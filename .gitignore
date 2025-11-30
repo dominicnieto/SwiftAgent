@@ -15,3 +15,7 @@ Examples/.build/index-build
 buildServer.json
 .xcede
 Examples/.build
+
+# xcode-build-server files
+buildServer.json
+.compile

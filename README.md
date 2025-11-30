@@ -1,4 +1,3 @@
-
 [![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FSwiftedMind%2FSwiftAgent%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/SwiftedMind/SwiftAgent)
 [![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FSwiftedMind%2FSwiftAgent%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/SwiftedMind/SwiftAgent)
 
@@ -386,7 +385,7 @@ These overrides apply only to the current turn, so you can increase creativity o
 
 Raw transcripts expose every event as `GeneratedContent`, which is flexible but awkward when you want to build UI or assertions.
 
-Create a schema for your session using  `@SessionSchema` to describe the tools, groundings, and structured outputs you expect. SwiftAgent then decodes each transcript entry into strongly typed cases that mirror your declarations.
+Create a schema for your session using `@SessionSchema` to describe the tools, groundings, and structured outputs you expect. SwiftAgent then decodes each transcript entry into strongly typed cases that mirror your declarations.
 
 ```swift
 @SessionSchema
@@ -837,4 +836,4 @@ SwiftAgent is available under the MIT license. See [LICENSE](LICENSE) for more i
 - Inspired by Apple's [FoundationModels](https://developer.apple.com/documentation/foundationmodels) framework
 - Built with the amazing Swift ecosystem and community
 
-*Made with ❤️ for the Swift community*
+_Made with ❤️ for the Swift community_

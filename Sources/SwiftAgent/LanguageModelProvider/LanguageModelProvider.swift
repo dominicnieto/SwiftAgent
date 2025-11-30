@@ -31,7 +31,7 @@ public protocol LanguageModelProvider<SessionSchema>: AnyObject, Sendable {
   @MainActor func resetTokenUsage()
 
   @discardableResult nonisolated func withAuthorization<T>(
-    token: String,
+    token: String?,
     refresh: (@Sendable () async throws -> String)?,
     perform: @Sendable () async throws -> T,
   ) async rethrows -> T
@@ -307,65 +307,69 @@ package extension LanguageModelProvider {
 // MARK: - Authorization
 
 public extension LanguageModelProvider {
-  // Executes the provided work with a temporary authorization context for this session.
-  //
-  // Use this helper to attach an access token to all network requests that happen during a single
-  // "agent turn" — that is, every request the agent performs until it finishes producing the
-  // next message (reasoning steps, tool calls and their outputs, and the final response).
-  //
-  // The token is stored in an internal task‑local value and is automatically picked up by adapter
-  // configurations that support proxy authorization (for example, ``OpenAIConfiguration/proxy(through:)``).
-  // This keeps credentials out of your app bundle and enables secure, backend‑issued, short‑lived
-  // tokens that you can rotate per turn.
-  //
-  // You can also provide an optional `refresh` closure. If the proxy responds with `401 Unauthorized`,
-  // the SDK will invoke this closure to obtain a new token and retry the failed request once.
-  //
-  // - Parameters:
-  //   - token: The access token to authorize requests for this agent turn.
-  //   - refresh: Optional closure that returns a freshly issued token when a request is unauthorized.
-  //   - perform: The asynchronous work to run while the authorization context is active.
-  // - Returns: The result of the `perform` closure.
-  //
-  // ## Example: Per‑Turn Token
-  //
-  // ```swift
-  // // 1) Configure the session to use your proxy backend
-  // let configuration = OpenAIConfiguration.proxy(through: URL(string: "https://api.your‑backend.com")!)
-  // let session = LanguageModelProvider.openAI(
-  //   tools: [WeatherTool(), CalculatorTool()],
-  //   instructions: "You are a helpful assistant.",
-  //   configuration: configuration
-  // )
-  //
-  // // 2) Ask your backend for a short‑lived token that is valid for a single agent turn
-  // let token = try await backend.issueTurnToken(for: userId)
-  //
-  // // 3) Run all requests for this turn with that token
-  // let response = try await session.withAuthorization(token: token) {
-  //   try await session.respond(to: "What's the weather in San Francisco?")
-  // }
-  // print(response.content)
-  // ```
-  //
-  // ## Example: Automatic Refresh
-  //
-  // ```swift
-  // let initial = try await backend.issueTurnToken(for: userId)
-  //
-  // let response = try await session.withAuthorization(
-  //   token: initial,
-  //   refresh: { try await backend.refreshTurnToken(for: userId) }
-  // ) {
-  //   try await session.respond(to: "Plan a 3‑day trip to Kyoto.")
-  // }
-  // ```
+  /// Executes the provided work with a temporary authorization context for this session.
+  ///
+  /// Use this helper to attach an access token to all network requests that happen during a single
+  /// "agent turn" — that is, every request the agent performs until it finishes producing the
+  /// next message (reasoning steps, tool calls and their outputs, and the final response).
+  ///
+  /// The token is stored in an internal task‑local value and is automatically picked up by adapter
+  /// configurations that support proxy authorization (for example, ``OpenAIConfiguration/proxy(through:)``).
+  /// This keeps credentials out of your app bundle and enables secure, backend‑issued, short‑lived
+  /// tokens that you can rotate per turn.
+  ///
+  /// You can also provide an optional `refresh` closure. If the proxy responds with `401 Unauthorized`,
+  /// the SDK will invoke this closure to obtain a new token and retry the failed request once.
+  ///
+  /// ## Example: Per‑Turn Token
+  ///
+  /// ```swift
+  /// // 1) Configure the session to use your proxy backend
+  /// let configuration = OpenAIConfiguration.proxy(through: URL(string: "https://api.your‑backend.com")!)
+  /// let session = LanguageModelProvider.openAI(
+  ///   tools: [WeatherTool(), CalculatorTool()],
+  ///   instructions: "You are a helpful assistant.",
+  ///   configuration: configuration
+  /// )
+  ///
+  /// // 2) Ask your backend for a short‑lived token that is valid for a single agent turn
+  /// let token = try await backend.issueTurnToken(for: userId)
+  ///
+  /// // 3) Run all requests for this turn with that token
+  /// let response = try await session.withAuthorization(token: token) {
+  ///   try await session.respond(to: "What's the weather in San Francisco?")
+  /// }
+  /// print(response.content)
+  /// ```
+  ///
+  /// ## Example: Automatic Refresh
+  ///
+  /// ```swift
+  /// let initial = try await backend.issueTurnToken(for: userId)
+  ///
+  /// let response = try await session.withAuthorization(
+  ///   token: initial,
+  ///   refresh: { try await backend.refreshTurnToken(for: userId) }
+  /// ) {
+  ///   try await session.respond(to: "Plan a 3‑day trip to Kyoto.")
+  /// }
+  /// ```
+  ///
+  /// - Parameters:
+  ///   - token: The access token to authorize requests for this agent turn.
+  ///   - refresh: Optional closure that returns a freshly issued token when a request is unauthorized.
+  ///   - perform: The asynchronous work to run while the authorization context is active.
+  /// - Returns: The result of the `perform` closure.
   @discardableResult
   nonisolated func withAuthorization<T>(
-    token: String,
+    token: String?,
     refresh: (@Sendable () async throws -> String)? = nil,
     perform: @Sendable () async throws -> T,
   ) async rethrows -> T {
+    guard let token else {
+      return try await perform()
+    }
+
     precondition(!token.isEmpty, "Authorization token must not be empty.")
     let context = AuthorizationContext(bearerToken: token, refreshToken: refresh)
     return try await AuthorizationContext.$current.withValue(context) {
