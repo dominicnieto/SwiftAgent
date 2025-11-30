@@ -29,7 +29,7 @@ public struct SessionSchemaMacro: MemberMacro {
 
     members.append(
       """
-      \(raw: memberAccessLevel.rawValue) nonisolated let decodableTools: [any DecodableTool<DecodedToolRun>]
+      \(raw: memberAccessLevel.rawValue) nonisolated let tools: [any DecodableTool<DecodedToolRun>]
       """,
     )
 

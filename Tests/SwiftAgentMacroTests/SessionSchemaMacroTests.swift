@@ -27,7 +27,7 @@ struct SessionSchemaMacroTests {
         @Grounding(Date.self) var currentDate
         @StructuredOutput(WeatherReport.self) var weatherReport
 
-        internal nonisolated let decodableTools: [any DecodableTool<DecodedToolRun>]
+        internal nonisolated let tools: [any DecodableTool<DecodedToolRun>]
 
         internal struct StructuredOutputs: @unchecked Sendable {
           let weatherReport = WeatherReport.self
@@ -40,7 +40,7 @@ struct SessionSchemaMacroTests {
         }
 
         internal init() {
-          decodableTools = [
+          tools = [
             DecodableCalculatorTool(baseTool: _calculator.wrappedValue),
             DecodableWeatherTool(baseTool: _weather.wrappedValue)
           ]
@@ -205,7 +205,7 @@ struct SessionSchemaMacroTests {
       struct SessionSchema {
         @Tool var calculator: CalculatorTool
 
-        internal nonisolated let decodableTools: [any DecodableTool<DecodedToolRun>]
+        internal nonisolated let tools: [any DecodableTool<DecodedToolRun>]
 
         internal struct StructuredOutputs: @unchecked Sendable {
         }
@@ -219,7 +219,7 @@ struct SessionSchemaMacroTests {
         ) {
           _calculator = Tool(wrappedValue: calculator)
 
-          decodableTools = [
+          tools = [
             DecodableCalculatorTool(baseTool: _calculator.wrappedValue)
           ]
         }

@@ -6,10 +6,13 @@
 
 ### Added
 
+- **Tool schema JSON export**: `DecodableTool.jsonSchema(prettyPrinted:)` now emits a function-call compatible JSON schema (name, description, parameters) in compact or pretty form for session schema tools.
+
 ### Enhanced
 
 ### Fixed
 
+- **Breaking Change**: Renamed `SessionSchema.decodableTools` to `SessionSchema.tools`
 - **Stable GeneratedContent JSON**: Added `GeneratedContent.stableJsonString` to reserialize payloads with sorted keys, improving cache hit rates while Apple addresses FB20745786.
 
 ## [0.7.1]
@@ -23,6 +26,7 @@
 ### Breaking Changes
 
 - **OpenAISession Replaces ModelSession**: `ModelSession.openAI(...)` has been removed. Create sessions with `OpenAISession` and pass tools as variadic parameters. `OpenAISession` is `@Observable`, so view code can observe transcripts directly.
+
   ```swift
   // Before
   let session = ModelSession.openAI(
@@ -40,6 +44,7 @@
   ```
 
 - **FoundationModels Tool Adoption**: Tools now conform directly to the FoundationModels `Tool` protocol and mocks adopt `MockableTool`. Rename any `AgentTool` or `SwiftAgentTool` conformances.
+
   ```swift
   // Before
   struct WeatherTool: AgentTool { ... }
@@ -51,6 +56,7 @@
   ```
 
 - **StructuredOutput Protocol Required for Guided Responses**: Guided generations now require types to conform to `StructuredOutput` with an embedded `Schema`. Replace plain `@Generable` data transfer objects that were passed directly into `respond(generating:)`.
+
   ```swift
   // Before
   @Generable
@@ -80,6 +86,7 @@
   ```
 
 - **Session Schema Macro Supersedes PromptContext and Tool Resolver**: The `PromptContext`, `toolResolver`, and `transcript.resolved(using:)` helpers have been removed. Declare an `@SessionSchema` with `@Tool`, `@Grounding`, and `@StructuredOutput` wrappers and resolve transcripts through it.
+
   ```swift
   // Before
   enum PromptContext: SwiftAgent.PromptContext { ... }
@@ -102,6 +109,7 @@
   ```
 
 - **Simulation Workflow Overhauled**: `ModelSession.simulateResponse` has been removed. Use `SimulatedSession` with a `SessionSchema`, `MockableTool` wrappers, and `SimulationConfiguration` to define scripted turns.
+
   ```swift
   // Before
   let response = try await session.simulateResponse(
@@ -127,6 +135,7 @@
 ### Added
 
 - **Streaming Responses and Structured Outputs**: `streamResponse` yields snapshots that include partial content, live transcripts, and structured output projections.
+
   ```swift
   let stream = try session.streamResponse(
     to: "Summarize yesterday's revenue",
@@ -156,6 +165,7 @@
   ```
 
 - **Proxy Configuration and Per-Turn Authorization**: Configure `OpenAIConfiguration.proxy(through:)` to route traffic through your backend and wrap calls with `session.withAuthorization(token:perform:)` to attach per-turn credentials.
+
   ```swift
   let configuration = OpenAIConfiguration.proxy(through: URL(string: "https://api.example.com/proxy")!)
   let session = OpenAISession(
@@ -170,6 +180,7 @@
   ```
 
 ### Fixed
+
 - **Rejection Report Validation**: Tool output decoding errors now propagate unless the payload matches the recoverable `ToolRunRejection` report structure, preventing silent failures in custom tools.
 
 ## [0.6.0]
@@ -215,7 +226,7 @@
 
 ### Fixed
 
-- **Transcript ID Handling**: Fixed issue where transcript IDs were not properly converting back to original OpenAI IDs, removing unnecessary manual addition of "fc_" prefix from function call IDs.
+- **Transcript ID Handling**: Fixed issue where transcript IDs were not properly converting back to original OpenAI IDs, removing unnecessary manual addition of "fc\_" prefix from function call IDs.
 - **Tool Output Status Tracking**: Added missing `status` field to `ToolOutput` in `AgentTranscript` for better tool execution tracking and consistency.
 - **JSON Encoding Determinism**: Enabled sorted keys in OpenAI JSON encoder to ensure consistent property ordering in tool schemas, preventing cache misses and improving prompt caching effectiveness.
 
@@ -256,6 +267,7 @@
   ```
 
 - The `PromptContext` protocol has been replaced with a generic struct wrapper that provides both user-written input and app or SDK generated context data (like link previews or vector search results). User types now conform to `PromptContextSource` instead of `PromptContext`:
+
   ```swift
   // Define your context source
   enum ContextSource: PromptContextSource {
@@ -296,11 +308,13 @@
 ### Changed
 
 - **Breaking Change**: Restructured the products in the SDK. Each provider now has its own product, e.g. `OpenAISession`
+
   ```swift
   import OpenAISession
   ```
 
 - **Breaking Change**: Renamed nearly all the types in the SDK to close align with FoundationModels types. `Agent` is now `ModelSession`, and `OpenAIAgent` is now `OpenAISession`:
+
   ```swift
   import OpenAISession
 
@@ -313,6 +327,7 @@
   ```
 
 - **Breaking Change**: Replaced the generic `GenerationOptions` struct with adapter-specific generation options. Each adapter now defines its own `GenerationOptions` type as an associated type, providing better type safety and access to adapter-specific parameters:
+
   ```swift
   // Before
   let options = GenerationOptions(temperature: 0.7, maximumResponseTokens: 1000)
@@ -347,6 +362,7 @@
 ### Breaking Changes
 
 - **Renamed `Provider` to `Adapter`**: The core abstraction for AI model integrations has been renamed from `Provider` to `Adapter` for better clarity. Update all references to use the new naming:
+
   ```swift
   // Before
   let agent = Agent<OpenAIProvider, Context>()
@@ -356,6 +372,7 @@
   ```
 
 - **Renamed `Transcript` to `AgentTranscript`**: To avoid naming conflicts with FoundationModels, the `Transcript` type has been renamed to `AgentTranscript`:
+
   ```swift
   // Before
   public var transcript: Transcript
@@ -367,6 +384,7 @@
 ### Added
 
 - **Prompt Context System**: Introduced a new `PromptContext` protocol that enables separation of user input from contextual information (such as vector embeddings or retrieved documents). This provides cleaner transcript organization and better prompt augmentation:
+
   ```swift
   enum PromptContext: SwiftAgent.PromptContext {
     case vectorEmbedding(String)
@@ -386,6 +404,7 @@
   ```
 
 - **Tool Decoder**: Added a powerful type-safe tool resolution system that combines tool calls with their outputs. The `ToolDecoder` enables compile-time access to tool arguments and outputs:
+
   ```swift
   // Define a decoded tool run enum
   enum DecodedToolRun {
@@ -417,6 +436,7 @@
   ```
 
 - **Convenience Initializers**: Added streamlined initializers that reduce generic complexity. The new `OpenAIAgent` typealias and convenience initializers make agent creation more ergonomic:
+
   ```swift
   // Simplified initialization with typealias
   let agent = OpenAIAgent(supplying: PromptContext.self, tools: tools)

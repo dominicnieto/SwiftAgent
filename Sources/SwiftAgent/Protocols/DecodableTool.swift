@@ -18,6 +18,10 @@ public protocol DecodableTool<DecodedToolRun>: SwiftAgentTool where BaseTool.Arg
   func decode(_ run: ToolRun<BaseTool>) -> DecodedToolRun
 }
 
+enum DecodableToolJSONEncodingError: Error {
+  case nonUTF8Data
+}
+
 package extension DecodableTool {
   /// Decodes a completed tool run from raw generated content.
   func decodeCompleted(
@@ -121,5 +125,57 @@ package extension DecodableTool {
       json: generatedContent.stableJsonString,
       details: RejectionReportDetailsExtractor.values(from: generatedContent),
     )
+  }
+}
+
+// MARK: - JSON Schema
+
+private struct EncodableToolSchema: Encodable {
+  let type: String
+  let name: String
+  let description: String
+  let parameters: GenerationSchema
+}
+
+public extension DecodableTool {
+  /// Encodes the tool's schema into a JSON string that function-calling APIs can consume.
+  ///
+  /// The JSON includes the tool `type` (set to "function"), `name`, `description`, and
+  /// a JSON Schema produced from `parameters`.
+  ///
+  /// - Parameter prettyPrinted: Whether to include whitespace for readability.
+  /// - Returns: A JSON string representing the tool schema.
+  func jsonSchema(prettyPrinted: Bool = false) throws -> String {
+    let schema = EncodableToolSchema(
+      type: "function",
+      name: name,
+      description: description,
+      parameters: parameters,
+    )
+
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = outputFormatting(prettyPrinted: prettyPrinted)
+
+    let data = try encoder.encode(schema)
+    guard let jsonString = String(data: data, encoding: .utf8) else {
+      throw DecodableToolJSONEncodingError.nonUTF8Data
+    }
+
+    return jsonString
+  }
+}
+
+private extension DecodableTool {
+  func outputFormatting(prettyPrinted: Bool) -> JSONEncoder.OutputFormatting {
+    var formatting: JSONEncoder.OutputFormatting = [
+      .sortedKeys,
+      .withoutEscapingSlashes,
+    ]
+
+    if prettyPrinted {
+      formatting.insert(.prettyPrinted)
+    }
+
+    return formatting
   }
 }

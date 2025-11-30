@@ -47,7 +47,7 @@ extension SessionSchemaMacro {
 
     let initializerBodySections = [
       wrapperAssignments,
-      "  decodableTools = \(decodableLiteral)",
+      "  tools = \(decodableLiteral)",
     ]
     .filter { !$0.isEmpty }
     .joined(separator: "\n\n")
@@ -55,7 +55,7 @@ extension SessionSchemaMacro {
     let initializer: DeclSyntax =
       """
       \(raw: signature) {
-      \(raw: initializerBodySections.isEmpty ? "  decodableTools = []" : initializerBodySections)
+      \(raw: initializerBodySections.isEmpty ? "  tools = []" : initializerBodySections)
       }
       """
 

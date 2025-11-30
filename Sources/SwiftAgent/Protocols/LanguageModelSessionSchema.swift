@@ -28,7 +28,7 @@ public protocol LanguageModelSessionSchema {
   /// Internal decodable wrappers used by the transcript resolver.
   ///
   /// - Note: Populated automatically by the macro; you do not create these yourself.
-  nonisolated var decodableTools: [any DecodableTool<DecodedToolRun>] { get }
+  nonisolated var tools: [any DecodableTool<DecodedToolRun>] { get }
 
   static func structuredOutputs() -> [any (SwiftAgent.DecodableStructuredOutput<DecodedStructuredOutput>).Type]
 }
@@ -52,7 +52,7 @@ package extension LanguageModelSessionSchema {
 
 /// A default transcript resolver that can be used when no custom resolver is provided. It is empty.
 public struct NoSchema: LanguageModelSessionSchema {
-  public let decodableTools: [any DecodableTool<DecodedToolRun>] = []
+  public let tools: [any DecodableTool<DecodedToolRun>] = []
   public static func structuredOutputs() -> [any DecodableStructuredOutput<DecodedStructuredOutput>.Type] {
     []
   }

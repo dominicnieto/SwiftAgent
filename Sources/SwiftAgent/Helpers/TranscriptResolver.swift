@@ -8,7 +8,7 @@ import OSLog
 ///
 /// This utility reads a ``Transcript`` and produces the `SessionSchema.Transcript`
 /// by resolving tool runs, structured outputs, and groundings using the
-/// automatically generated `decodableTools` and `structuredOutputs` from your
+/// automatically generated `tools` and `structuredOutputs` from your
 /// `@LanguageModelProvider` session.
 ///
 /// - Note: You typically create this via `session.resolver()`; the macro wires
@@ -29,7 +29,7 @@ public struct TranscriptResolver<SessionSchema: LanguageModelSessionSchema> {
   ///   to resolve transcript entries.
   public init(for provider: SessionSchema) {
     self.provider = provider
-    toolsByName = Dictionary(uniqueKeysWithValues: provider.decodableTools.map { ($0.name, $0) })
+    toolsByName = Dictionary(uniqueKeysWithValues: provider.tools.map { ($0.name, $0) })
   }
 
   /// Resolves a full transcript into the provider's resolved representation.

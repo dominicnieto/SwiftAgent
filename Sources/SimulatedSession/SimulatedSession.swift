@@ -56,7 +56,7 @@ public final class SimulatedSession<
   ) {
     self.schema = schema
     adapter = SimulationAdapter(
-      tools: schema.decodableTools,
+      tools: schema.tools,
       instructions: instructions,
       configuration: configuration,
     )

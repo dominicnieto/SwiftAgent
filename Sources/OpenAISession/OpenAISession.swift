@@ -71,7 +71,7 @@ public final class OpenAISession<
   ) {
     self.schema = schema
     adapter = OpenAIAdapter(
-      tools: schema.decodableTools,
+      tools: schema.tools,
       instructions: instructions,
       configuration: .direct(apiKey: apiKey),
     )
@@ -90,7 +90,7 @@ public final class OpenAISession<
   ) {
     self.schema = schema
     adapter = OpenAIAdapter(
-      tools: schema.decodableTools,
+      tools: schema.tools,
       instructions: instructions,
       configuration: configuration,
     )
