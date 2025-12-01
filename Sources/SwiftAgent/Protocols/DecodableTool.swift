@@ -145,7 +145,7 @@ public extension DecodableTool {
   ///
   /// - Parameter prettyPrinted: Whether to include whitespace for readability.
   /// - Returns: A JSON string representing the tool schema.
-  func jsonSchema(prettyPrinted: Bool = false) throws -> String {
+  func jsonSchema(prettyPrinted: Bool = false) -> String {
     let schema = EncodableToolSchema(
       type: "function",
       name: name,
@@ -156,12 +156,21 @@ public extension DecodableTool {
     let encoder = JSONEncoder()
     encoder.outputFormatting = outputFormatting(prettyPrinted: prettyPrinted)
 
-    let data = try encoder.encode(schema)
-    guard let jsonString = String(data: data, encoding: .utf8) else {
-      throw DecodableToolJSONEncodingError.nonUTF8Data
-    }
+    do {
+      let data = try encoder.encode(schema)
+      guard let jsonString = String(data: data, encoding: .utf8) else {
+        AgentLog.error(
+          DecodableToolJSONEncodingError.nonUTF8Data,
+          context: "tool_json_schema_encoding",
+        )
+        return ""
+      }
 
-    return jsonString
+      return jsonString
+    } catch {
+      AgentLog.error(error, context: "tool_json_schema_encoding")
+      return ""
+    }
   }
 }
 

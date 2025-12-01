@@ -18,8 +18,8 @@ struct DecodableToolJSONSchemaTests {
   func encodesToolSchema() throws {
     let tool = try #require(session.tools.first)
 
-    let compactSchema = try tool.jsonSchema()
-    let prettySchema = try tool.jsonSchema(prettyPrinted: true)
+    let compactSchema = tool.jsonSchema()
+    let prettySchema = tool.jsonSchema(prettyPrinted: true)
 
     let expectedCompact = #"{"description":"Return forecast units for a city.","name":"forecast_weather","parameters":{"additionalProperties":false,"properties":{"city":{"type":"string"},"units":{"type":"string"}},"required":["city","units"],"title":"Arguments","type":"object","x-order":["city","units"]},"type":"function"}"#
 
