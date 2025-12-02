@@ -79,95 +79,103 @@ package extension LanguageModelProvider {
     using model: Adapter.Model,
     options: Adapter.GenerationOptions?,
   ) async throws -> Response<StructuredOutput> {
-    let promptEntry = Transcript.Entry.prompt(prompt)
-    await appendTranscript(promptEntry)
+    do {
+      let promptEntry = Transcript.Entry.prompt(prompt)
+      await appendTranscript(promptEntry)
 
-    let stream = await adapter.respond(
-      to: prompt,
-      generating: type,
-      using: model,
-      including: transcript,
-      options: options ?? .automatic(for: model),
-    )
+      let stream = await adapter.respond(
+        to: prompt,
+        generating: type,
+        using: model,
+        including: transcript,
+        options: options ?? .automatic(for: model),
+      )
 
-    var generatedTranscript = Transcript(entries: [promptEntry])
-    var generatedUsage: TokenUsage?
+      var generatedTranscript = Transcript(entries: [promptEntry])
+      var generatedUsage: TokenUsage?
 
-    for try await update in stream {
-      try Task.checkCancellation()
+      for try await update in stream {
+        try Task.checkCancellation()
 
-      switch update {
-      case let .transcript(entry):
-        await upsertTranscript(entry)
-        generatedTranscript.upsert(entry)
+        switch update {
+        case let .transcript(entry):
+          await upsertTranscript(entry)
+          generatedTranscript.upsert(entry)
 
-        // Handle content extraction based on type
-        if type == nil {
-          // For String content, we accumulate all text segments and process at the end
-          continue
-        } else {
-          // For structured content, return immediately when we find a structured segment
-          if case let .response(response) = entry {
-            for segment in response.segments {
-              try Task.checkCancellation()
+          // Handle content extraction based on type
+          if type == nil {
+            // For String content, we accumulate all text segments and process at the end
+            continue
+          } else {
+            // For structured content, return immediately when we find a structured segment
+            if case let .response(response) = entry {
+              for segment in response.segments {
+                try Task.checkCancellation()
 
-              switch segment {
-              case .text:
-                // Not applicable for structured content
-                break
-              case let .structure(structuredSegment):
-                // We can return here since a structured response can only happen once
-                // TODO: Handle errors here in some way
+                switch segment {
+                case .text:
+                  // Not applicable for structured content
+                  break
+                case let .structure(structuredSegment):
+                  // We can return here since a structured response can only happen once
+                  // TODO: Handle errors here in some way
 
-                return try Response<StructuredOutput>(
-                  content: StructuredOutput.Schema(structuredSegment.content),
-                  transcript: generatedTranscript,
-                  tokenUsage: generatedUsage,
-                )
+                  return try Response<StructuredOutput>(
+                    content: StructuredOutput.Schema(structuredSegment.content),
+                    transcript: generatedTranscript,
+                    tokenUsage: generatedUsage,
+                  )
+                }
               }
             }
           }
-        }
-      case let .tokenUsage(usage):
-        // Update session token usage immediately for real-time tracking
-        await mergeTokenUsage(usage)
+        case let .tokenUsage(usage):
+          // Update session token usage immediately for real-time tracking
+          await mergeTokenUsage(usage)
 
-        if var current = generatedUsage {
-          current.merge(usage)
-          generatedUsage = current
-        } else {
-          generatedUsage = usage
-        }
-      }
-    }
-
-    // If the task was cancelled during the stream, the stream simply ends so we need to check for cancellation here
-    try Task.checkCancellation()
-
-    // Handle final content extraction for String type
-    if type == nil {
-      let finalResponseSegments = generatedTranscript
-        .compactMap { entry -> [String]? in
-          guard case let .response(response) = entry else { return nil }
-
-          return response.segments.compactMap { segment in
-            if case let .text(textSegment) = segment {
-              return textSegment.content
-            }
-            return nil
+          if var current = generatedUsage {
+            current.merge(usage)
+            generatedUsage = current
+          } else {
+            generatedUsage = usage
           }
         }
-        .flatMap(\.self)
+      }
 
-      return Response<StructuredOutput>(
-        content: finalResponseSegments.joined(separator: "\n") as! StructuredOutput.Schema,
-        transcript: generatedTranscript,
-        tokenUsage: generatedUsage,
-      )
-    } else {
-      // For structured content, if we reach here, no structured segment was found
-      let errorContext = GenerationError.UnexpectedStructuredResponseContext()
-      throw GenerationError.unexpectedStructuredResponse(errorContext)
+      // If the task was cancelled during the stream, the stream simply ends so we need to check for cancellation here
+      try Task.checkCancellation()
+
+      // Handle final content extraction for String type
+      if type == nil {
+        let finalResponseSegments = generatedTranscript
+          .compactMap { entry -> [String]? in
+            guard case let .response(response) = entry else { return nil }
+
+            return response.segments.compactMap { segment in
+              if case let .text(textSegment) = segment {
+                return textSegment.content
+              }
+              return nil
+            }
+          }
+          .flatMap(\.self)
+
+        return Response<StructuredOutput>(
+          content: finalResponseSegments.joined(separator: "\n") as! StructuredOutput.Schema,
+          transcript: generatedTranscript,
+          tokenUsage: generatedUsage,
+        )
+      } else {
+        // For structured content, if we reach here, no structured segment was found
+        let errorContext = GenerationError.UnexpectedStructuredResponseContext()
+        throw GenerationError.unexpectedStructuredResponse(errorContext)
+      }
+    } catch {
+      if GenerationError.isCancellation(error) {
+        throw GenerationError.cancelled
+      }
+
+      throw error
     }
   }
 
@@ -284,6 +292,11 @@ package extension LanguageModelProvider {
 
         continuation.finish()
       } catch {
+        if GenerationError.isCancellation(error) {
+          continuation.finish(throwing: GenerationError.cancelled)
+          return
+        }
+
         continuation.finish(throwing: error)
       }
     }

@@ -8,6 +8,10 @@ package extension GenerationError {
     _ error: any Error,
     httpErrorMapper: (HTTPError) -> GenerationError = { Self.fromHTTP($0) },
   ) -> GenerationError {
+    if isCancellation(error) {
+      return .cancelled
+    }
+
     if let generationError = error as? GenerationError {
       return generationError
     }
@@ -40,6 +44,10 @@ package extension GenerationError {
     _ error: any Error,
     httpErrorMapper: (HTTPError) -> GenerationError = { Self.fromHTTP($0) },
   ) -> GenerationError {
+    if isCancellation(error) {
+      return .cancelled
+    }
+
     if let generationError = error as? GenerationError {
       return generationError
     }
@@ -88,6 +96,10 @@ package extension GenerationError {
     _ error: any Error,
     rawArguments: String? = nil,
   ) -> GenerationError {
+    if isCancellation(error) {
+      return .cancelled
+    }
+
     if let generationError = error as? GenerationError {
       return generationError
     }
@@ -110,5 +122,27 @@ package extension GenerationError {
     }
 
     return .unknown
+  }
+
+  /// Determines whether the given error represents a cancellation.
+  static func isCancellation(_ error: any Error) -> Bool {
+    if let generationError = error as? GenerationError, case .cancelled = generationError {
+      return true
+    }
+
+    if error is CancellationError {
+      return true
+    }
+
+    if let urlError = error as? URLError, urlError.code == .cancelled {
+      return true
+    }
+
+    let nsError = error as NSError
+    if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled {
+      return true
+    }
+
+    return false
   }
 }

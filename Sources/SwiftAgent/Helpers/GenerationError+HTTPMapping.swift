@@ -26,6 +26,10 @@ package extension GenerationError {
         detail: "The configured provider endpoint URL is invalid.",
       )
     case let .requestFailed(underlying):
+      if isCancellation(underlying) {
+        return .cancelled
+      }
+
       return .requestFailed(
         reason: .networkFailure,
         detail: underlying.localizedDescription,

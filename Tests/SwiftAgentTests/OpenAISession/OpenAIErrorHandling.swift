@@ -11,7 +11,7 @@ import Testing
 struct OpenAIErrorHandling {
   typealias Transcript = SwiftAgent.Transcript
 
-  @Test("'CancellationError' is thrown")
+  @Test("'GenerationError.cancelled' is thrown")
   func cancellationError() async throws {
     let mockHTTPClient = ReplayHTTPClient<CreateModelResponseQuery>(
       recordedResponse: .init(body: "", statusCode: 200, delay: .milliseconds(10)),
@@ -31,9 +31,18 @@ struct OpenAIErrorHandling {
       try await print(task.value)
 
       Issue.record("Expected respond to throw")
-    } catch is CancellationError {
     } catch {
-      Issue.record("Expected CancellationError but received \(error)")
+      guard let generationError = error as? GenerationError else {
+        Issue.record("Expected GenerationError but received \(error)")
+        return
+      }
+
+      switch generationError {
+      case .cancelled:
+        break
+      default:
+        Issue.record("Expected GenerationError.cancelled but received \(generationError)")
+      }
     }
   }
 

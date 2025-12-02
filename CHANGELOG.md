@@ -14,6 +14,7 @@
 
 - **Breaking Change**: Renamed `SessionSchema.decodableTools` to `SessionSchema.tools`
 - **Stable GeneratedContent JSON**: Added `GeneratedContent.stableJsonString` to reserialize payloads with sorted keys, improving cache hit rates while Apple addresses FB20745786.
+- **Cancellation normalized**: All providers now map task and network cancellations to `GenerationError.cancelled`, avoiding generic errors when generations end early.
 
 ## [0.7.1]
 

@@ -27,6 +27,8 @@ public enum GenerationError: Error, LocalizedError {
   case streamingFailure(StreamingFailureContext)
   /// A tool execution failed during the agent run.
   case toolExecutionFailed(ToolExecutionFailedContext)
+  /// The generation was cancelled before completion.
+  case cancelled
   /// An unknown or unspecified generation error occurred.
   case unknown
 
@@ -73,6 +75,8 @@ public enum GenerationError: Error, LocalizedError {
       }
     case let .toolExecutionFailed(context):
       return "Tool '\(context.toolName)' failed: \(context.underlyingError.localizedDescription)"
+    case .cancelled:
+      return "Generation was cancelled"
     case .unknown:
       return "Unknown generation error"
     }
