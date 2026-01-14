@@ -11,6 +11,12 @@ enum Secret {
     }
   }
 
+  enum Anthropic {
+    static var apiKey: String {
+      value(for: "Anthropic_API_Key_Debug")
+    }
+  }
+
   // MARK: - Helpers
 
   private static func loadSecrets() -> [String: Any]? {

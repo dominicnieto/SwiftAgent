@@ -11,13 +11,40 @@ enum AnthropicMessageBuilder {
     var content: [MessageParameter.Message.Content.ContentObject]
   }
 
-  static func messages(from transcript: SwiftAgent.Transcript) throws -> [MessageParameter.Message] {
+  static func messages(
+    from transcript: SwiftAgent.Transcript,
+    includeThinking: Bool,
+  ) throws -> [MessageParameter.Message] {
     var drafts: [DraftMessage] = []
+    var pendingThinking: [MessageParameter.Message.Content.ContentObject] = []
 
     func append(
       role: MessageParameter.Message.Role,
       content: MessageParameter.Message.Content.ContentObject,
     ) {
+      if role == .assistant, !pendingThinking.isEmpty {
+        if var last = drafts.last, last.role == role {
+          if last.content.isEmpty {
+            last.content.append(contentsOf: pendingThinking)
+          } else {
+            last.content.insert(contentsOf: pendingThinking, at: 0)
+          }
+          pendingThinking.removeAll()
+          last.content.append(content)
+          drafts[drafts.count - 1] = last
+          return
+        }
+
+        drafts.append(
+          DraftMessage(
+            role: role,
+            content: pendingThinking + [content],
+          ),
+        )
+        pendingThinking.removeAll()
+        return
+      }
+
       if var last = drafts.last, last.role == role {
         last.content.append(content)
         drafts[drafts.count - 1] = last
@@ -78,8 +105,21 @@ enum AnthropicMessageBuilder {
           content: .toolResult(toolOutput.callId, output, nil, nil),
         )
 
-      case .reasoning:
-        break
+      case let .reasoning(reasoning):
+        guard includeThinking else {
+          break
+        }
+
+        let summaryText = reasoning.summary.joined(separator: "\n")
+          .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !summaryText.isEmpty {
+          let signature = reasoning.encryptedReasoning ?? ""
+          pendingThinking.append(.thinking(summaryText, signature))
+        } else if let encryptedReasoning = reasoning.encryptedReasoning,
+                  !encryptedReasoning.isEmpty {
+          pendingThinking.append(.redactedThinking(encryptedReasoning))
+        }
       }
     }
 

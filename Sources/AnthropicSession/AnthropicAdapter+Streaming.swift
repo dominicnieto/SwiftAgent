@@ -305,13 +305,16 @@ private extension AnthropicAdapter {
         messageState?.structuredToolUseId = toolUseId
         if let input = contentBlock.input,
            let arguments = try? AnthropicMessageBuilder.generatedContent(from: input) {
-          messageState?.structuredJSONBuffer = arguments.stableJsonString
-          try updateMessageEntry(
-            messageState: &messageState,
-            generatedTranscript: &generatedTranscript,
-            continuation: continuation,
-            finalizeStructuredContent: false,
-          )
+          let json = arguments.stableJsonString
+          if json != "{}" {
+            messageState?.structuredJSONBuffer = json
+            try updateMessageEntry(
+              messageState: &messageState,
+              generatedTranscript: &generatedTranscript,
+              continuation: continuation,
+              finalizeStructuredContent: false,
+            )
+          }
         }
         return
       }
@@ -322,7 +325,7 @@ private extension AnthropicAdapter {
         callId: toolUseId,
         toolName: name,
         arguments: placeholderArguments,
-        status: nil,
+        status: .inProgress,
       )
 
       let entry = Transcript.ToolCalls(calls: [toolCall])
@@ -340,13 +343,17 @@ private extension AnthropicAdapter {
       )
       if let input = contentBlock.input,
          let arguments = try? AnthropicMessageBuilder.generatedContent(from: input) {
-        state.argumentsBuffer = arguments.stableJsonString
-        updateToolCallEntry(
-          state: state,
-          updatedArguments: arguments,
-          generatedTranscript: &generatedTranscript,
-          continuation: continuation,
-        )
+        let json = arguments.stableJsonString
+        if json != "{}" {
+          state.argumentsBuffer = json
+          updateToolCallEntry(
+            state: state,
+            updatedArguments: arguments,
+            generatedTranscript: &generatedTranscript,
+            continuation: continuation,
+            status: .completed,
+          )
+        }
       }
 
       toolCallStates[toolUseId] = state
@@ -438,7 +445,10 @@ private extension AnthropicAdapter {
         }
 
         if toolUseId == messageState?.structuredToolUseId {
-          messageState?.structuredJSONBuffer.append(partialJson)
+          if var buffer = messageState?.structuredJSONBuffer {
+            appendPartialJSON(partialJson, to: &buffer)
+            messageState?.structuredJSONBuffer = buffer
+          }
           try updateMessageEntry(
             messageState: &messageState,
             generatedTranscript: &generatedTranscript,
@@ -452,7 +462,9 @@ private extension AnthropicAdapter {
           return
         }
 
-        state.argumentsBuffer.append(partialJson)
+        var buffer = state.argumentsBuffer
+        appendPartialJSON(partialJson, to: &buffer)
+        state.argumentsBuffer = buffer
         toolCallStates[toolUseId] = state
 
         if let updatedArguments = try? GeneratedContent(json: state.argumentsBuffer) {
@@ -496,12 +508,14 @@ private extension AnthropicAdapter {
       }
 
       do {
-        let updatedArguments = try GeneratedContent(json: state.argumentsBuffer)
+        let finalJSON = state.argumentsBuffer.isEmpty ? "{}" : state.argumentsBuffer
+        let updatedArguments = try GeneratedContent(json: finalJSON)
         updateToolCallEntry(
           state: state,
           updatedArguments: updatedArguments,
           generatedTranscript: &generatedTranscript,
           continuation: continuation,
+          status: .completed,
         )
       } catch {
         throw GenerationError.structuredContentParsingFailed(
@@ -680,6 +694,7 @@ private extension AnthropicAdapter {
     updatedArguments: GeneratedContent,
     generatedTranscript: inout Transcript,
     continuation: AsyncThrowingStream<AdapterUpdate, any Error>.Continuation,
+    status: Transcript.Status? = nil,
   ) {
     updateTranscriptEntry(
       at: state.entryIndex,
@@ -694,7 +709,21 @@ private extension AnthropicAdapter {
       }
 
       toolCalls.calls[callIndex].arguments = updatedArguments
+      if let status {
+        toolCalls.calls[callIndex].status = status
+      }
       entry = .toolCalls(toolCalls)
+    }
+  }
+
+  func appendPartialJSON(
+    _ partial: String,
+    to buffer: inout String,
+  ) {
+    if buffer.isEmpty || buffer == "{}" {
+      buffer = partial
+    } else {
+      buffer.append(partial)
     }
   }
 

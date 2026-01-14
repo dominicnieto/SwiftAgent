@@ -1,6 +1,5 @@
 // By Dennis Müller
 
-import FoundationModels
 import OpenAISession
 import SwiftUI
 
@@ -14,7 +13,16 @@ struct ExampleApp: App {
 
   var body: some Scene {
     WindowGroup {
-      AgentPlaygroundView()
+      TabView {
+        AgentPlaygroundView()
+          .tabItem {
+            Label("OpenAI", systemImage: "sparkles")
+          }
+        AnthropicPlaygroundView()
+          .tabItem {
+            Label("Anthropic", systemImage: "a.circle")
+          }
+      }
     }
   }
 }

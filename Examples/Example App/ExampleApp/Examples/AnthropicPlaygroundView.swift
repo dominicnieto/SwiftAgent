@@ -1,10 +1,10 @@
 // By Dennis Müller
 
-import OpenAISession
+import AnthropicSession
 import SwiftUI
 import UIKit
 
-struct AgentPlaygroundView: View {
+struct AnthropicPlaygroundView: View {
   @State private var userInput = """
   Choose a random city and request a weather report. Then use the calculator to
   multiply the temperature by 5 and finally answer with a short story (1-2 paragraphs) involving the tool call
@@ -13,7 +13,7 @@ struct AgentPlaygroundView: View {
   @State private var transcript: Transcript.Resolved<SessionSchema> = .init()
   @State private var streamingTranscript: Transcript.Resolved<SessionSchema> = .init()
   @State private var sessionSchema = SessionSchema()
-  @State private var session: OpenAISession<SessionSchema>?
+  @State private var session: AnthropicSession<SessionSchema>?
 
   @State private var viewState: ViewState = .idle
   @State private var messageTask: Task<Void, Never>?
@@ -74,13 +74,13 @@ struct AgentPlaygroundView: View {
       }
       .animation(.default, value: streamingTranscript)
       .animation(.default, value: viewState)
-      .navigationTitle("OpenAI Playground")
+      .navigationTitle("Anthropic Playground")
       .navigationBarTitleDisplayMode(.inline)
     }
   }
 
   @ViewBuilder
-  private func content(session: OpenAISession<SessionSchema>) -> some View {
+  private func content(session: AnthropicSession<SessionSchema>) -> some View {
     ForEach(transcript + streamingTranscript) { entry in
       switch entry {
       case let .prompt(prompt):
@@ -96,14 +96,14 @@ struct AgentPlaygroundView: View {
   }
 
   private func setupAgent() {
-    session = OpenAISession(
+    session = AnthropicSession(
       schema: sessionSchema,
       instructions: """
       You are a helpful assistant with access to several tools.
       Use the available tools when appropriate to help answer questions.
       Be concise but informative in your responses.
       """,
-      configuration: .direct(apiKey: Secret.OpenAI.apiKey),
+      configuration: .direct(apiKey: Secret.Anthropic.apiKey),
     )
   }
 
@@ -117,15 +117,16 @@ struct AgentPlaygroundView: View {
     viewState = .loading
 
     do {
-      let options = OpenAIGenerationOptions(
-        include: [.reasoning_encryptedContent],
-        reasoning: .init(effort: .minimal, summary: .auto),
+      let options = AnthropicGenerationOptions(
+        maxOutputTokens: 10000,
+        thinking: .init(budgetTokens: 1024),
+        minimumStreamingSnapshotInterval: .milliseconds(150),
       )
 
       let stream = try session.streamResponse(
         to: userInput,
         groundingWith: [.currentDate(Date())],
-        using: OpenAIModel.gpt5_nano,
+        using: .other("claude-sonnet-4-5-20250929"),
         options: options,
       ) { input, sources in
         PromptTag("context") {
@@ -218,7 +219,8 @@ private enum ViewState: Hashable {
   case error
 }
 
+
 #Preview {
-  AgentPlaygroundView()
+  AnthropicPlaygroundView()
     .preferredColorScheme(.dark)
 }

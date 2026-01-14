@@ -183,7 +183,7 @@ public actor AnthropicAdapter: Adapter {
             callId: toolUse.id,
             toolName: toolUse.name,
             arguments: arguments,
-            status: nil,
+            status: .completed,
           )
           toolCalls.append(toolCall)
         }
@@ -353,7 +353,10 @@ public actor AnthropicAdapter: Adapter {
     options: AnthropicGenerationOptions,
     streamResponses: Bool,
   ) throws -> MessageParameter {
-    let messages = try AnthropicMessageBuilder.messages(from: transcript)
+    let messages = try AnthropicMessageBuilder.messages(
+      from: transcript,
+      includeThinking: options.thinking != nil,
+    )
 
     let systemPrompt: MessageParameter.System? = instructions.isEmpty
       ? nil
