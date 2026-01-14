@@ -1,0 +1,138 @@
+// By Dennis Müller
+
+import Foundation
+import FoundationModels
+import SwiftAgent
+import SwiftAnthropic
+
+enum AnthropicMessageBuilder {
+  private struct DraftMessage {
+    var role: MessageParameter.Message.Role
+    var content: [MessageParameter.Message.Content.ContentObject]
+  }
+
+  static func messages(from transcript: SwiftAgent.Transcript) throws -> [MessageParameter.Message] {
+    var drafts: [DraftMessage] = []
+
+    func append(
+      role: MessageParameter.Message.Role,
+      content: MessageParameter.Message.Content.ContentObject,
+    ) {
+      if var last = drafts.last, last.role == role {
+        last.content.append(content)
+        drafts[drafts.count - 1] = last
+        return
+      }
+
+      drafts.append(
+        DraftMessage(
+          role: role,
+          content: [content],
+        ),
+      )
+    }
+
+    for entry in transcript.entries {
+      switch entry {
+      case let .prompt(prompt):
+        append(
+          role: .user,
+          content: .text(prompt.prompt),
+        )
+
+      case let .response(response):
+        for segment in response.segments {
+          switch segment {
+          case let .text(textSegment):
+            append(
+              role: .assistant,
+              content: .text(textSegment.content),
+            )
+          case let .structure(structuredSegment):
+            append(
+              role: .assistant,
+              content: .text(structuredSegment.content.generatedContent.stableJsonString),
+            )
+          }
+        }
+
+      case let .toolCalls(toolCalls):
+        for toolCall in toolCalls.calls {
+          let input = try toolInput(from: toolCall.arguments)
+          append(
+            role: .assistant,
+            content: .toolUse(toolCall.callId, toolCall.toolName, input),
+          )
+        }
+
+      case let .toolOutput(toolOutput):
+        let output: String = switch toolOutput.segment {
+        case let .text(textSegment):
+          textSegment.content
+        case let .structure(structuredSegment):
+          structuredSegment.content.generatedContent.stableJsonString
+        }
+
+        append(
+          role: .user,
+          content: .toolResult(toolOutput.callId, output, nil, nil),
+        )
+
+      case .reasoning:
+        break
+      }
+    }
+
+    let messages = drafts.map { draft in
+      let content: MessageParameter.Message.Content = if draft.content.count == 1,
+                                                         case let .text(text) = draft.content[0] {
+        .text(text)
+      } else {
+        .list(draft.content)
+      }
+
+      return MessageParameter.Message(
+        role: draft.role,
+        content: content,
+      )
+    }
+
+    if let first = messages.first,
+       first.role != MessageParameter.Message.Role.user.rawValue {
+      throw GenerationError.requestFailed(
+        reason: .invalidRequestConfiguration,
+        detail: "Anthropic messages must start with a user role.",
+      )
+    }
+
+    return messages
+  }
+
+  static func toolInput(
+    from generatedContent: GeneratedContent,
+  ) throws -> MessageResponse.Content.Input {
+    let data = try jsonData(from: generatedContent)
+    return try JSONDecoder().decode(MessageResponse.Content.Input.self, from: data)
+  }
+
+  static func generatedContent(
+    from input: MessageResponse.Content.Input,
+  ) throws -> GeneratedContent {
+    let data = try JSONEncoder().encode(input)
+    let json = String(decoding: data, as: UTF8.self)
+    return try GeneratedContent(json: json)
+  }
+
+  private static func jsonData(
+    from generatedContent: GeneratedContent,
+  ) throws -> Data {
+    let json = generatedContent.stableJsonString
+    guard let data = json.data(using: .utf8) else {
+      throw GenerationError.structuredContentParsingFailed(
+        .init(rawContent: json, underlyingError: GenerationError.unknown),
+      )
+    }
+
+    return data
+  }
+}

@@ -11,11 +11,13 @@ let package = Package(
   ],
   products: [
     .library(name: "OpenAISession", targets: ["OpenAISession", "SimulatedSession", "SwiftAgent"]),
+    .library(name: "AnthropicSession", targets: ["AnthropicSession", "SimulatedSession", "SwiftAgent"]),
     .library(name: "ExampleCode", targets: ["ExampleCode"]),
   ],
   dependencies: [
     .package(url: "https://github.com/swiftlang/swift-syntax.git", "600.0.0"..<"603.0.0"),
     .package(url: "https://github.com/MacPaw/OpenAI.git", branch: "main"),
+    .package(url: "https://github.com/jamesrochabrun/SwiftAnthropic.git", from: "2.2.0"),
     .package(url: "https://github.com/mattt/EventSource", from: "1.2.0"),
     .package(url: "https://github.com/pointfreeco/swift-macro-testing", from: "0.6.4"),
   ],
@@ -47,6 +49,15 @@ let package = Package(
       ],
     ),
     .target(
+      name: "AnthropicSession",
+      dependencies: [
+        "SwiftAgent",
+        "SwiftAnthropic",
+        "SwiftAgentMacros",
+        "EventSource",
+      ],
+    ),
+    .target(
       name: "SimulatedSession",
       dependencies: [
         "SwiftAgent",
@@ -64,9 +75,11 @@ let package = Package(
     .testTarget(
       name: "SwiftAgentTests",
       dependencies: [
+        "AnthropicSession",
         "OpenAISession",
         "SwiftAgent",
         "SimulatedSession",
+        .product(name: "SwiftAnthropic", package: "SwiftAnthropic"),
       ],
     ),
     .testTarget(
