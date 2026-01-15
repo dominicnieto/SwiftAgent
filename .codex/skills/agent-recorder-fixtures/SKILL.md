@@ -1,6 +1,6 @@
 ---
 name: agent-recorder-fixtures
-description: Record real OpenAI/Anthropic HTTP back-and-forth (including streaming text/event-stream) and print paste-ready Swift fixtures for SwiftAgent unit tests (ReplayHTTPClient) using the AgentRecorder CLI or HTTPReplayRecorder. Use when adding/updating streaming tool-call tests, when provider payload formats change, or when you need to debug request/response mismatches by inspecting recorded JSON/SSE payloads.
+description: Record real OpenAI/Anthropic HTTP back-and-forth (requests + responses, including streaming text/event-stream) and print paste-ready Swift fixtures for SwiftAgent unit tests (ReplayHTTPClient) using the AgentRecorder CLI or HTTPReplayRecorder. Use when adding/updating any provider adapter tests (text, streaming, structured outputs, tool calls), when payload formats change, or when debugging agent loop mismatches by inspecting recorded JSON/SSE payloads.
 ---
 
 # Agent Recorder Fixtures
@@ -8,7 +8,7 @@ description: Record real OpenAI/Anthropic HTTP back-and-forth (including streami
 ## Overview
 
 Use `AgentRecorder` to capture real provider payloads and generate paste-ready Swift fixtures for tests using `ReplayHTTPClient`.
-This is the fastest loop for keeping streaming tool-call tests in sync with real OpenAI/Anthropic SSE traffic.
+This is the fastest loop for keeping SwiftAgent’s unit tests (and agent-loop behavior) in sync with real OpenAI/Anthropic traffic.
 
 ## Workflow
 
@@ -18,12 +18,13 @@ This is the fastest loop for keeping streaming tool-call tests in sync with real
 - If no scenario matches your test, add one (keep it small and deterministic).
 
 2) Set API keys
-- OpenAI: `OPENAI_API_KEY`
-- Anthropic: `ANTHROPIC_API_KEY`
+- Preferred: use a local `Secrets.plist` in the repo root (not committed).
+  - Run with `--secrets-plist Secrets.plist`
+  - Plist keys: `OpenAI_API_Key_Debug` / `Anthropic_API_Key_Debug`
 
-Optional (if you already have a local plist):
-- Set `AGENT_RECORDER_SECRETS_PLIST` (or pass `--secrets-plist <path>`)
-- Use keys `OpenAI_API_Key_Debug` / `Anthropic_API_Key_Debug`
+Optional:
+- Env vars fallback (useful for CI or quick runs): `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`
+- `AGENT_RECORDER_SECRETS_PLIST` is also supported (fallback if env vars are missing).
 
 3) Run the recorder (Xcode or Terminal)
 - Xcode: select `AgentRecorder` scheme, set env vars, Run → copy stdout from Debug console.
@@ -31,8 +32,8 @@ Optional (if you already have a local plist):
 
 ```bash
 xcodebuild -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" -derivedDataPath .tmp/DerivedData build
-OPENAI_API_KEY=sk-... ./.tmp/DerivedData/Build/Products/Debug/AgentRecorder --list-scenarios
-OPENAI_API_KEY=sk-... ./.tmp/DerivedData/Build/Products/Debug/AgentRecorder --provider openai --scenario openai/streaming-tool-calls/weather
+./.tmp/DerivedData/Build/Products/Debug/AgentRecorder --list-scenarios
+./.tmp/DerivedData/Build/Products/Debug/AgentRecorder --secrets-plist Secrets.plist --provider openai --scenario openai/streaming-tool-calls/weather
 ```
 
 4) Paste fixtures into tests
@@ -49,3 +50,5 @@ OPENAI_API_KEY=sk-... ./.tmp/DerivedData/Build/Products/Debug/AgentRecorder --pr
 - Headers may include secrets. `HTTPReplayRecorder` redacts common auth header fields, but always review before committing.
 - Streaming fixtures are raw `text/event-stream`. If the SDK stops consuming early, the recorded payload may be partial (this is usually fine for replaying the SDK’s behavior).
 - If you need request bodies for debugging, re-run with `--include-requests`.
+- OpenAI scenarios: prefer `gpt-5.2-2025-12-11` and set `reasoning.effort = .low` + `summary = .detailed` for stable decoding.
+- Cleanup: if you used `.tmp/DerivedData` (and/or wrote capture files like `.tmp/AgentRecorderOutput/*.txt`), delete them after you’ve pasted fixtures into tests.
