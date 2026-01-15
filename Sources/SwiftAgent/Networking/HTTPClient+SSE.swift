@@ -52,6 +52,20 @@ public extension URLSessionHTTPClient {
             try await prepareRequest(&request)
           }
 
+          var requestID = UUID()
+          var isRetry = false
+          if let onRequest = configuration.interceptors.onRequest {
+            let snapshot = HTTPRequestSnapshot(
+              id: requestID,
+              url: url,
+              method: request.httpMethod ?? method.rawValue,
+              headers: request.allHTTPHeaderFields ?? [:],
+              body: request.httpBody,
+              isRetry: false,
+            )
+            await onRequest(snapshot)
+          }
+
           NetworkLog.request(request)
 
           var (asyncBytes, response) = try await urlSession.bytes(for: request)
@@ -63,6 +77,20 @@ public extension URLSessionHTTPClient {
             if let prepareRequest = configuration.interceptors.prepareRequest {
               try await prepareRequest(&request)
             }
+
+            requestID = UUID()
+            isRetry = true
+            if let onRequest = configuration.interceptors.onRequest {
+              let snapshot = HTTPRequestSnapshot(
+                id: requestID,
+                url: url,
+                method: request.httpMethod ?? method.rawValue,
+                headers: request.allHTTPHeaderFields ?? [:],
+                body: request.httpBody,
+                isRetry: true,
+              )
+              await onRequest(snapshot)
+            }
             NetworkLog.request(request)
             (asyncBytes, response) = try await urlSession.bytes(for: request)
           }
@@ -73,14 +101,100 @@ public extension URLSessionHTTPClient {
           guard (200..<300).contains(httpResponse.statusCode) else {
             let errorPreview = try await readPrefix(from: asyncBytes, maxLength: 4 * 1024)
             NetworkLog.response(response, data: errorPreview)
+            if let onResponse = configuration.interceptors.onResponse,
+               let errorURL = httpResponse.url {
+              let headers = httpResponse.allHeaderFields.reduce(into: [String: String]()) { partialResult, pair in
+                let key = String(describing: pair.key)
+                let value = String(describing: pair.value)
+                partialResult[key] = value
+              }
+
+              let snapshot = HTTPResponseSnapshot(
+                requestID: requestID,
+                url: errorURL,
+                statusCode: httpResponse.statusCode,
+                headers: headers,
+                body: errorPreview,
+                isRetry: isRetry,
+              )
+
+              await onResponse(snapshot)
+            }
             throw HTTPError.unacceptableStatus(code: httpResponse.statusCode, data: errorPreview)
           }
 
           NetworkLog.response(response, data: nil)
 
-          for try await event in asyncBytes.events {
-            try Task.checkCancellation()
-            continuation.yield(event)
+          let shouldRecordStreamBody = configuration.interceptors.onStreamResponse != nil
+          if shouldRecordStreamBody {
+            var collectedBytes = Data()
+            collectedBytes.reserveCapacity(32 * 1024)
+
+            let parser = EventSource.Parser()
+            let streamURL = httpResponse.url
+
+            func flushParsedEvents() async {
+              while let event = await parser.getNextEvent() {
+                continuation.yield(event)
+              }
+            }
+
+            func notifyStreamHookIfNeeded() async {
+              guard let onStreamResponse = configuration.interceptors.onStreamResponse,
+                    let streamURL else {
+                return
+              }
+
+              let headers = httpResponse.allHeaderFields.reduce(into: [String: String]()) { partialResult, pair in
+                let key = String(describing: pair.key)
+                let value = String(describing: pair.value)
+                partialResult[key] = value
+              }
+
+              let rawStreamString = String(decoding: collectedBytes, as: UTF8.self)
+
+              let snapshot = HTTPStreamResponseSnapshot(
+                requestID: requestID,
+                url: streamURL,
+                statusCode: httpResponse.statusCode,
+                headers: headers,
+                body: rawStreamString,
+                isRetry: isRetry,
+              )
+
+              await onStreamResponse(snapshot)
+            }
+
+            do {
+              for try await byte in asyncBytes {
+                try Task.checkCancellation()
+                collectedBytes.append(byte)
+                await parser.consume(byte)
+
+                if byte == 0x0A || byte == 0x0D {
+                  await flushParsedEvents()
+                }
+              }
+
+              await parser.finish()
+              await flushParsedEvents()
+              await notifyStreamHookIfNeeded()
+            } catch is CancellationError {
+              await parser.finish()
+              await flushParsedEvents()
+              await notifyStreamHookIfNeeded()
+              throw CancellationError()
+            } catch {
+              await parser.finish()
+              await flushParsedEvents()
+              await notifyStreamHookIfNeeded()
+              throw error
+            }
+          } else {
+            for try await event in asyncBytes.events {
+              try Task.checkCancellation()
+              continuation.yield(event)
+            }
           }
 
           continuation.finish()

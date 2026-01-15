@@ -83,6 +83,7 @@ func planCopenhagenWeekend() async throws {
   - [Per-turn Authorization](#per-turn-authorization)
 - [Simulated Session](#simulated-session)
 - [Logging](#logging)
+- [Recording HTTP Fixtures](#recording-http-fixtures)
 - [Development Status](#development-status)
 - [Example App](#example-app)
 - [License](#license)
@@ -855,6 +856,80 @@ SwiftAgentConfiguration.setNetworkLoggingEnabled(true)
 // 📤 Tool output — weather [abc123]
 // ✅ Finished
 ```
+
+## Recording HTTP Fixtures
+
+When writing unit tests, it’s often useful to capture real provider payloads and replay them locally.
+SwiftAgent includes an opt-in recorder (`HTTPReplayRecorder`) that attaches to the SDK’s networking layer
+via `HTTPClientInterceptors` and prints paste-ready Swift fixtures.
+
+This is especially useful for streaming responses where you want to replay the full `text/event-stream`
+payload in tests (like the ones using `ReplayHTTPClient` in this repository).
+
+### Option 1: `AgentRecorder` CLI (recommended)
+
+This repository includes a small macOS command-line tool (`AgentRecorder`) that runs recording scenarios and prints
+paste-ready Swift fixtures to stdout.
+
+1) Set API keys (either in your shell or in Xcode scheme env vars):
+- `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+
+2) Run from Xcode:
+- Open `SwiftAgent.xcworkspace`
+- Select the `AgentRecorder` scheme
+- Run (stdout/stderr show in Xcode’s Debug console)
+
+3) Run from Terminal:
+
+```bash
+xcodebuild -quiet -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" -derivedDataPath .tmp/DerivedData build
+OPENAI_API_KEY=sk-... ./.tmp/DerivedData/Build/Products/Debug/AgentRecorder --provider openai --scenario tool-call-weather-openai
+```
+
+### Option 2: Use the API directly
+
+```swift
+import OpenAISession
+import SwiftAgent
+
+let recorder = HTTPReplayRecorder(
+  options: .init(
+    includeRequests: false,
+    includeHeaders: true,
+    prettyPrintJSON: true
+  )
+)
+
+var interceptors = HTTPClientInterceptors(
+  prepareRequest: { request in
+    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+  }
+)
+interceptors = interceptors.recording(to: recorder)
+
+let configuration = HTTPClientConfiguration(
+  baseURL: URL(string: "https://api.openai.com")!,
+  jsonEncoder: JSONEncoder(),
+  jsonDecoder: JSONDecoder(),
+  interceptors: interceptors
+)
+
+let httpClient = URLSessionHTTPClient(configuration: configuration)
+let session = OpenAISession(
+  instructions: "You are a helpful assistant.",
+  configuration: OpenAIConfiguration(httpClient: httpClient)
+)
+
+_ = try await session.respond(to: "Hello!")
+
+await recorder.printSwiftFixtureSnippet()
+```
+
+Notes:
+- Streaming responses are recorded as raw `text/event-stream` payloads (may be partial if the consumer stops iterating early).
+- Enabling stream capture buffers stream bytes in memory; keep it enabled only for debugging/fixture recording.
+- Request headers may contain secrets; the recorder redacts common auth header fields before printing.
 
 ## Development Status
 

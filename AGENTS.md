@@ -72,10 +72,10 @@ These are the defaults and conventions that keep changes consistent and easy to 
 
 - Build SDK
   - `xcodebuild -quiet -workspace SwiftAgent.xcworkspace -scheme ExampleApp -destination "platform=iOS Simulator,name=iPhone 17 Pro,OS=latest" build`
-- Build Utility App
-  - `xcodebuild -quiet -workspace SwiftAgent.xcworkspace -scheme UtilityApp -destination "platform=iOS Simulator,name=iPhone 17 Pro,OS=latest" build`
+- Build AgentRecorder (CLI)
+  - `xcodebuild -quiet -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" build`
 - Build Tests
-  - `xcodebuild -quiet -workspace SwiftAgent.xcworkspace -scheme UtilityApp -destination "platform=iOS Simulator,name=iPhone 17 Pro,OS=latest" build`
+  - `xcodebuild -quiet -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests build`
 - Run Tests
   - `xcodebuild -quiet -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests test`
 - Prefer keeping `-quiet` on; if something fails and you need more logs, drop it temporarily.
@@ -154,10 +154,20 @@ These are the defaults and conventions that keep changes consistent and easy to 
 xcodebuild -quiet -workspace SwiftAgent.xcworkspace -scheme ExampleApp -destination "platform=iOS Simulator,name=iPhone 17 Pro,OS=latest" build
 ```
 
-#### Build Utility App
+#### Build AgentRecorder (CLI)
 
 ```
-xcodebuild -quiet -workspace SwiftAgent.xcworkspace -scheme UtilityApp -destination "platform=iOS Simulator,name=iPhone 17 Pro,OS=latest" build
+xcodebuild -quiet -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" build
+```
+
+#### Record HTTP fixtures (AgentRecorder)
+
+- Output is printed to stdout (Xcode: Debug console).
+- Project skill: `.codex/skills/agent-recorder-fixtures/SKILL.md` (workflow for updating test fixtures).
+
+```bash
+xcodebuild -quiet -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" -derivedDataPath .tmp/DerivedData build
+OPENAI_API_KEY=sk-... ANTHROPIC_API_KEY=sk-ant-... ./.tmp/DerivedData/Build/Products/Debug/AgentRecorder --provider both
 ```
 
 #### Build Tests

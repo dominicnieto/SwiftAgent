@@ -10,6 +10,8 @@
 - **Generation error codes**: `GenerationError` exposes `errorCode` with concise identifiers for each case, making it easier to log and triage failures.
 - **Anthropic adapter support**: Added `AnthropicSession` with streaming, tool calls, structured outputs, and thinking support powered by SwiftAnthropic.
 - **Example app**: Added an Anthropic playground alongside the OpenAI demo.
+- **HTTP fixture recorder**: Added `HTTPReplayRecorder` and `HTTPClientInterceptors` hooks to capture request/response payloads (including streaming `text/event-stream`) and print paste-ready Swift fixtures for unit tests.
+- **AgentRecorder CLI**: Added a macOS command-line tool (`AgentRecorder`) that runs recording scenarios and prints paste-ready fixtures via `HTTPReplayRecorder`.
 
 ### Enhanced
 

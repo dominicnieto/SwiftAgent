@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "2600"
+   LastUpgradeVersion = "2620"
    version = "1.7">
    <BuildAction
       parallelizeBuildables = "YES"
@@ -15,10 +15,10 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "41763F5C2C2D340E00F42070"
-               BuildableName = "UtilityApp.app"
-               BlueprintName = "UtilityApp"
-               ReferencedContainer = "container:UtilityApp.xcodeproj">
+               BlueprintIdentifier = "4EFB28322F18DBCA00D20896"
+               BuildableName = "AgentRecorder"
+               BlueprintName = "AgentRecorder"
+               ReferencedContainer = "container:AgentRecorder.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -39,15 +39,16 @@
       ignoresPersistentStateOnLaunch = "NO"
       debugDocumentVersioning = "YES"
       debugServiceExtension = "internal"
-      allowLocationSimulation = "YES">
+      allowLocationSimulation = "YES"
+      viewDebuggingEnabled = "No">
       <BuildableProductRunnable
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "41763F5C2C2D340E00F42070"
-            BuildableName = "UtilityApp.app"
-            BlueprintName = "UtilityApp"
-            ReferencedContainer = "container:UtilityApp.xcodeproj">
+            BlueprintIdentifier = "4EFB28322F18DBCA00D20896"
+            BuildableName = "AgentRecorder"
+            BlueprintName = "AgentRecorder"
+            ReferencedContainer = "container:AgentRecorder.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -61,10 +62,10 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "41763F5C2C2D340E00F42070"
-            BuildableName = "UtilityApp.app"
-            BlueprintName = "UtilityApp"
-            ReferencedContainer = "container:UtilityApp.xcodeproj">
+            BlueprintIdentifier = "4EFB28322F18DBCA00D20896"
+            BuildableName = "AgentRecorder"
+            BlueprintName = "AgentRecorder"
+            ReferencedContainer = "container:AgentRecorder.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>
