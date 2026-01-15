@@ -76,9 +76,5 @@ public struct AnthropicGenerationOptions: AdapterGenerationOptions {
     if let topK, topK <= 0 {
       throw GenerationOptionsError.invalidTopK(topK)
     }
-
-    if let thinking {
-      _ = thinking
-    }
   }
 }
