@@ -61,8 +61,44 @@ public struct AnthropicGenerationOptions: AdapterGenerationOptions {
   }
 
   public func validate(for model: Model) throws(AnthropicGenerationOptionsError) {
-    if let maxOutputTokens, maxOutputTokens <= 0 {
+    guard let maxOutputTokens, maxOutputTokens > 0 else {
       throw GenerationOptionsError.missingMaxTokens
+    }
+
+    if thinking != nil {
+      let minimumThinkingBudgetTokens = 1024
+
+      if temperature != nil {
+        throw GenerationOptionsError.thinkingIncompatibleWithTemperature
+      }
+
+      if topP != nil {
+        throw GenerationOptionsError.thinkingIncompatibleWithTopP
+      }
+
+      if topK != nil {
+        throw GenerationOptionsError.thinkingIncompatibleWithTopK
+      }
+
+      if let toolChoice,
+         let toolChoiceType = AnthropicGenerationOptions.toolChoiceType(from: toolChoice),
+         toolChoiceType != "auto" {
+        throw GenerationOptionsError.thinkingIncompatibleWithToolChoice(toolChoiceType)
+      }
+
+      if let thinking,
+         let budgetTokens = AnthropicGenerationOptions.thinkingBudgetTokens(from: thinking) {
+        if budgetTokens < minimumThinkingBudgetTokens {
+          throw GenerationOptionsError.invalidThinkingBudget(budgetTokens)
+        }
+
+        if maxOutputTokens <= budgetTokens {
+          throw GenerationOptionsError.thinkingBudgetExceedsMaxOutputTokens(
+            budgetTokens: budgetTokens,
+            maxOutputTokens: maxOutputTokens,
+          )
+        }
+      }
     }
 
     if let temperature, !(0.0...1.0).contains(temperature) {
@@ -76,5 +112,33 @@ public struct AnthropicGenerationOptions: AdapterGenerationOptions {
     if let topK, topK <= 0 {
       throw GenerationOptionsError.invalidTopK(topK)
     }
+  }
+}
+
+private extension AnthropicGenerationOptions {
+  static func thinkingBudgetTokens(
+    from thinking: MessageParameter.Thinking,
+  ) -> Int? {
+    guard let data = try? JSONEncoder().encode(thinking),
+          let object = try? JSONSerialization.jsonObject(with: data),
+          let dictionary = object as? [String: Any],
+          let budgetTokens = dictionary["budget_tokens"] as? Int else {
+      return nil
+    }
+
+    return budgetTokens
+  }
+
+  static func toolChoiceType(
+    from toolChoice: MessageParameter.ToolChoice,
+  ) -> String? {
+    guard let data = try? JSONEncoder().encode(toolChoice),
+          let object = try? JSONSerialization.jsonObject(with: data),
+          let dictionary = object as? [String: Any],
+          let type = dictionary["type"] as? String else {
+      return nil
+    }
+
+    return type
   }
 }

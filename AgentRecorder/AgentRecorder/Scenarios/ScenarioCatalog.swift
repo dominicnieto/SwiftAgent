@@ -8,6 +8,7 @@ enum ScenarioCatalog {
     // Anthropic
     AnthropicTextScenario.scenario,
     AnthropicStreamingTextScenario.scenario,
+    AnthropicStreamingThinkingScenario.scenario,
     AnthropicStructuredOutputScenario.scenario,
     AnthropicStreamingToolCallsWeatherScenario.scenario,
     AnthropicStreamingToolCallsNoArgsPingScenario.scenario,

@@ -128,9 +128,11 @@ extension AnthropicAdapter {
           case MessageStreamResponse.StreamEvent.messageStart.rawValue:
             try handleMessageStart(
               decoded.payload,
+              includeThinking: options.thinking != nil,
               structuredOutputTypeName: structuredOutputTypeName,
               structuredToolName: structuredToolName,
               messageState: &messageState,
+              reasoningState: &reasoningState,
               generatedTranscript: &generatedTranscript,
               entryIndices: &entryIndices,
               continuation: continuation,
@@ -185,6 +187,7 @@ extension AnthropicAdapter {
             responseCompleted = true
             try finalizeMessage(
               messageState: &messageState,
+              reasoningState: &reasoningState,
               generatedTranscript: &generatedTranscript,
               entryIndices: &entryIndices,
               continuation: continuation,

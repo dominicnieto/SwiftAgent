@@ -247,8 +247,7 @@ public actor AnthropicAdapter: Adapter {
       return []
     }
 
-    if let structuredOutputTypeName, structuredContent == nil {
-      _ = structuredOutputTypeName
+    if structuredOutputTypeName != nil, structuredContent == nil {
       throw GenerationError.unexpectedStructuredResponse(.init())
     }
 

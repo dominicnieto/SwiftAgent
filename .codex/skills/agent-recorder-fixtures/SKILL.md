@@ -26,6 +26,9 @@ Optional:
 - Env vars fallback (useful for CI or quick runs): `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`
 - `AGENT_RECORDER_SECRETS_PLIST` is also supported (fallback if env vars are missing).
 
+Legacy:
+- If you already have `Secrets.plist` under `Examples/Example App/ExampleApp/Secrets.plist`, either move/symlink it to the repo root or pass the full path via `--secrets-plist`.
+
 3) Run the recorder (Xcode or Terminal)
 - Xcode: select `AgentRecorder` scheme, set env vars, Run → copy stdout from Debug console.
 - Terminal:

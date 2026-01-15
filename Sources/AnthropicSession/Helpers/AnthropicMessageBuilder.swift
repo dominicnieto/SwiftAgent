@@ -123,6 +123,16 @@ enum AnthropicMessageBuilder {
       }
     }
 
+    if !pendingThinking.isEmpty,
+       let lastAssistantIndex = drafts.lastIndex(where: { $0.role == .assistant }) {
+      if drafts[lastAssistantIndex].content.isEmpty {
+        drafts[lastAssistantIndex].content.append(contentsOf: pendingThinking)
+      } else {
+        drafts[lastAssistantIndex].content.insert(contentsOf: pendingThinking, at: 0)
+      }
+      pendingThinking.removeAll()
+    }
+
     let messages = drafts.map { draft in
       let content: MessageParameter.Message.Content = if draft.content.count == 1,
                                                          case let .text(text) = draft.content[0] {

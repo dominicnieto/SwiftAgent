@@ -49,6 +49,7 @@ public actor OpenAIAdapter: Adapter {
       } catch {
         AgentLog.error(error, context: "Invalid generation options")
         setup.continuation.finish(throwing: error)
+        return
       }
 
       // Run the agent

@@ -8,13 +8,36 @@ import SwiftAgent
 extension AnthropicAdapter {
   func handleMessageStart(
     _ payload: MessageStreamResponse,
+    includeThinking: Bool,
     structuredOutputTypeName: String?,
     structuredToolName: String?,
     messageState: inout StreamingMessageState?,
+    reasoningState: inout StreamingReasoningState?,
     generatedTranscript: inout Transcript,
     entryIndices: inout [String: Int],
     continuation: AsyncThrowingStream<AdapterUpdate, any Error>.Continuation,
   ) throws {
+    reasoningState = nil
+    if includeThinking {
+      let reasoningEntry = Transcript.Reasoning(
+        id: UUID().uuidString,
+        summary: [],
+        encryptedReasoning: nil,
+        status: .inProgress,
+      )
+      let reasoningEntryIndex = appendEntry(
+        .reasoning(reasoningEntry),
+        to: &generatedTranscript,
+        entryIndices: &entryIndices,
+        continuation: continuation,
+      )
+      reasoningState = StreamingReasoningState(
+        entryIndex: reasoningEntryIndex,
+        summaryText: "",
+        encryptedReasoning: nil,
+      )
+    }
+
     let responseId = payload.message?.id ?? UUID().uuidString
     let response = Transcript.Response(
       id: responseId,
@@ -317,6 +340,7 @@ extension AnthropicAdapter {
 
   func finalizeMessage(
     messageState: inout StreamingMessageState?,
+    reasoningState: inout StreamingReasoningState?,
     generatedTranscript: inout Transcript,
     entryIndices: inout [String: Int],
     continuation: AsyncThrowingStream<AdapterUpdate, any Error>.Continuation,
@@ -332,7 +356,22 @@ extension AnthropicAdapter {
       finalizeStructuredContent: true,
     )
 
-    if let state = messageState, let _ = state.structuredOutputTypeName {
+    if let status = messageState?.status, let reasoningEntryIndex = reasoningState?.entryIndex {
+      _ = updateTranscriptEntry(
+        at: reasoningEntryIndex,
+        in: &generatedTranscript,
+        continuation: continuation,
+      ) { entry in
+        guard case var .reasoning(reasoning) = entry else {
+          return
+        }
+
+        reasoning.status = status
+        entry = .reasoning(reasoning)
+      }
+    }
+
+    if let state = messageState, state.structuredOutputTypeName != nil {
       if !state.textFragments.nonEmptyFragments.isEmpty {
         throw GenerationError.unexpectedTextResponse(.init())
       }

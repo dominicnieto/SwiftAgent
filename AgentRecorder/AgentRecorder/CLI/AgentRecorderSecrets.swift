@@ -69,6 +69,16 @@ struct AgentRecorderSecrets: Sendable {
       }
     }
 
+    let defaultURL = urlFromUserPath("Secrets.plist")
+    if FileManager.default.fileExists(atPath: defaultURL.path) {
+      return defaultURL
+    }
+
+    let legacyURL = urlFromUserPath("Examples/Example App/ExampleApp/Secrets.plist")
+    if FileManager.default.fileExists(atPath: legacyURL.path) {
+      return legacyURL
+    }
+
     return nil
   }
 

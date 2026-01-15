@@ -12,6 +12,14 @@ extension AnthropicAdapter {
     options: AnthropicGenerationOptions,
     streamResponses: Bool,
   ) throws -> MessageParameter {
+    guard let maxTokens = options.maxOutputTokens else {
+      throw AnthropicGenerationOptionsError.missingMaxTokens
+    }
+
+    if options.thinking != nil, type != nil {
+      throw AnthropicGenerationOptionsError.thinkingIncompatibleWithStructuredOutput
+    }
+
     let messages = try AnthropicMessageBuilder.messages(
       from: transcript,
       includeThinking: options.thinking != nil,
@@ -33,7 +41,7 @@ extension AnthropicAdapter {
     return MessageParameter(
       model: .other(model.rawValue),
       messages: messages,
-      maxTokens: options.maxOutputTokens ?? 1024,
+      maxTokens: maxTokens,
       system: systemPrompt,
       metadata: nil,
       stopSequences: options.stopSequences,

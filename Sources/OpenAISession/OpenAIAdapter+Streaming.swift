@@ -775,34 +775,6 @@ private struct StreamingFunctionCallState {
   var transcriptEntryId: String
 }
 
-private struct ContentFragmentBuffer {
-  private(set) var fragments: [String] = []
-
-  mutating func append(_ text: String, at index: Int) {
-    ensureCapacity(for: index)
-    fragments[index].append(text)
-  }
-
-  mutating func assign(_ text: String, at index: Int) {
-    ensureCapacity(for: index)
-    fragments[index] = text
-  }
-
-  func joined(separator: String = "") -> String {
-    fragments.joined(separator: separator)
-  }
-
-  var nonEmptyFragments: [String] {
-    fragments.filter { !$0.isEmpty }
-  }
-
-  private mutating func ensureCapacity(for index: Int) {
-    if fragments.count <= index {
-      fragments.append(contentsOf: Array(repeating: "", count: index - fragments.count + 1))
-    }
-  }
-}
-
 private func transcriptStatusForMessage(
   _ status: Components.Schemas.OutputMessage.StatusPayload,
 ) -> SwiftAgent.Transcript.Status {
