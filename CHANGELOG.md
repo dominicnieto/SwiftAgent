@@ -8,6 +8,8 @@
 
 - **Tool schema JSON export**: `DecodableTool.jsonSchema(prettyPrinted:)` now emits a function-call compatible JSON schema (name, description, parameters) in compact or pretty form for session schema tools.
 - **Generation error codes**: `GenerationError` exposes `errorCode` with concise identifiers for each case, making it easier to log and triage failures.
+- **Anthropic adapter support**: Added `AnthropicSession` with streaming, tool calls, structured outputs, and thinking support powered by SwiftAnthropic.
+- **Example app**: Added an Anthropic playground alongside the OpenAI demo.
 
 ### Enhanced
 

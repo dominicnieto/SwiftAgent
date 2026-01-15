@@ -68,8 +68,10 @@ let package = Package(
       name: "ExampleCode",
       dependencies: [
         "SwiftAgent",
+        "AnthropicSession",
         "OpenAISession",
         "SimulatedSession",
+        .product(name: "SwiftAnthropic", package: "SwiftAnthropic"),
       ],
     ),
     .testTarget(

@@ -92,7 +92,7 @@ func planCopenhagenWeekend() async throws {
 
 - **Zero-Setup Agent Loops** — Handle autonomous agent execution with just a few lines of code
 - **Native Tool Integration** — Use `@Generable` structs from FoundationModels as agent tools seamlessly
-- **Adapter Agnostic** — Abstract interface supports multiple AI adapters (OpenAI included, more coming)
+- **Adapter Agnostic** — Abstract interface supports multiple AI adapters (OpenAI + Anthropic included, more coming)
 - **Apple-Native Design** — API inspired by FoundationModels for familiar, intuitive development
 - **Modern Swift** — Built with Swift 6, async/await, and latest concurrency features
 - **Rich Logging** — Comprehensive, human-readable logging for debugging and monitoring
@@ -112,6 +112,9 @@ dependencies: [
 
 // OpenAI target
 .product(name: "OpenAISession", package: "SwiftAgent")
+
+// Anthropic target
+.product(name: "AnthropicSession", package: "SwiftAgent")
 ```
 
 Then import the target you need:
@@ -120,7 +123,8 @@ Then import the target you need:
 // For OpenAI
 import OpenAISession
 
-// Other providers coming soon
+// For Anthropic
+import AnthropicSession
 ```
 
 ### Basic Usage
@@ -139,6 +143,21 @@ let session = OpenAISession(
 let response = try await session.respond(to: "What's the weather like in San Francisco?")
 
 // Process response
+print(response.content)
+```
+
+Or use Anthropic:
+
+```swift
+import AnthropicSession
+
+let session = AnthropicSession(
+  instructions: "You are a helpful assistant.",
+  apiKey: "sk-ant-...",
+)
+
+let response = try await session.respond(to: "What's the weather like in San Francisco?")
+
 print(response.content)
 ```
 
@@ -380,6 +399,30 @@ print(response.content)
 ```
 
 These overrides apply only to the current turn, so you can increase creativity or token limits for specific prompts without mutating the session-wide configuration.
+
+Anthropic uses its own generation options:
+
+```swift
+import AnthropicSession
+
+let session = AnthropicSession(
+  instructions: "You are a helpful assistant.",
+  apiKey: "sk-ant-...",
+)
+
+let options = AnthropicGenerationOptions(
+  maxOutputTokens: 1000,
+  thinking: .init(budgetTokens: 1024),
+)
+
+let response = try await session.respond(
+  to: "What's the weather like in San Francisco?",
+  using: .claude37SonnetLatest,
+  options: options,
+)
+
+print(response.content)
+```
 
 ## Session Schema
 
@@ -821,7 +864,7 @@ SwiftAgentConfiguration.setNetworkLoggingEnabled(true)
 
 SwiftAgent ships with a SwiftUI demo that showcases the SDK in action. Open the project at `Examples/Example App/ExampleApp` to explore an agent playground that:
 
-- Configures an `OpenAISession` with the bundled `SessionSchema`, calculator tool, weather tool, and a structured weather report output.
+- Configures `OpenAISession` and `AnthropicSession` with the bundled `SessionSchema`, calculator tool, weather tool, and a structured weather report output.
 - Streams responses while rendering prompts, reasoning summaries, tool runs, and final replies in a chat-style transcript UI.
 - Demonstrates tool-specific views (calculator and weather) with live argument updates, results, and SwiftUI previews backed by `SimulatedSession` scenarios.
 

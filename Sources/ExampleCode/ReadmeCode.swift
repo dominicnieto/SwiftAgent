@@ -1,5 +1,6 @@
 // By Dennis Müller
 
+import AnthropicSession
 import Foundation
 import FoundationModels
 import Observation
@@ -27,6 +28,18 @@ public enum ReadmeCode {
     let response = try await session.respond(to: "What's the weather like in San Francisco?")
 
     // Process response
+    print(response.content)
+  }
+
+  /// Step: Basic Usage (Anthropic)
+  func basicUsage_anthropic() async throws {
+    let session = AnthropicSession(
+      instructions: "You are a helpful assistant.",
+      apiKey: "sk-ant-...",
+    )
+
+    let response = try await session.respond(to: "What's the weather like in San Francisco?")
+
     print(response.content)
   }
 
@@ -111,6 +124,26 @@ public enum ReadmeCode {
     let response = try await session.respond(
       to: "What's the weather like in San Francisco?",
       using: .gpt5,
+      options: options,
+    )
+
+    print(response.content)
+  }
+
+  func basicUsage_CustomGenerationOptionsAnthropic() async throws {
+    let session = AnthropicSession(
+      instructions: "You are a helpful assistant.",
+      apiKey: "sk-ant-...",
+    )
+
+    let options = AnthropicGenerationOptions(
+      maxOutputTokens: 1000,
+      thinking: .init(budgetTokens: 1024),
+    )
+
+    let response = try await session.respond(
+      to: "What's the weather like in San Francisco?",
+      using: .claude37SonnetLatest,
       options: options,
     )
 
