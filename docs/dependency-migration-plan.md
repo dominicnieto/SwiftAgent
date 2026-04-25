@@ -43,6 +43,8 @@ AnyLanguageModel traits:
 - Phase 1 copies AnyLanguageModel first and builds the copied package in place.
 - Do not add all AnyLanguageModel dependencies to SwiftAgent's root manifest just because the copied repo has them.
 - Add dependencies to SwiftAgent only when a phase starts compiling moved code through SwiftAgent targets.
+- Do not remove dependencies from either SwiftAgent's package or the copied AnyLanguageModel package without explicit approval.
+- Any dependency removal proposal must list the dependency, current users, replacement path, affected targets/products, and test/build evidence.
 - Keep the base `SwiftAgent` product lightweight.
 - Heavy local runtime dependencies should be isolated behind optional provider targets/products.
 - SwiftPM traits are allowed, but use separate targets/products when that is clearer for users and CI.
@@ -83,6 +85,8 @@ Avoid:
 
 Phase 1 exit should report the copied package build command/result and any dependency resolution failures.
 
+Dependency removal approval: Phase 1 should not remove dependencies from either package. If a dependency appears obsolete during copy/build, document it only and wait for a later approved phase.
+
 ### Phase 2: Canonical Core Types
 
 When core ALM files start moving into `Sources/SwiftAgent`, decide whether `JSONSchema` and `PartialJSONDecoder` become base dependencies.
@@ -94,6 +98,8 @@ Expected dependency decisions:
 - Reconcile `swift-syntax` macro dependency shape.
 - Decide whether `JSONSchema` is a real base dependency or whether existing SwiftAgent schema conversion code replaces it.
 - Decide whether `PartialJSONDecoder` is needed for canonical streaming structured output.
+
+Dependency removal approval: Before removing any dependency from either package, produce the removal proposal described in "Migration Principles" and wait for explicit approval.
 
 ### Phase 3: Transcript and Streaming
 
@@ -108,6 +114,8 @@ Keep transport and replay aligned with SwiftAgent:
 - `AgentLog`
 
 If AsyncHTTPClient support survives, keep it behind an explicit optional target/trait and make sure replay recording still works without it.
+
+Dependency removal approval: Before removing or disabling any transport/streaming dependency from either package, produce the removal proposal described in "Migration Principles" and wait for explicit approval.
 
 ### Phase 4: OpenAI Provider
 
@@ -127,6 +135,8 @@ Remove MacPaw `OpenAI` only after:
 - OpenAI streaming tests emit transcript-first updates.
 - AgentRecorder can record OpenAI fixtures through the merged provider path.
 
+Dependency removal approval: Meeting these gates is not enough to remove MacPaw `OpenAI`; still present the removal proposal and wait for explicit approval.
+
 ### Phase 5: Anthropic Provider
 
 Direct Anthropic provider code may require:
@@ -145,6 +155,8 @@ Remove `SwiftAnthropic` only after:
 - Anthropic streaming thinking/reasoning tests pass.
 - AgentRecorder can record Anthropic fixtures through the merged provider path.
 
+Dependency removal approval: Meeting these gates is not enough to remove `SwiftAnthropic`; still present the removal proposal and wait for explicit approval.
+
 ### Phase 6: Other Providers
 
 Provider dependency placement:
@@ -155,6 +167,8 @@ Provider dependency placement:
 - `CoreMLLanguageModel`: optional `SwiftAgentCoreML` target/product.
 - `MLXLanguageModel`: optional `SwiftAgentMLX` target/product.
 - `LlamaLanguageModel`: optional `SwiftAgentLlama` target/product.
+
+Dependency removal approval: Before dropping any optional provider dependency or copied-provider dependency, produce the removal proposal described in "Migration Principles" and wait for explicit approval.
 
 ## Package Shape Target
 

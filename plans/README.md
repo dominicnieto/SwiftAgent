@@ -30,4 +30,6 @@ Each phase plan should include:
 - rollback or cleanup notes
 - open questions
 
+Each phase plan must include dependency approval gates. If the phase may remove a dependency from either SwiftAgent's package or the copied AnyLanguageModel package, the plan must require explicit approval before removal and must summarize the dependency, current users, replacement path, affected targets/products, and test/build evidence.
+
 Keep these files concise and update them as the phase progresses.

@@ -24,6 +24,8 @@ The phase plan should translate these higher-level docs into concrete steps for 
 
 Do not start implementation for a phase until its `plans/phase-*-*.md` file exists.
 
+Every phase plan must explicitly call out dependency changes. If a phase proposes removing a dependency from either SwiftAgent's package or the copied AnyLanguageModel package, summarize the dependency, the reason for removal, the replacement path, and the test/build evidence, then wait for explicit approval before removing it.
+
 ## Phase 0: Inventory and Baseline
 
 Goals:
