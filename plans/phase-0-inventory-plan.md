@@ -73,4 +73,3 @@ If implementation files are accidentally changed, revert those changes and run t
 - Which duplicate concepts should be proposed as canonical in Phase 2?
 - Which AnyLanguageModel live provider tests should become replay tests first?
 - How should AnyLanguageModel transport injection be adapted to preserve `HTTPReplayRecorder`?
-- Should `OpenAISession` and `AnthropicSession` survive as thin conveniences or be removed entirely after parity?

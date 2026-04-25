@@ -22,7 +22,7 @@ Inventory for the planned no-bridge merge of `/Users/dominicnieto/Desktop/AnyLan
   - Schema/tool protocols: `LanguageModelSessionSchema`, `StructuredOutput`, `DecodableStructuredOutput`, `SwiftAgentTool`, `DecodableTool`.
   - Prompting: `Prompt`, `PromptBuilder`, `PromptRepresentable`, `PromptSection`, `PromptTag`, prompt builtins.
   - Networking/logging/replay: `HTTPClient`, `URLSessionHTTPClient`, `HTTPReplayRecorder`, `HTTPClientInterceptors`, `NetworkLog`, `AgentLog`.
-  - Macro surface: `@SessionSchema` in `Sources/SwiftAgent/Macros.swift`.
+  - Observation/macro surface: `@SessionSchema` in `Sources/SwiftAgent/Macros.swift`; `OpenAISession`, `AnthropicSession`, and `SimulatedSession` are `@Observable` session types.
 - Provider products:
   - `Sources/OpenAISession`: `OpenAISession`, `OpenAIAdapter`, `OpenAIModel`, `OpenAIConfiguration`, `OpenAIGenerationOptions`.
   - `Sources/AnthropicSession`: `AnthropicSession`, `AnthropicAdapter`, `AnthropicModel`, `AnthropicConfiguration`, `AnthropicGenerationOptions`.
@@ -42,15 +42,15 @@ Inventory for the planned no-bridge merge of `/Users/dominicnieto/Desktop/AnyLan
 
 ### FoundationModels and Provider SDK Usage
 
-- Current SwiftAgent side has broad Apple `FoundationModels` usage: 138 matches across `Sources`, `Tests`, `AgentRecorder`, and `Examples`.
+- Current SwiftAgent side has broad Apple `FoundationModels` usage across `Sources`, `Tests`, `AgentRecorder`, and `Examples`.
   - Core wrappers/protocols use `FoundationModels.Tool`, `Generable`, `GeneratedContent`, and `GenerationSchema`.
   - `SwiftAgentMacros` emits `FoundationModels.Tool` constraints.
   - Provider sessions accept variadic `FoundationModels.Tool` values and wrap them in `_SwiftAgentToolWrapper`.
-- OpenAI SDK usage: 74 matches.
+- OpenAI SDK usage is concentrated in the OpenAI session target, OpenAI replay tests, and AgentRecorder OpenAI scenarios.
   - `Package.swift` depends on MacPaw `OpenAI`.
   - `OpenAIAdapter` maps Responses API requests, streaming events, schemas, tool calls, error mapping, and usage.
   - Tests use `CreateModelResponseQuery` and inline replay JSON/SSE fixtures.
-- SwiftAnthropic usage: 77 matches.
+- SwiftAnthropic SDK usage is concentrated in the Anthropic session target, Anthropic replay tests, and one AgentRecorder thinking scenario.
   - `Package.swift` depends on `SwiftAnthropic`.
   - `AnthropicAdapter` maps Messages API requests, streaming events, schemas, tool calls, thinking, errors, and usage.
   - Tests use `MessageParameter`, `Model`, and inline replay JSON/SSE fixtures.
@@ -89,6 +89,7 @@ Inventory for the planned no-bridge merge of `/Users/dominicnieto/Desktop/AnyLan
   - `Tool`, `ToolExecutionDelegate`, `ToolExecutionDecision`.
   - `LanguageModel`, `LanguageModelSession`, `LanguageModelFeedback`.
   - `GenerationOptions` with `sampling`, `temperature`, `maximumResponseTokens`, and typed model custom options via `options[custom: Model.self]`.
+  - `LanguageModelSession` is `@Observable` and exposes observable `isResponding` and `transcript`.
   - Macros: `@Generable`, `@Guide`.
 - Direct providers:
   - `OpenAILanguageModel`, `OpenResponsesLanguageModel`, `AnthropicLanguageModel`, `GeminiLanguageModel`, `OllamaLanguageModel`.
@@ -132,7 +133,7 @@ Inventory for the planned no-bridge merge of `/Users/dominicnieto/Desktop/AnyLan
 
 - AnyLanguageModel mostly replaces FoundationModels primitives locally.
 - Apple `FoundationModels` usage is concentrated in `Models/SystemLanguageModel.swift` and FoundationModels compatibility/conversion tests.
-- Current count: 103 matches under AnyLanguageModel `Sources` and `Tests`, primarily conversion into/from Apple `SystemLanguageModel`, `LanguageModelSession`, `GenerationSchema`, `GeneratedContent`, `Prompt`, `Instructions`, `Tool`, and `Transcript`.
+- Usage is primarily conversion into/from Apple `SystemLanguageModel`, `LanguageModelSession`, `GenerationSchema`, `GeneratedContent`, `Prompt`, `Instructions`, `Tool`, and `Transcript`; the file inventory below is the source of truth.
 
 ## Duplicate Concepts For Phase 2 Decision
 
@@ -150,6 +151,9 @@ Do not decide these in Phase 0.
 - Streaming snapshot/update model:
   - SwiftAgent streams transcript/token updates and derives `AgentSnapshot`.
   - AnyLanguageModel streams `content`/`rawContent` snapshots.
+- Observation/session UI state:
+  - SwiftAgent provider sessions and `SimulatedSession` are `@Observable` and expose transcript/token state for UI use.
+  - AnyLanguageModel `LanguageModelSession` is `@Observable` and exposes observable `isResponding` and `transcript`.
 - Generation options:
   - SwiftAgent has provider-specific `OpenAIGenerationOptions`, `AnthropicGenerationOptions`, `SimulationGenerationOptions`.
   - AnyLanguageModel has one `GenerationOptions` with model-specific custom options.
@@ -225,6 +229,7 @@ Do not decide these in Phase 0.
 - Preserve or adapt with replay parity: OpenAI text, structured output, non-streaming tool calls, streaming text, streaming structured output, streaming tool calls, streaming multiple tool calls, malformed tool arguments, streaming errors, HTTP errors, and generation option validation in `Tests/SwiftAgentTests/OpenAISession/*`.
 - Preserve or adapt with replay parity: Anthropic text, structured output, streaming text, streaming thinking, streaming tool calls, streaming multiple tool calls, streaming no-args tool calls, HTTP errors, thinking round-trip, and generation option validation in `Tests/SwiftAgentTests/AnthropicSession/*`.
 - Move/classify: AnyLanguageModel core tests for generated content, schema, prompts, instructions, transcript, tool execution, custom options, structured generation, macros, mock model, locking, and helpers.
+- Preserve/adapt: AnyLanguageModel Observation behavior in `Tests/AnyLanguageModelTests/ObservationTests.swift` and `MockLanguageModelTests.swift` coverage for `isResponding`.
 - Move/classify as compatibility tests: AnyLanguageModel API compatibility, FoundationModels compatibility, dynamic schema conversion, and SystemLanguageModel tests.
 - Keep optional/live gated: AnyLanguageModel OpenAI, OpenResponses, Anthropic, Gemini, Ollama, CoreML, MLX, Llama provider tests until replay/local-runtime strategy is decided.
 - Replace or regenerate intentionally: inline provider replay JSON/SSE constants in SwiftAgent provider tests when direct provider request/response formats change.
@@ -394,11 +399,12 @@ Tests/SwiftAgentTests/AnthropicSession/AnthropicThinkingCompatibilityValidationT
 
 ### AnyLanguageModel FoundationModels Usage Files
 
-AnyLanguageModel does not use direct `import FoundationModels` lines in the scanned files. It references Apple FoundationModels symbols in:
+AnyLanguageModel has conditional direct `import FoundationModels` lines and Apple FoundationModels symbol references in:
 
 ```text
 /Users/dominicnieto/Desktop/AnyLanguageModel/Sources/AnyLanguageModel/Models/SystemLanguageModel.swift
 /Users/dominicnieto/Desktop/AnyLanguageModel/Tests/AnyLanguageModelTests/DynamicSchemaConversionTests.swift
+/Users/dominicnieto/Desktop/AnyLanguageModel/Tests/AnyLanguageModelTests/APICompatibilityFoundationModelsTests.swift
 ```
 
 ## Phase 0 Completion Audit
@@ -411,6 +417,7 @@ AnyLanguageModel does not use direct `import FoundationModels` lines in the scan
 - Complete: `FoundationModels` imports/references are inventoried in prose and file lists.
 - Complete: OpenAI and SwiftAnthropic SDK imports are inventoried in prose and file lists.
 - Complete: duplicate concepts are listed under "Duplicate Concepts For Phase 2 Decision" without selecting canonical sources.
+- Complete: Observation/session UI state is inventoried as a merge surface and tied to AnyLanguageModel observation tests.
 - Complete: current SwiftAgent streaming behavior is captured under "Transcript and Streaming Behavior To Preserve" and "Streaming Baseline Fixtures".
 - Complete: AnyLanguageModel provider coverage and gating are captured under "Provider Coverage and Gating".
 - Complete: outputs include this inventory doc, the explicit test coverage checklist, and the initial source-compatible API list.
