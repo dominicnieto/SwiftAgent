@@ -24,6 +24,8 @@ The phase plan should translate these higher-level docs into concrete steps for 
 
 Do not start implementation for a phase until its `plans/phase-*-*.md` file exists.
 
+Every phase must also produce a phase results doc in `docs/`. The results doc should record what actually happened: commands run, build/test results, failures, skipped validation, changed files/directories, dependency decisions made or deferred, and follow-ups for later phases.
+
 Every phase plan must explicitly call out dependency changes. If a phase proposes removing a dependency from either SwiftAgent's package or the copied AnyLanguageModel package, summarize the dependency, the reason for removal, the replacement path, and the test/build evidence, then wait for explicit approval before removing it.
 
 ## Phase 0: Inventory and Baseline
@@ -47,6 +49,7 @@ Tasks:
 Outputs:
 
 - `docs/phase-0-inventory.md`.
+- `docs/phase-0-results.md` if Phase 0 execution details are not already captured in the inventory doc.
 - Test coverage checklist.
 - Initial list of source-compatible APIs worth preserving.
 
@@ -61,12 +64,14 @@ Goals:
 Tasks:
 
 - Create `plans/phase-1-copy-any-language-model-plan.md`.
+- Create `docs/phase-1-copy-results.md`.
 - Copy the entire AnyLanguageModel repository into SwiftAgent mechanically with shell copy commands.
 - Do not rewrite files by hand during the initial move.
 - Preserve the copied repo layout first, including sources, tests, package files, docs, scripts, fixtures, and metadata.
 - Build the copied package in place before changing SwiftAgent to use it.
-- After the copied repo builds, start pruning or relocating files intentionally.
-- Add required package dependencies currently used by AnyLanguageModel only after the copied source is present and the dependency needs are clear.
+- Record the exact copy/build commands, results, and any failures in `docs/phase-1-copy-results.md`.
+- Do not prune, relocate, rename modules, merge types, integrate providers, or migrate dependencies in Phase 1.
+- Defer pruning, relocation, SwiftAgent integration, and dependency migration to later approved phases.
 
 Notes:
 
