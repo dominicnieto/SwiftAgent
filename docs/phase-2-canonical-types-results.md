@@ -6,9 +6,10 @@ Implemented the first Phase 2 vertical slice for local FoundationModels-style pr
 
 Phase 2 status: partial. Phase 2 is not complete. This result covers the first vertical slice:
 local core primitives, macro references, and the current provider/test/example call sites needed
-to consume those primitives. A later slice also resolved `@Generable` defaulted-property parity.
-Transcript/session/provider replacement, unified generation options, provider capabilities, and
-direct provider migration remain deferred to later approved slices.
+to consume those primitives. Later slices also resolved `@Generable` defaulted-property parity
+and migrated focused ALM core tests for canonical SwiftAgent primitives. Transcript/session/provider
+replacement, unified generation options, provider capabilities, and direct provider migration
+remain deferred to later approved slices.
 
 SwiftAgent now owns ALM-derived local definitions for:
 
@@ -32,6 +33,85 @@ Review cleanup removed stray generated artifacts `External/.DS_Store` and `./.DS
 `.swiftpm/xcode/xcshareddata/xcschemes/SwiftAgentMacroTests.xcscheme` diff was inspected and
 reverted as incidental Xcode metadata because the existing `TestAction` already referenced the
 macro test plan and the Phase 2 slice does not require scheme metadata changes.
+
+## Initial ALM Core Test Migration Slice
+
+Completed the next Phase 2 implementation step from `docs/phase-2-completion-checklist.md`:
+initial migration of relevant ALM core tests into SwiftAgent.
+
+Implementation:
+
+- Mechanically copied these ALM core tests into `Tests/SwiftAgentTests/Core/`:
+  - `ConvertibleToGeneratedContentTests.swift`
+  - `DynamicGenerationSchemaTests.swift`
+  - `GenerationGuideTests.swift`
+- Adapted imports from `AnyLanguageModel` to `SwiftAgent`.
+- Removed the copied test-only `JSONSchema` import because the root `SwiftAgentTests` target does
+  not depend on `JSONSchema` and this assertion only needed semantic JSON comparison. This does
+  not change the dependency decision for production ALM JSON/schema code.
+- Used `Prompt.formatted()` for SwiftAgent prompt rendering in the generated-content representation
+  assertion.
+- Replaced copied decimal force unwraps with `#require`.
+
+Files changed:
+
+- `Tests/SwiftAgentTests/Core/ConvertibleToGeneratedContentTests.swift`
+- `Tests/SwiftAgentTests/Core/DynamicGenerationSchemaTests.swift`
+- `Tests/SwiftAgentTests/Core/GenerationGuideTests.swift`
+- `docs/phase-2-completion-checklist.md`
+- `docs/phase-2-canonical-types-results.md`
+
+Dependency decisions:
+
+- No dependency additions.
+- No dependency removals.
+- `Package.swift` was not edited.
+- `JSONSchema` remains deferred until `GenerationOptions`, `JSONValue`, direct provider request
+  builders, or provider-neutral schema conversion move into SwiftAgent with explicit approval.
+- `PartialJSONDecoder` remains deferred until structured streaming / partial snapshot work needs it
+  with explicit approval.
+
+Validation succeeded:
+
+```bash
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests -only-testing:SwiftAgentTests/ConvertibleToGeneratedContentTests -only-testing:SwiftAgentTests/DynamicGenerationSchemaTests -only-testing:SwiftAgentTests/GenerationGuideTests test -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests build -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests test -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme ExampleApp -destination "platform=iOS Simulator,name=iPhone 17 Pro,OS=latest" build -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO build -quiet
+```
+
+The same validation set was rerun during final review on April 25, 2026, with the same outcomes.
+
+Attempted and blocked by local environment:
+
+```bash
+swiftformat --config ".swiftformat" Tests/SwiftAgentTests/Core/ConvertibleToGeneratedContentTests.swift Tests/SwiftAgentTests/Core/DynamicGenerationSchemaTests.swift Tests/SwiftAgentTests/Core/GenerationGuideTests.swift
+which swiftformat || true
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" build -quiet
+```
+
+Result:
+
+```text
+zsh:1: command not found: swiftformat
+swiftformat not found
+No signing certificate "Mac Development" found: No "Mac Development" signing certificate matching team ID "7F6BJZY5B3" with a private key was found.
+```
+
+Follow-ups:
+
+- Continue ALM core test migration/classification for generated content, broader generation schema
+  behavior, prompt, instructions, transcript, generation options, and tool execution.
+- Phase 2 remains partial because the checklist still has incomplete canonical ownership and
+  dependency-decision items.
+
+Final review status:
+
+- No review findings remain open for this implementation step.
+- This initial ALM core test migration slice is ready to commit, including the three new
+  `Tests/SwiftAgentTests/Core/` files and the Phase 2 tracking doc updates.
+- Phase 2 remains partial according to `docs/phase-2-completion-checklist.md`.
 
 ## Defaulted-Property Parity Slice
 

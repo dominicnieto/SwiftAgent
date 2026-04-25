@@ -10,9 +10,9 @@ Small implementation slices are allowed, but they are only a way to complete thi
 
 ## Current Status
 
-Status: partial / first vertical slice plus defaulted-property parity slice complete.
+Status: partial / first vertical slice plus defaulted-property parity and initial ALM core test migration slices complete.
 
-The first Phase 2 implementation slice completed the local primitive stack and macro/reference updates recorded in `docs/phase-2-canonical-types-results.md`. The next slice resolved `@Generable` defaulted-property parity. Phase 2 remains incomplete because the broader merge docs still require additional canonical core work, especially `Prompt`, `GenerationOptions`, `LanguageModel`, `Availability`, ALM core test migration/classification, and dependency decisions for any moved ALM JSON/schema/partial-decoding code.
+The first Phase 2 implementation slice completed the local primitive stack and macro/reference updates recorded in `docs/phase-2-canonical-types-results.md`. The next slice resolved `@Generable` defaulted-property parity. The latest slice migrated focused ALM core tests for `ConvertibleToGeneratedContent`, `DynamicGenerationSchema`, and `GenerationGuide` into `SwiftAgentTests`. Phase 2 remains incomplete because the broader merge docs still require additional canonical core work, especially `Prompt`, `GenerationOptions`, `LanguageModel`, `Availability`, broader ALM core test migration/classification, and dependency decisions for any moved ALM JSON/schema/partial-decoding code.
 
 ## Reconciliation Sources
 
@@ -60,7 +60,7 @@ This checklist was reconciled against:
 | Root package dependencies remain unchanged. | Done | No uncommitted diffs in `Package.swift` or `Package.resolved`; no dependency additions/removals. |
 | Provider SDK replacement did not start. | Done | MacPaw `OpenAI` and `SwiftAnthropic` usage remains; no direct-provider migration or adapter deletion occurred. |
 | Phase 3 transcript/session streaming redesign did not start. | Done | No canonical transcript/session streaming reducer, provider capability model, or direct provider event stream was implemented in this slice. |
-| Relevant ALM core tests are moved/adapted or explicitly deferred with reasons. | Incomplete | `merge-test-matrix.md` and `phase-0-inventory.md` require ALM core/macro test migration or classification. The defaulted-property slice added focused SwiftAgent `@Generable` macro coverage, but broader ALM core tests for generated content, schemas, prompt, instructions, transcript, generation options, and tool execution still need migration/classification. |
+| Relevant ALM core tests are moved/adapted or explicitly deferred with reasons. | Incomplete | Initial focused core migration added SwiftAgent-native tests adapted from ALM for `ConvertibleToGeneratedContent`, `DynamicGenerationSchema`, and `GenerationGuide` under `Tests/SwiftAgentTests/Core/`; focused tests passed. Broader ALM core tests for generated content, schemas, prompt, instructions, transcript, generation options, and tool execution still need migration/classification. |
 | `Prompt` canonical ownership is implemented or explicitly tracked as remaining Phase 2 work. | Incomplete | Merge spec lists `Prompt` as a canonical model primitive. This slice kept SwiftAgent's current prompt stack and only removed availability friction needed by ALM conversion protocols. |
 | `LanguageModel` canonical ownership is implemented or explicitly tracked as remaining Phase 2 work. | Incomplete | Merge spec lists `LanguageModel` as a canonical primitive/provider boundary. This slice did not move ALM `LanguageModel` into SwiftAgent. |
 | `Availability` canonical ownership is implemented or explicitly tracked as remaining Phase 2 work. | Incomplete | Merge spec lists `Availability` as a canonical model primitive. This slice did not move ALM `Availability` into SwiftAgent. |
@@ -72,9 +72,9 @@ This checklist was reconciled against:
 
 ## Remaining Phase 2 Work
 
-- Review and commit the current primitive-stack slice if it passes review.
-- Move/adapt relevant ALM core tests or explicitly defer them with reasons.
-- Decide whether first-slice coverage is sufficient or add dedicated SwiftAgent tests for local `GeneratedContent`, `GenerationSchema`, `DynamicGenerationSchema`, `GenerationGuide`, and `@Generable` parity.
+- Commit the current initial ALM core test migration slice if accepted.
+- Continue moving/adapting relevant ALM core tests or explicitly defer them with reasons.
+- Decide whether current first-slice and initial migrated coverage is sufficient or add more dedicated SwiftAgent tests for local `GeneratedContent`, `GenerationSchema`, `DynamicGenerationSchema`, `GenerationGuide`, and `@Generable` parity.
 - Resolve canonical `Prompt`, `LanguageModel`, and `Availability` ownership for SwiftAgent or explicitly amend Phase 2 scope.
 - Resolve the `GenerationOptions` / `JSONValue` slice.
 - Request approval for `JSONSchema` if the `GenerationOptions` / `JSONValue` slice naturally needs it.
