@@ -6,10 +6,10 @@ Implemented the first Phase 2 vertical slice for local FoundationModels-style pr
 
 Phase 2 status: partial. Phase 2 is not complete. This result covers the first vertical slice:
 local core primitives, macro references, and the current provider/test/example call sites needed
-to consume those primitives. Later slices also resolved `@Generable` defaulted-property parity
-and migrated focused ALM core tests for canonical SwiftAgent primitives. Transcript/session/provider
-replacement, unified generation options, provider capabilities, and direct provider migration
-remain deferred to later approved slices.
+to consume those primitives. Later slices also resolved `@Generable` defaulted-property parity,
+migrated focused ALM core tests for canonical SwiftAgent primitives, and completed the Phase 2
+prompt ownership slice. Transcript/session/provider replacement, unified generation options,
+provider capabilities, and direct provider migration remain deferred to later approved slices.
 
 SwiftAgent now owns ALM-derived local definitions for:
 
@@ -203,8 +203,132 @@ unable to attach DB: error: accessing build database ".../XCBuildData/build.db":
 Follow-ups:
 
 - Broader ALM core tests still need migration/classification before Phase 2 can be complete.
-- `Prompt`, `LanguageModel`, `Availability`, `GenerationOptions`, `JSONValue`/`JSONSchema`, and
+- `LanguageModel`, `Availability`, `GenerationOptions`, `JSONValue`/`JSONSchema`, and
   `PartialJSONDecoder` checklist items remain unresolved or deferred pending later approved work.
+
+## Prompt Canonical Ownership And Prompt/Instructions Test Slice
+
+Completed the next Phase 2 implementation step from `docs/phase-2-completion-checklist.md`:
+canonical `Prompt` ownership plus another focused ALM core test migration slice.
+
+Implementation:
+
+- Kept SwiftAgent's existing `Prompt`/`PromptBuilder` as the canonical prompt implementation
+  because it already preserves richer section/tag rendering used by SwiftAgent prompt/source tests.
+- Added ALM-compatible `CustomStringConvertible` behavior so `Prompt.description` returns the
+  formatted model input text.
+- Added ALM-compatible newline prompt rendering for arrays by overriding `promptRepresentation`
+  in SwiftAgent's existing `Array: ConvertibleToGeneratedContent` conformance. This avoids a
+  second array protocol conformance while preserving generated-content array behavior.
+- Mechanically copied ALM `PromptTests` and `InstructionsTests` into `Tests/SwiftAgentTests/Core/`
+  and adapted imports from `AnyLanguageModel` to `SwiftAgent`.
+
+Files changed:
+
+- `Sources/SwiftAgent/Prompting/PromptBuilder.swift`
+- `Sources/SwiftAgent/Core/ConvertibleToGeneratedContent.swift`
+- `Tests/SwiftAgentTests/Core/PromptTests.swift`
+- `Tests/SwiftAgentTests/Core/InstructionsTests.swift`
+- `docs/phase-2-completion-checklist.md`
+- `docs/phase-2-canonical-types-results.md`
+
+Dependency decisions:
+
+- No dependency additions.
+- No dependency removals.
+- `Package.swift` was not edited.
+- This prompt slice did not need `JSONSchema`, `JSONValue`, or `PartialJSONDecoder`.
+- For later `GenerationOptions` / `JSONValue` work, preserve the dependency-backed ALM path and
+  request explicit approval before adding `JSONSchema` to the root package.
+
+Validation succeeded:
+
+```bash
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests -only-testing:SwiftAgentTests/PromptTests -only-testing:SwiftAgentTests/InstructionsTests test -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests -only-testing:SwiftAgentTests/PromptBuilderTests -only-testing:SwiftAgentTests/PromptTests -only-testing:SwiftAgentTests/InstructionsTests test -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests build -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests test -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme ExampleApp -destination "platform=iOS Simulator,name=iPhone 17 Pro,OS=latest" build -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO build -quiet
+```
+
+Attempted and blocked by local environment:
+
+```bash
+which swiftformat || true
+swiftformat --config ".swiftformat" Sources/SwiftAgent/Prompting/PromptBuilder.swift Sources/SwiftAgent/Core/ConvertibleToGeneratedContent.swift Tests/SwiftAgentTests/Core/PromptTests.swift Tests/SwiftAgentTests/Core/InstructionsTests.swift
+```
+
+Result:
+
+```text
+swiftformat not found
+zsh:1: command not found: swiftformat
+```
+
+Failed during implementation and fixed:
+
+```bash
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests -only-testing:SwiftAgentTests/PromptTests -only-testing:SwiftAgentTests/InstructionsTests test -quiet
+```
+
+Result before moving array prompt rendering into the existing array conformance:
+
+```text
+Conflicting conformance of 'Array<Element>' to protocol 'PromptRepresentable'; there cannot be more than one conformance, even with different conditional bounds
+```
+
+Follow-ups:
+
+- Continue with feature-shaped Phase 2 blockers: `Availability`, `LanguageModel`, and
+  `GenerationOptions` / `JSONValue`.
+- Ask for explicit `JSONSchema` approval before editing `Package.swift` for the
+  `GenerationOptions` / `JSONValue` slice.
+- Broader ALM core tests for generated content, schemas, transcript, generation options, and tool
+  execution still need migration/classification.
+
+Final review on April 25, 2026:
+
+- Rechecked the uncommitted diff scope: only the prompt slice Swift files, prompt/instructions
+  tests, and Phase 2 tracking docs are changed.
+- Confirmed no uncommitted `Package.swift`, `Package.resolved`, `External/AnyLanguageModel`, or
+  `.swiftpm/xcode/xcshareddata/xcschemes/*.xcscheme` changes.
+- Confirmed no `.DS_Store` files are present.
+- Confirmed MacPaw `OpenAI` and `SwiftAnthropic` dependencies/imports remain in place.
+- Confirmed this slice did not start Phase 3 transcript/session streaming redesign, Phase 4/5
+  provider replacement, dependency removal, or `External/AnyLanguageModel` pruning.
+
+Validation rerun during final review:
+
+```bash
+which swiftformat || true
+swiftformat --config ".swiftformat" Sources/SwiftAgent/Core/ConvertibleToGeneratedContent.swift Sources/SwiftAgent/Prompting/PromptBuilder.swift Tests/SwiftAgentTests/Core/InstructionsTests.swift Tests/SwiftAgentTests/Core/PromptTests.swift
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests -only-testing:SwiftAgentTests/PromptBuilderTests -only-testing:SwiftAgentTests/PromptTests -only-testing:SwiftAgentTests/InstructionsTests test -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests build -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests test -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme ExampleApp -destination "platform=iOS Simulator,name=iPhone 17 Pro,OS=latest" build -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO build -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" build -quiet
+```
+
+Results:
+
+```text
+swiftformat not found
+zsh:1: command not found: swiftformat
+Focused PromptBuilder/Prompt/Instructions tests passed.
+SwiftAgentTests build passed.
+Full SwiftAgentTests test plan passed.
+ExampleApp iPhone 17 Pro simulator build passed.
+AgentRecorder build passed with CODE_SIGNING_ALLOWED=NO.
+Plain AgentRecorder build failed before compilation because no Mac Development signing certificate matching team ID "7F6BJZY5B3" with a private key was found.
+```
+
+Review status:
+
+- No review findings remain open for this prompt ownership and prompt/instructions test slice.
+- This implementation step is ready to commit.
+- Phase 2 remains partial according to `docs/phase-2-completion-checklist.md`.
 
 ## Source Movement
 

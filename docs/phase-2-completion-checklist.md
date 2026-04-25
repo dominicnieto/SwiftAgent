@@ -52,7 +52,7 @@ This checklist was reconciled against:
 | `@Generable` and `@Guide` macro wiring exists in SwiftAgent. | Done for first slice | Added `Sources/SwiftAgentMacros/GenerableMacro.swift`, `Sources/SwiftAgentMacros/GuideMacro.swift`, and `SwiftAgentMacroPlugin` registration. Macro test plan passed. Defaulted-property parity is tracked separately below and is now done. |
 | `@SessionSchema` emits local core types. | Done | `SessionSchemaMacro` emits `SwiftAgent.Tool`; macro expansion expectations updated and macro test plan passed. |
 | Existing transcript codable/stable JSON behavior still works. | Done | Focused `TranscriptCodableTests` passed; full `SwiftAgentTests` passed. |
-| Existing prompt/source rendering behavior still works. | Done | Full `SwiftAgentTests` passed, including existing `PromptBuilderTests`. No transcript/source metadata redesign was attempted in this slice. |
+| Existing prompt/source rendering behavior still works. | Done | Full `SwiftAgentTests` passed in earlier slices. Current prompt slice passed focused `PromptBuilderTests`, migrated ALM `PromptTests`, and migrated ALM `InstructionsTests`. No transcript/source metadata redesign was attempted. |
 | Existing decodable tool schema behavior still works. | Done | Focused `DecodableToolJSONSchemaTests` passed; full `SwiftAgentTests` passed. |
 | Existing provider schema conversion through current SDK adapters still works. | Done | Full OpenAI/Anthropic/Simulated SwiftAgent test suite passed while MacPaw `OpenAI` and `SwiftAnthropic` remain in place. |
 | Example and AgentRecorder compile after local primitive adoption. | Done with environment note | ExampleApp iPhone 17 Pro simulator build passed. AgentRecorder compiled with `CODE_SIGNING_ALLOWED=NO`; plain AgentRecorder build is blocked locally by a missing Mac Development signing certificate. |
@@ -60,8 +60,8 @@ This checklist was reconciled against:
 | Root package dependencies remain unchanged. | Done | No uncommitted diffs in `Package.swift` or `Package.resolved`; no dependency additions/removals. |
 | Provider SDK replacement did not start. | Done | MacPaw `OpenAI` and `SwiftAnthropic` usage remains; no direct-provider migration or adapter deletion occurred. |
 | Phase 3 transcript/session streaming redesign did not start. | Done | No canonical transcript/session streaming reducer, provider capability model, or direct provider event stream was implemented in this slice. |
-| Relevant ALM core tests are moved/adapted or explicitly deferred with reasons. | Incomplete | Initial focused core migration added SwiftAgent-native tests adapted from ALM for `ConvertibleToGeneratedContent`, `DynamicGenerationSchema`, and `GenerationGuide` under `Tests/SwiftAgentTests/Core/`; focused tests passed. Broader ALM core tests for generated content, schemas, prompt, instructions, transcript, generation options, and tool execution still need migration/classification. |
-| `Prompt` canonical ownership is implemented or explicitly tracked as remaining Phase 2 work. | Incomplete | Merge spec lists `Prompt` as a canonical model primitive. This slice kept SwiftAgent's current prompt stack and only removed availability friction needed by ALM conversion protocols. |
+| Relevant ALM core tests are moved/adapted or explicitly deferred with reasons. | Incomplete | Focused core migrations added SwiftAgent-native tests adapted from ALM for `ConvertibleToGeneratedContent`, `DynamicGenerationSchema`, `GenerationGuide`, `Prompt`, and `Instructions` under `Tests/SwiftAgentTests/Core/`; focused tests passed. Broader ALM core tests for generated content, schemas, transcript, generation options, and tool execution still need migration/classification. |
+| `Prompt` canonical ownership is implemented or explicitly tracked as remaining Phase 2 work. | Done | SwiftAgent's richer local `Prompt`/`PromptBuilder` remains the canonical prompt type. This slice added ALM-compatible `Prompt.description` and newline array prompt representation while preserving existing section/tag/source-rendering behavior. Verified by migrated ALM `PromptTests` and existing `PromptBuilderTests`. |
 | `LanguageModel` canonical ownership is implemented or explicitly tracked as remaining Phase 2 work. | Incomplete | Merge spec lists `LanguageModel` as a canonical primitive/provider boundary. This slice did not move ALM `LanguageModel` into SwiftAgent. |
 | `Availability` canonical ownership is implemented or explicitly tracked as remaining Phase 2 work. | Incomplete | Merge spec lists `Availability` as a canonical model primitive. This slice did not move ALM `Availability` into SwiftAgent. |
 | `GenerationOptions` canonical decision is implemented or explicitly marked as remaining Phase 2 work. | Incomplete | Decisions/spec require unified `GenerationOptions`; this slice preserved provider-specific generation options and records the unified options work as a follow-up. |
@@ -72,10 +72,10 @@ This checklist was reconciled against:
 
 ## Remaining Phase 2 Work
 
-- Commit the current initial ALM core test migration slice if accepted.
+- Commit the current prompt ownership and prompt/instructions test migration slice if accepted.
 - Continue moving/adapting relevant ALM core tests or explicitly defer them with reasons.
 - Decide whether current first-slice and initial migrated coverage is sufficient or add more dedicated SwiftAgent tests for local `GeneratedContent`, `GenerationSchema`, `DynamicGenerationSchema`, `GenerationGuide`, and `@Generable` parity.
-- Resolve canonical `Prompt`, `LanguageModel`, and `Availability` ownership for SwiftAgent or explicitly amend Phase 2 scope.
+- Resolve canonical `LanguageModel` and `Availability` ownership for SwiftAgent or explicitly amend Phase 2 scope.
 - Resolve the `GenerationOptions` / `JSONValue` slice.
 - Request approval for `JSONSchema` if the `GenerationOptions` / `JSONValue` slice naturally needs it.
 - Decide whether `PartialJSONDecoder` is needed in Phase 2 or explicitly deferred to Phase 3.

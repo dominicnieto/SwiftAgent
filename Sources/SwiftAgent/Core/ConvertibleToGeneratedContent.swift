@@ -39,4 +39,11 @@ where Element: ConvertibleToGeneratedContent {
     public var generatedContent: GeneratedContent {
         GeneratedContent(elements: self.map { $0.generatedContent })
     }
+
+    /// An instance that represents a prompt.
+    public var promptRepresentation: Prompt {
+        let combined = self.map { $0.promptRepresentation.description }
+            .joined(separator: "\n")
+        return Prompt(combined)
+    }
 }
