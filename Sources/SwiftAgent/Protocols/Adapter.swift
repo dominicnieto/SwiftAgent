@@ -1,9 +1,8 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 
-public protocol Adapter: Actor {
+public protocol Adapter: Actor, SendableMetatype {
   associatedtype GenerationOptions: AdapterGenerationOptions<Model>
   associatedtype Model: AdapterModel
   associatedtype Configuration: AdapterConfiguration

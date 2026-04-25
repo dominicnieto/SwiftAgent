@@ -124,6 +124,9 @@ Exit criteria:
 - SwiftAgent core no longer requires Apple FoundationModels.
 - Tool and structured output constraints use local core types.
 
+Implementation results for the first approved Phase 2 vertical slice are recorded in
+`docs/phase-2-canonical-types-results.md`.
+
 ## Phase 3: Merge Transcript and Streaming
 
 Goals:

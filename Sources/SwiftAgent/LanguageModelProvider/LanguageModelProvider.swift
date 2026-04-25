@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 
 public protocol LanguageModelProvider<SessionSchema>: AnyObject, Sendable {
   typealias Transcript = SwiftAgent.Transcript

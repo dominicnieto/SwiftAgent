@@ -1,6 +1,5 @@
 // By Dennis Müller
 
-import FoundationModels
 import OpenAI
 import OpenAISession
 import SwiftAgent
@@ -50,7 +49,7 @@ private struct RecordingSchema {
   @Tool var weather = WeatherTool()
 }
 
-private struct WeatherTool: FoundationModels.Tool {
+private struct WeatherTool: SwiftAgent.Tool {
   var name: String = "get_weather"
   var description: String = "Get current temperature for a given location."
 

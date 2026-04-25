@@ -2,7 +2,6 @@
 
 @testable import AnthropicSession
 import Foundation
-import FoundationModels
 @testable import SwiftAgent
 import SwiftAnthropic
 import Testing
@@ -119,14 +118,12 @@ struct AnthropicStreamingToolCallsNoArgsTests {
 
 // MARK: - Tool
 
-private struct PingTool: FoundationModels.Tool {
+private struct PingTool: SwiftAgent.Tool {
   var name: String = "ping"
   var description: String = "Returns pong with no arguments."
 
   @Generable
-  struct Arguments {
-    init() {}
-  }
+  struct Arguments {}
 
   func call(arguments: Arguments) async throws -> String {
     _ = arguments

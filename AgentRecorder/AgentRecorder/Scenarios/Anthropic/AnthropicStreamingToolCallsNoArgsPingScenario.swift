@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import AnthropicSession
-import FoundationModels
 import SwiftAgent
 
 enum AnthropicStreamingToolCallsNoArgsPingScenario {
@@ -42,14 +41,12 @@ private struct RecordingSchema {
   @Tool var ping = PingTool()
 }
 
-private struct PingTool: FoundationModels.Tool {
+private struct PingTool: SwiftAgent.Tool {
   var name: String = "ping"
   var description: String = "Returns pong with no arguments."
 
   @Generable
-  struct Arguments {
-    init() {}
-  }
+  struct Arguments {}
 
   func call(arguments: Arguments) async throws -> String {
     _ = arguments

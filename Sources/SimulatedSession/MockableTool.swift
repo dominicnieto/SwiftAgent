@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 import SwiftAgent
 
 /// A protocol that defines the interface for creating mockable versions of agent tools
@@ -38,7 +37,7 @@ public protocol MockableTool<Tool> where Tool.Arguments: Generable,
   ///
   /// This type must conform to `Tool` and its `Arguments` type must be `Encodable`
   /// to support JSON serialization in the simulation system.
-  associatedtype Tool: FoundationModels.Tool
+  associatedtype Tool: SwiftAgent.Tool
 
   /// The actual tool instance that this mock wraps.
   ///

@@ -1,6 +1,5 @@
 // By Dennis Müller
 
-import FoundationModels
 import SwiftAgent
 
 extension AnthropicAdapter {
@@ -42,7 +41,7 @@ extension AnthropicAdapter {
 }
 
 private extension AnthropicAdapter {
-  func callTool<T: FoundationModels.Tool>(
+  func callTool<T: SwiftAgent.Tool>(
     _ tool: T,
     with generatedContent: GeneratedContent,
   ) async throws -> T.Output where T.Output: ConvertibleToGeneratedContent {

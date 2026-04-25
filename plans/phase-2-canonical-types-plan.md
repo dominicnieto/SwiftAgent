@@ -129,8 +129,8 @@ Later implementation will likely touch these areas after approval:
 ## Dependency Impact Notes
 
 - No dependency changes are part of this planning phase.
-- `JSONSchema` may become a base dependency if ALM schema builders/converters are moved into `Sources/SwiftAgent`. Alternative: preserve or extend SwiftAgent's existing schema conversion helpers. This requires explicit approval before `Package.swift` changes.
-- `PartialJSONDecoder` may become a base dependency if Phase 3 adopts ALM's partial structured-output decoding for streaming snapshots. This should be decided with the streaming implementation plan, not in this planning-only phase.
+- `JSONSchema` should be treated as the likely provider-neutral dependency once ALM `GenerationOptions`, `JSONValue`, direct providers, or provider-neutral schema conversion move into `Sources/SwiftAgent`. It should not be avoided by hand-rewriting ALM JSON/schema logic. It still requires explicit approval before `Package.swift` changes.
+- `PartialJSONDecoder` should be treated as the likely dependency for ALM-style partial structured-output decoding once structured streaming or partial snapshots move into SwiftAgent. It does not replace transcript-first streaming reducers or provider event parsing. It still requires explicit approval before `Package.swift` changes.
 - `swift-syntax` version and macro target shape will need reconciliation when `@Generable`/`@Guide` and `@SessionSchema` converge.
 - `EventSource` version reconciliation is likely during provider migration because both packages use SSE support with different resolved versions.
 - `async-http-client` should remain confined to the copied ALM package unless an approved optional transport path is retained. Long-term provider integration should prefer SwiftAgent `HTTPClient` and replay.

@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 
 /// Combines a tool call, its streaming arguments, and the resulting payload into one typed record.
 ///
@@ -53,7 +52,7 @@ import FoundationModels
 ///   }
 /// }
 /// ```
-public struct ToolRun<Tool: FoundationModels.Tool>: Identifiable where Tool.Arguments: Generable,
+public struct ToolRun<Tool: SwiftAgent.Tool>: Identifiable where Tool.Arguments: Generable,
   Tool.Output: Generable {
   /// The arguments type for this tool.
   public typealias Arguments = Tool.Arguments

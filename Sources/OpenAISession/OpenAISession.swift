@@ -1,6 +1,5 @@
 // By Dennis Müller
 
-import FoundationModels
 import Observation
 import SwiftAgent
 import SwiftUI
@@ -44,7 +43,7 @@ public final class OpenAISession<
     apiKey: String,
   ) where
     SessionSchema == NoSchema,
-    repeat (each ToolType): FoundationModels.Tool,
+    repeat (each ToolType): SwiftAgent.Tool,
     repeat (each ToolType).Arguments: Generable,
     repeat (each ToolType).Output: Generable {
       var wrappedTools: [any SwiftAgentTool] = []
@@ -107,7 +106,7 @@ public final class OpenAISession<
     instructions: String = "",
     configuration: OpenAIConfiguration,
   ) where SessionSchema == NoSchema,
-    repeat (each ToolType): FoundationModels.Tool,
+    repeat (each ToolType): SwiftAgent.Tool,
     repeat (each ToolType).Arguments: Generable,
     repeat (each ToolType).Output: Generable {
       var wrappedTools: [any SwiftAgentTool] = []

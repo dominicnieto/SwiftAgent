@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import struct FoundationModels.GeneratedContent
 @testable import SwiftAgent
 import Testing
 

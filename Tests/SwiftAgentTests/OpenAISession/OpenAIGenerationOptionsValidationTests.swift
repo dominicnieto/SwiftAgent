@@ -1,6 +1,5 @@
 // By Dennis Müller
 
-import FoundationModels
 import OpenAI
 @testable import OpenAISession
 @testable import SwiftAgent

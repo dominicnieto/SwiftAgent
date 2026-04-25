@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 import SwiftAgent
 
 public struct OpenAIConfiguration: AdapterConfiguration {

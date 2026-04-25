@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 import Observation
 @_exported import SwiftAgent
 
@@ -35,7 +34,7 @@ public final class SimulatedSession<
     configuration: SimulationConfiguration,
   ) where
     SessionSchema == NoSchema,
-    repeat (each ToolType): FoundationModels.Tool,
+    repeat (each ToolType): SwiftAgent.Tool,
     repeat (each ToolType).Arguments: Generable,
     repeat (each ToolType).Output: Generable {
       var wrappedTools: [any SwiftAgentTool] = []

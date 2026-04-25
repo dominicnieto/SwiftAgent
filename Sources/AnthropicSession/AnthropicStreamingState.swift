@@ -1,6 +1,5 @@
 // By Dennis Müller
 
-import FoundationModels
 import SwiftAgent
 
 struct StreamingMessageState {

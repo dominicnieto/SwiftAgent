@@ -2,7 +2,6 @@
 
 @testable import AnthropicSession
 import Foundation
-import FoundationModels
 @testable import SwiftAgent
 import SwiftAnthropic
 import Testing
@@ -143,7 +142,7 @@ struct AnthropicStreamingToolCallsTests {
 
 // MARK: - Tool
 
-private struct WeatherTool: FoundationModels.Tool {
+private struct WeatherTool: SwiftAgent.Tool {
   var name: String = "get_weather"
   var description: String = "Get current weather for a given location."
 

@@ -49,6 +49,7 @@ AnyLanguageModel traits:
 - Heavy local runtime dependencies should be isolated behind optional provider targets/products.
 - SwiftPM traits are allowed, but use separate targets/products when that is clearer for users and CI.
 - Existing SwiftAgent transport, replay, and logging should win over importing a second long-term transport stack.
+- Do not hand-roll replacement JSON/schema infrastructure just to avoid an otherwise appropriate dependency. If moved AnyLanguageModel code naturally depends on `JSONSchema` or `PartialJSONDecoder`, prefer preserving the dependency-backed implementation and pause for an explicit dependency-addition approval instead of rewriting large portions of ALM logic.
 
 ## Dependency Classification
 
@@ -56,8 +57,8 @@ AnyLanguageModel traits:
 | --- | --- | --- | --- |
 | `swift-syntax` | No root manifest change needed | Base macro dependency | Both repos already use it. Reconcile version ranges when macro code is merged. |
 | `EventSource` | No root manifest change needed | Base dependency if SSE helper remains useful | SwiftAgent already depends on `EventSource` `1.2.0`; ALM uses `1.3.0`. Reconcile during provider migration. |
-| `JSONSchema` | Do not add until schema code is moved | Probably base `SwiftAgent` or internal replacement | Needed if ALM schema builders/converters remain. Decide in Phase 2 when canonical schema code is chosen. |
-| `PartialJSONDecoder` | Do not add until streaming structured output code is moved | Probably base `SwiftAgent` if used by core streaming | Useful for partial JSON snapshots. Add when Phase 3/4 needs it, not during copy-only Phase 1. |
+| `JSONSchema` | Do not add during copy-only Phase 1 | Likely base `SwiftAgent` once ALM `GenerationOptions`, `JSONValue`, direct providers, or provider-neutral schema conversion move into SwiftAgent | ALM uses `JSONSchema.JSONValue` heavily for custom options, provider request bodies, tool arguments, and schema conversion. Prefer adding it with approval over rewriting ALM JSON/schema logic. It does not replace SwiftAgent's `GenerationSchema`, stable encoding, transcript/replay, or provider-specific normalization requirements. |
+| `PartialJSONDecoder` | Do not add during copy-only Phase 1 | Likely base or internal dependency when structured streaming / partial snapshots move into SwiftAgent | Useful for partial structured-output decoding. It does not replace transcript-first streaming assembly, tool-call event handling, or provider stream parsing. Prefer adding it with approval if the merged streaming implementation uses ALM's partial decoding path. |
 | `async-http-client` | Keep inside copied ALM package only | Optional transport support or removed | SwiftAgent has `HTTPClient`, `URLSessionHTTPClient`, `HTTPReplayRecorder`, `NetworkLog`, and `AgentLog`. Prefer adapting ALM providers to SwiftAgent transport before making AHC part of the public package shape. |
 | `swift-transformers` | Keep inside copied ALM package only | Optional `SwiftAgentCoreML` target/product if retained | Should not affect base builds. CoreML provider work belongs after core/provider parity. |
 | `mlx-swift-lm` | Keep inside copied ALM package only | Optional `SwiftAgentMLX` target/product | Do not make base `SwiftAgent` depend on MLX. |
@@ -89,15 +90,16 @@ Dependency removal approval: Phase 1 should not remove dependencies from either 
 
 ### Phase 2: Canonical Core Types
 
-When core ALM files start moving into `Sources/SwiftAgent`, decide whether `JSONSchema` and `PartialJSONDecoder` become base dependencies.
+When core ALM files start moving into `Sources/SwiftAgent`, decide whether `JSONSchema` and `PartialJSONDecoder` become base dependencies based on the moved code, not on a preference to minimize dependencies at the cost of rewriting ALM logic.
 
 Do not add MLX, Llama, CoreML, or AsyncHTTPClient to the base target in this phase.
 
 Expected dependency decisions:
 
 - Reconcile `swift-syntax` macro dependency shape.
-- Decide whether `JSONSchema` is a real base dependency or whether existing SwiftAgent schema conversion code replaces it.
-- Decide whether `PartialJSONDecoder` is needed for canonical streaming structured output.
+- If `GenerationOptions`, `JSONValue`, direct providers, or provider-neutral schema conversion move into SwiftAgent, propose adding `JSONSchema` rather than rewriting ALM JSON/schema handling.
+- If structured streaming or partial snapshots move into SwiftAgent, propose adding `PartialJSONDecoder` if ALM's partial decoding path is still the chosen implementation.
+- Record what each dependency does and does not cover before requesting approval.
 
 Dependency removal approval: Before removing any dependency from either package, produce the removal proposal described in "Migration Principles" and wait for explicit approval.
 

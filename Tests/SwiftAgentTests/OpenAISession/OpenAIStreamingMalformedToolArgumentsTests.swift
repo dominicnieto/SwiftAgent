@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 import OpenAI
 @testable import OpenAISession
 @testable import SwiftAgent
@@ -65,7 +64,7 @@ struct OpenAIStreamingMalformedToolArgumentsTests {
 
 // MARK: - Tool
 
-private struct WeatherTool: FoundationModels.Tool {
+private struct WeatherTool: SwiftAgent.Tool {
   var name: String = "get_weather"
   var description: String = "Get current weather for a given location."
 

@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 
 public extension Transcript {
   /// Transcript materialized into strongly typed entries using a ``SessionSchema``.

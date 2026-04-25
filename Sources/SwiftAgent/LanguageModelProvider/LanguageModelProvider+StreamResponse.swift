@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 
 // MARK: - String Response Methods
 
@@ -135,7 +134,7 @@ public extension LanguageModelProvider {
   ///
   /// ## Example
   /// ```swift
-  /// import FoundationModels
+  /// import SwiftAgent
   /// import OpenAISession
   ///
   /// struct WeatherReport: StructuredOutput {
@@ -190,7 +189,7 @@ public extension LanguageModelProvider {
   ///
   /// ## Example
   /// ```swift
-  /// import FoundationModels
+  /// import SwiftAgent
   /// import OpenAISession
   ///
   /// @SessionSchema
@@ -252,7 +251,7 @@ public extension LanguageModelProvider {
   ///
   /// ## Example
   /// ```swift
-  /// import FoundationModels
+  /// import SwiftAgent
   /// import OpenAISession
   ///
   /// let article = "..."
@@ -312,7 +311,7 @@ public extension LanguageModelProvider {
   ///
   /// ## Example
   /// ```swift
-  /// import FoundationModels
+  /// import SwiftAgent
   /// import OpenAISession
   ///
   /// @SessionSchema
@@ -375,7 +374,7 @@ public extension LanguageModelProvider {
   ///
   /// ## Example
   /// ```swift
-  /// import FoundationModels
+  /// import SwiftAgent
   /// import OpenAISession
   ///
   /// struct WeatherReport: StructuredOutput {
@@ -428,7 +427,7 @@ public extension LanguageModelProvider {
   ///
   /// ## Example
   /// ```swift
-  /// import FoundationModels
+  /// import SwiftAgent
   /// import OpenAISession
   ///
   /// @SessionSchema
@@ -491,7 +490,7 @@ public extension LanguageModelProvider {
   ///
   /// ## Example
   /// ```swift
-  /// import FoundationModels
+  /// import SwiftAgent
   /// import OpenAISession
   ///
   /// @SessionSchema
@@ -557,7 +556,7 @@ public extension LanguageModelProvider {
   ///
   /// ## Example
   /// ```swift
-  /// import FoundationModels
+  /// import SwiftAgent
   /// import OpenAISession
   ///
   /// @SessionSchema
@@ -640,7 +639,7 @@ public extension LanguageModelProvider {
   ///
   /// ## Example
   /// ```swift
-  /// import FoundationModels
+  /// import SwiftAgent
   /// import OpenAISession
   ///
   /// @SessionSchema

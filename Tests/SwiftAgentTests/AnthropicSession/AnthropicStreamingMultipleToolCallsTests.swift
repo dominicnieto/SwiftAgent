@@ -2,7 +2,6 @@
 
 @testable import AnthropicSession
 import Foundation
-import FoundationModels
 @testable import SwiftAgent
 import SwiftAnthropic
 import Testing
@@ -150,7 +149,7 @@ struct AnthropicStreamingMultipleToolCallsTests {
 
 // MARK: - Tools
 
-private struct WeatherTool: FoundationModels.Tool {
+private struct WeatherTool: SwiftAgent.Tool {
   var name: String = "get_weather"
   var description: String = "Get current weather for a given location."
 
@@ -165,7 +164,7 @@ private struct WeatherTool: FoundationModels.Tool {
   }
 }
 
-private struct TimeTool: FoundationModels.Tool {
+private struct TimeTool: SwiftAgent.Tool {
   var name: String = "get_time"
   var description: String = "Get current local time for a given location."
 

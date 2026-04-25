@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 
 /// Describes how a tool run is decoded into schema-backed values.
 ///
@@ -11,7 +10,7 @@ import FoundationModels
 public protocol DecodableTool<DecodedToolRun>: SwiftAgentTool where BaseTool.Arguments: Generable,
   BaseTool.Output: Generable {
   /// The tool implementation being decoded.
-  associatedtype BaseTool: FoundationModels.Tool
+  associatedtype BaseTool: SwiftAgent.Tool
   /// Schema-specific projection used in resolved transcripts and snapshots.
   associatedtype DecodedToolRun: SwiftAgent.DecodedToolRun
   /// Converts a typed `ToolRun` into the schema-defined decoded representation.

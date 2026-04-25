@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 import SwiftAnthropic
 
 extension JSONSchema {
@@ -19,9 +18,9 @@ extension JSONSchema {
   }
 }
 
-/// FoundationModels glue
+/// SwiftAgent generation schema glue.
 extension GenerationSchema {
-  /// Convert a `GenerationSchema` (from FoundationModels) into an Anthropic `JSONSchema`.
+  /// Convert a local SwiftAgent `GenerationSchema` into an Anthropic `JSONSchema`.
   func asAnthropicJSONSchema(
     encoder: JSONEncoder? = nil,
     decoder: JSONDecoder? = nil,

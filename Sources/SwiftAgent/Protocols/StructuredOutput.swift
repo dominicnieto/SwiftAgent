@@ -1,11 +1,10 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 
 /// Names a schema SwiftAgent can generate directly as a typed value.
 ///
-/// Conforming types declare a `Schema` using FoundationModels' `@Generable` macro and expose a
+/// Conforming types declare a `Schema` using SwiftAgent's local `@Generable` macro and expose a
 /// stable `name` used to tag transcript segments. Add the type to a `@SessionSchema` type with
 /// `@StructuredOutput` to request the value, stream partial updates, and access decoded results.
 ///

@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 
 package enum RejectionReportDetailsExtractor {
   /// Extracts fallback detail values from rejection report generated content.

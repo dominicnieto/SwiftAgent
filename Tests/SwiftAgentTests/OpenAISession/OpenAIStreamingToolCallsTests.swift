@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 import OpenAI
 @testable import OpenAISession
 @testable import SwiftAgent
@@ -206,7 +205,7 @@ struct OpenAIStreamingToolCallsTests {
 
 // MARK: - Tools
 
-private struct WeatherTool: FoundationModels.Tool {
+private struct WeatherTool: SwiftAgent.Tool {
   var name: String = "get_weather"
   var description: String = "Get current temperature for a given location."
 

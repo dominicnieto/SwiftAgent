@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 import OpenAI
 
 extension JSONSchema {
@@ -19,9 +18,9 @@ extension JSONSchema {
   }
 }
 
-/// FoundationModels glue
+/// SwiftAgent generation schema glue.
 extension GenerationSchema {
-  /// Convert a `GenerationSchema` (from FoundationModels) into your local `JSONSchema`.
+  /// Convert a local SwiftAgent `GenerationSchema` into your local `JSONSchema`.
   func asJSONSchema(
     encoder: JSONEncoder? = nil,
     decoder: JSONDecoder? = nil,

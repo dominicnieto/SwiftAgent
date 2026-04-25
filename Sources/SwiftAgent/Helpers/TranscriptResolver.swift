@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 import OSLog
 
 /// Resolves raw transcript entries into your app's domain types.

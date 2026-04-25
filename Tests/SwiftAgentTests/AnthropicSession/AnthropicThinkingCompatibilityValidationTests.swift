@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 @testable import AnthropicSession
-import FoundationModels
 @testable import SwiftAgent
 import SwiftAnthropic
 import Testing

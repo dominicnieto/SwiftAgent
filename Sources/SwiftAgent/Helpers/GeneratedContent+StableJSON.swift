@@ -1,12 +1,11 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 
 extension GeneratedContent {
   /// A stable JSON string representation whose dictionary keys are deterministically sorted.
   ///
-  /// FoundationModels currently emits unsorted keys for `jsonString`, which produces semantically
+  /// Generated content can emit unsorted keys for `jsonString`, which produces semantically
   /// equivalent payloads that differ byte-for-byte. Those differences undermine response caching
   /// because requests miss whenever key order changes. This accessor reserializes the content with
   /// sorted keys so downstream systems receive a consistent payload while Apple works on an

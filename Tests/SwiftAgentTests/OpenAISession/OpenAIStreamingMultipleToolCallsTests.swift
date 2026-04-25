@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 import OpenAI
 @testable import OpenAISession
 @testable import SwiftAgent
@@ -224,7 +223,7 @@ struct OpenAIStreamingMultipleToolCallsTests {
 
 // MARK: - Tools
 
-private struct WeatherTool: FoundationModels.Tool {
+private struct WeatherTool: SwiftAgent.Tool {
   var name: String = "get_weather"
   var description: String = "Get current weather for a given location."
 
@@ -239,7 +238,7 @@ private struct WeatherTool: FoundationModels.Tool {
   }
 }
 
-private struct TimeTool: FoundationModels.Tool {
+private struct TimeTool: SwiftAgent.Tool {
   var name: String = "get_time"
   var description: String = "Get the current local time for a given location."
 

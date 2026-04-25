@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 
 /// A snapshot of the agent's current state during streamed generation.
 ///

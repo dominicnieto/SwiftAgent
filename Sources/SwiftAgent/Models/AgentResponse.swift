@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 
 /// The response returned from an agent's generation, containing generated content and metadata.
 ///

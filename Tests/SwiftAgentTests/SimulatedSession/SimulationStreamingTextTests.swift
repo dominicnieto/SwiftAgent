@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 @testable import SimulatedSession
 @testable import SwiftAgent
 import Testing

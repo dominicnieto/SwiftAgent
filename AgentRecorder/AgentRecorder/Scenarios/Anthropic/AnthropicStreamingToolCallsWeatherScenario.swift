@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import AnthropicSession
-import FoundationModels
 import SwiftAgent
 
 enum AnthropicStreamingToolCallsWeatherScenario {
@@ -38,7 +37,7 @@ enum AnthropicStreamingToolCallsWeatherScenario {
   )
 }
 
-private struct WeatherTool: FoundationModels.Tool {
+private struct WeatherTool: SwiftAgent.Tool {
   var name: String = "get_weather"
   var description: String = "Get current weather for a given location."
 

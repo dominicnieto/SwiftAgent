@@ -1,6 +1,5 @@
 // By Dennis Müller
 
-import FoundationModels
 import OpenAISession
 import SwiftAgent
 
@@ -47,7 +46,7 @@ private struct RecordingSchema {
   @Tool var time = TimeTool()
 }
 
-private struct WeatherTool: FoundationModels.Tool {
+private struct WeatherTool: SwiftAgent.Tool {
   var name: String = "get_weather"
   var description: String = "Get current weather for a given location."
 
@@ -62,7 +61,7 @@ private struct WeatherTool: FoundationModels.Tool {
   }
 }
 
-private struct TimeTool: FoundationModels.Tool {
+private struct TimeTool: SwiftAgent.Tool {
   var name: String = "get_time"
   var description: String = "Get the current local time for a given location."
 

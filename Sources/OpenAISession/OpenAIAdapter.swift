@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 import OpenAI
 import OSLog
 import SwiftAgent
@@ -375,7 +374,7 @@ public actor OpenAIAdapter: Adapter {
     continuation.yield(.transcript(entry))
   }
 
-  func callTool<T: FoundationModels.Tool>(
+  func callTool<T: SwiftAgent.Tool>(
     _ tool: T,
     with generatedContent: GeneratedContent,
   ) async throws -> T.Output where T.Output: ConvertibleToGeneratedContent {

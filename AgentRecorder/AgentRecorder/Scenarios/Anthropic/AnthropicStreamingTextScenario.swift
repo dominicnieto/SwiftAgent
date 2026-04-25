@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import AnthropicSession
-import FoundationModels
 import SwiftAgent
 
 enum AnthropicStreamingTextScenario {

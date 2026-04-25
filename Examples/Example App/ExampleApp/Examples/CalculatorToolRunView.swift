@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import struct FoundationModels.GeneratedContent
 import OpenAISession
 import SwiftUI
 

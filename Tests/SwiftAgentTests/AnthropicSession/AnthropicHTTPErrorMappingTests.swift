@@ -2,7 +2,6 @@
 
 @testable import AnthropicSession
 import Foundation
-import FoundationModels
 @testable import SwiftAgent
 import SwiftAnthropic
 import Testing

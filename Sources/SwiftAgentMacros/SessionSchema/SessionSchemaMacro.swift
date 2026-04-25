@@ -74,7 +74,7 @@ public struct SessionSchemaMacro: MemberMacro {
     members.append(
       """
       @propertyWrapper
-      struct Tool<ToolType: FoundationModels.Tool>
+      struct Tool<ToolType: SwiftAgent.Tool>
       where ToolType.Arguments: Generable, ToolType.Output: Generable {
         var wrappedValue: ToolType
         init(wrappedValue: ToolType) {

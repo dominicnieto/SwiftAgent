@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 
 /// Captures a single streamed update for a structured output while the agent responds.
 ///
