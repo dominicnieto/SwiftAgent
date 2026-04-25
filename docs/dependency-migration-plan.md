@@ -49,7 +49,7 @@ AnyLanguageModel traits:
 - Heavy local runtime dependencies should be isolated behind optional provider targets/products.
 - SwiftPM traits are allowed, but use separate targets/products when that is clearer for users and CI.
 - Existing SwiftAgent transport, replay, and logging should win over importing a second long-term transport stack.
-- Do not hand-roll replacement JSON/schema infrastructure just to avoid an otherwise appropriate dependency. If moved AnyLanguageModel code naturally depends on `JSONSchema` or `PartialJSONDecoder`, prefer preserving the dependency-backed implementation and pause for an explicit dependency-addition approval instead of rewriting large portions of ALM logic.
+- Do not hand-roll replacement JSON/schema infrastructure just to avoid an otherwise appropriate dependency. In merged Phase 2, `JSONSchema` and `PartialJSONDecoder` additions are approved when moved AnyLanguageModel code naturally depends on them; prefer preserving the dependency-backed implementation and record current users, affected targets, and validation evidence instead of rewriting large portions of ALM logic.
 
 ## Dependency Classification
 
@@ -57,17 +57,25 @@ AnyLanguageModel traits:
 | --- | --- | --- | --- |
 | `swift-syntax` | No root manifest change needed | Base macro dependency | Both repos already use it. Reconcile version ranges when macro code is merged. |
 | `EventSource` | No root manifest change needed | Base dependency if SSE helper remains useful | SwiftAgent already depends on `EventSource` `1.2.0`; ALM uses `1.3.0`. Reconcile during provider migration. |
-| `JSONSchema` | Do not add during copy-only Phase 1 | Likely base `SwiftAgent` once ALM `GenerationOptions`, `JSONValue`, direct providers, or provider-neutral schema conversion move into SwiftAgent | ALM uses `JSONSchema.JSONValue` heavily for custom options, provider request bodies, tool arguments, and schema conversion. Prefer adding it with approval over rewriting ALM JSON/schema logic. It does not replace SwiftAgent's `GenerationSchema`, stable encoding, transcript/replay, or provider-specific normalization requirements. |
-| `PartialJSONDecoder` | Do not add during copy-only Phase 1 | Likely base or internal dependency when structured streaming / partial snapshots move into SwiftAgent | Useful for partial structured-output decoding. It does not replace transcript-first streaming assembly, tool-call event handling, or provider stream parsing. Prefer adding it with approval if the merged streaming implementation uses ALM's partial decoding path. |
+| `JSONSchema` | Do not add during copy-only Phase 1 | Approved in merged Phase 2 when ALM `GenerationOptions`, `JSONValue`, direct providers, or provider-neutral schema conversion move into SwiftAgent | ALM uses `JSONSchema.JSONValue` heavily for custom options, provider request bodies, tool arguments, and schema conversion. Prefer adding it when needed over rewriting ALM JSON/schema logic. It does not replace SwiftAgent's `GenerationSchema`, stable encoding, transcript/replay, or provider-specific normalization requirements. |
+| `PartialJSONDecoder` | Do not add during copy-only Phase 1 | Approved in merged Phase 2 when structured streaming / partial snapshots move into SwiftAgent | Useful for partial structured-output decoding. It does not replace transcript-first streaming assembly, tool-call event handling, or provider stream parsing. Prefer adding it if the merged streaming implementation uses ALM's partial decoding path. |
 | `async-http-client` | Keep inside copied ALM package only | Optional transport support or removed | SwiftAgent has `HTTPClient`, `URLSessionHTTPClient`, `HTTPReplayRecorder`, `NetworkLog`, and `AgentLog`. Prefer adapting ALM providers to SwiftAgent transport before making AHC part of the public package shape. |
 | `swift-transformers` | Keep inside copied ALM package only | Optional `SwiftAgentCoreML` target/product if retained | Should not affect base builds. CoreML provider work belongs after core/provider parity. |
 | `mlx-swift-lm` | Keep inside copied ALM package only | Optional `SwiftAgentMLX` target/product | Do not make base `SwiftAgent` depend on MLX. |
 | `llama.swift` | Keep inside copied ALM package only | Optional `SwiftAgentLlama` target/product | Do not make base `SwiftAgent` depend on Llama. |
-| MacPaw `OpenAI` | Keep until direct OpenAI parity | Remove after Phase 4 parity | Current SwiftAgent provider tests depend on this SDK path. Remove only after replay parity proves replacement. |
-| `SwiftAnthropic` | Keep until direct Anthropic parity | Remove after Phase 5 parity | Current SwiftAgent provider tests depend on this SDK path. Remove only after replay parity proves replacement. |
+| MacPaw `OpenAI` | Keep until direct OpenAI parity | Remove after merged Phase 2 direct-provider parity | Current SwiftAgent provider tests depend on this SDK path. Remove only after replay parity proves replacement and explicit dependency-removal approval is granted. |
+| `SwiftAnthropic` | Keep until direct Anthropic parity | Remove after merged Phase 2 direct-provider parity | Current SwiftAgent provider tests depend on this SDK path. Remove only after replay parity proves replacement and explicit dependency-removal approval is granted. |
 | `swift-macro-testing` | Keep | Test-only dependency | No ALM conflict. |
 
 ## Phase Guidance
+
+The original split between Phase 2 canonical types, Phase 3 transcript/streaming, Phase 4 OpenAI,
+and Phase 5 Anthropic is superseded. These areas now move together in Phase 2 Core Model Stack
+Merge because their dependencies and types are architecturally coupled.
+
+Dependency decisions should support whole-feature movement. Do not rewrite ALM JSON/schema,
+streaming, or provider code to avoid a dependency, and do not introduce interim protocols or
+placeholder types just to keep a dependency or related type out of the current phase.
 
 ### Phase 1: Copy Source
 
@@ -88,38 +96,27 @@ Phase 1 exit should report the copied package build command/result and any depen
 
 Dependency removal approval: Phase 1 should not remove dependencies from either package. If a dependency appears obsolete during copy/build, document it only and wait for a later approved phase.
 
-### Phase 2: Canonical Core Types
+### Phase 2: Core Model Stack Merge
 
-When core ALM files start moving into `Sources/SwiftAgent`, decide whether `JSONSchema` and `PartialJSONDecoder` become base dependencies based on the moved code, not on a preference to minimize dependencies at the cost of rewriting ALM logic.
+When ALM core, session, transcript, streaming, and direct provider files move into `Sources/SwiftAgent`, move their real dependency-backed implementation unless there is a product reason to redesign it.
 
 Do not add MLX, Llama, CoreML, or AsyncHTTPClient to the base target in this phase.
 
-Expected dependency decisions:
+Approved dependency additions for this phase:
+
+- Add `JSONSchema` to the root package when moving `GenerationOptions`, `JSONValue`, direct provider request builders, provider-neutral schema conversion, or provider custom option payloads.
+- Add `PartialJSONDecoder` to the root package when moving structured streaming or partial snapshot decoding.
+
+Expected dependency work:
 
 - Reconcile `swift-syntax` macro dependency shape.
-- If `GenerationOptions`, `JSONValue`, direct providers, or provider-neutral schema conversion move into SwiftAgent, propose adding `JSONSchema` rather than rewriting ALM JSON/schema handling.
-- If structured streaming or partial snapshots move into SwiftAgent, propose adding `PartialJSONDecoder` if ALM's partial decoding path is still the chosen implementation.
-- Record what each dependency does and does not cover before requesting approval.
+- Reconcile `EventSource` versions while moving direct providers.
+- Keep SwiftAgent `HTTPClient`, `URLSessionHTTPClient`, `HTTPReplayRecorder`, `NetworkLog`, and `AgentLog` as the long-term transport/replay/logging direction.
+- Adapt ALM provider transport to SwiftAgent replay/logging rather than introducing a second long-term transport stack.
 
 Dependency removal approval: Before removing any dependency from either package, produce the removal proposal described in "Migration Principles" and wait for explicit approval.
 
-### Phase 3: Transcript and Streaming
-
-Add `PartialJSONDecoder` only if the merged streaming engine uses ALM's partial structured decoding approach.
-
-Keep transport and replay aligned with SwiftAgent:
-
-- `HTTPClient`
-- `URLSessionHTTPClient`
-- `HTTPReplayRecorder`
-- `NetworkLog`
-- `AgentLog`
-
-If AsyncHTTPClient support survives, keep it behind an explicit optional target/trait and make sure replay recording still works without it.
-
-Dependency removal approval: Before removing or disabling any transport/streaming dependency from either package, produce the removal proposal described in "Migration Principles" and wait for explicit approval.
-
-### Phase 4: OpenAI Provider
+OpenAI and Anthropic direct provider work is part of this same phase.
 
 Direct OpenAI provider code may require:
 
@@ -139,8 +136,6 @@ Remove MacPaw `OpenAI` only after:
 
 Dependency removal approval: Meeting these gates is not enough to remove MacPaw `OpenAI`; still present the removal proposal and wait for explicit approval.
 
-### Phase 5: Anthropic Provider
-
 Direct Anthropic provider code may require:
 
 - `EventSource`
@@ -159,7 +154,7 @@ Remove `SwiftAnthropic` only after:
 
 Dependency removal approval: Meeting these gates is not enough to remove `SwiftAnthropic`; still present the removal proposal and wait for explicit approval.
 
-### Phase 6: Other Providers
+### Phase 3: Other Providers
 
 Provider dependency placement:
 
@@ -192,7 +187,7 @@ Use traits only where they make dependency conditions clearer than separate prod
 
 ## Open Questions For Implementation Phases
 
-- Should `JSONSchema` remain a public dependency, or can SwiftAgent's existing schema conversion cover the merged API?
+- Should `JSONSchema` remain visible through public API surfaces beyond the `JSONValue` typealias, or stay an implementation dependency where possible?
 - Should `PartialJSONDecoder` be part of base streaming support, or isolated to structured-output internals?
 - Should AsyncHTTPClient support survive as an optional transport path after providers use SwiftAgent replay/logging?
 - Should `SystemLanguageModel` live in the base target with conditional import, or in a platform-specific optional target?

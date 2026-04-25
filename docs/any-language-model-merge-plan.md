@@ -80,132 +80,69 @@ Notes:
 - The final public API should be folded into SwiftAgent.
 - Prefer reviewable mechanical commits/patches: copy first, compile, then refactor.
 
-## Phase 2: Choose Canonical Core Types
+## Phase 2: Core Model Stack Merge
 
 Goals:
 
-- Remove duplicate type definitions by selecting one canonical implementation for each core concept.
-- Get approval for canonical type choices before implementation.
+- Replace the current split Phase 2/3/4/5 plan with one coherent model-stack merge.
+- Build whole features across their natural boundaries instead of stopping at artificial phase lines.
+- Converge core primitives, `GenerationOptions`, `LanguageModel`, `LanguageModelSession`, transcript/streaming, tool execution, OpenAI, and Anthropic as one architecture.
+- Preserve SwiftAgent's agent-grade transcript, replay, token usage, logging, and schema behavior while absorbing AnyLanguageModel's direct provider stack.
+- Avoid interim protocols, placeholder types, bridge sessions, or compatibility-only abstractions that would be removed later.
 
-Approval gate:
+Planning requirement:
 
-- Create `plans/phase-2-canonical-types-plan.md`.
-- Before editing implementation code, produce a summary of each duplicate concept and the proposed canonical source.
-- Wait for approval before replacing or merging the types.
+- Use `plans/phase-2-canonical-types-plan.md`.
+- Do not create separate Phase 3/4/5 plans for transcript/streaming/OpenAI/Anthropic; those are now workstreams inside this phase.
 
-Example approval table:
+Architecture rule:
 
-```text
-Concept               Proposed canonical source
-Generable             AnyLanguageModel
-GeneratedContent      AnyLanguageModel
-GenerationSchema      AnyLanguageModel
-Tool                  AnyLanguageModel
-GenerationOptions     AnyLanguageModel
-Transcript            merged, SwiftAgent-biased
-LanguageModelSession  merged, AnyLanguageModel provider boundary + SwiftAgent agent state
-```
+- If an ALM type naturally depends on another ALM architectural type, move or design the related type with it.
+- Do not introduce a smaller temporary protocol, typealias, wrapper, adapter, or placeholder only to keep an old phase boundary intact.
+- If a feature cannot be completed coherently in the current change, defer the whole feature or split it by durable product behavior, not by dependency avoidance.
+- Compatibility wrappers are acceptable only when they are thin convenience APIs over the canonical implementation and have a clear removal or permanence decision.
 
-Canonical starting points:
+Feature-complete workstreams:
 
-- Use AnyLanguageModel for `Generable`, `GeneratedContent`, `GenerationSchema`, `Prompt`, `Instructions`, `Tool`, `LanguageModel`, and `GenerationOptions`.
-- Use a merged transcript biased toward SwiftAgent's current agent transcript.
-- Use a merged `LanguageModelSession` that combines AnyLanguageModel's provider boundary with SwiftAgent's transcript, token usage, schema, and streaming requirements.
+- **Canonical core and options:** `Generable`, `GeneratedContent`, `GenerationSchema`, `DynamicGenerationSchema`, `GenerationGuide`, `Prompt`, `Instructions`, `Tool`, `Availability`, `GenerationOptions`, `JSONValue`, and provider-specific custom options compile through SwiftAgent's public API.
+- **Provider/session boundary:** `LanguageModel` and `LanguageModelSession(model:tools:instructions:)` become the real provider/session boundary. Existing `LanguageModelProvider`, `Adapter`, `OpenAISession`, and `AnthropicSession` may remain only as compatibility conveniences over the canonical engine or be removed once tests and examples move.
+- **Transcript and streaming:** the merged transcript supports instructions, prompts, reasoning, tool calls, tool output, responses, images, structured output source tracking, stable IDs, token usage outside transcript entries, replay-friendly coding, and snapshots derived from transcript/token state.
+- **Tool execution:** providers emit tool calls; the session owns execution policy, approval hooks, parallelism, retry/missing-tool behavior, and tool output transcript updates.
+- **OpenAI direct provider:** `OpenAILanguageModel` and `OpenResponsesLanguageModel` replace the MacPaw SDK path for text, structured output, tool calling, streaming, reasoning, metadata, and replay fixture coverage.
+- **Anthropic direct provider:** `AnthropicLanguageModel` replaces the SwiftAnthropic path for text, structured output, tool calling, streaming thinking/reasoning, metadata, and replay fixture coverage.
+- **Public package/API surface:** `import SwiftAgent` exposes the canonical core API through a `SwiftAgent` library product. Provider-session products may remain only as compatibility conveniences after parity decisions.
+- **AgentRecorder/examples/docs:** AgentRecorder and examples use the merged session/provider API once the provider paths are ready.
 
 Tasks:
 
-- Replace SwiftAgent's Apple FoundationModels imports with local core imports.
-- Update SwiftAgent protocols and macros to reference local core primitives.
-- Merge duplicate helpers around generated content and schema conversion.
-- Keep compatibility typealiases only where they do not hide duplicate implementations.
+- Finish convergence of local core primitives already started in the earlier canonical-type work.
+- Add `JSONSchema` and `PartialJSONDecoder` when moved ALM code needs them. These dependency additions are approved for this merged phase; dependency removals still require separate approval.
+- Move `GenerationOptions` with its real `LanguageModel` relationship rather than introducing an interim custom-options provider protocol.
+- Design and implement the canonical `LanguageModel`/`LanguageModelSession` surface before wiring provider-specific option and request paths that depend on it.
+- Merge transcript and streaming reducers before declaring direct providers migrated.
+- Replace OpenAI and Anthropic provider paths through direct ALM-derived providers only when transcript-first streaming, tool calls, structured output, token usage, metadata, and replay coverage are present.
+- Remove or deprecate old SDK adapter paths only after parity is proven and dependency removal is explicitly approved.
+- Keep heavy optional providers out of the base product unless separately approved.
+- Add the public `SwiftAgent` library product as part of exposing the canonical API.
 
 Exit criteria:
 
 - SwiftAgent core no longer requires Apple FoundationModels.
-- Tool and structured output constraints use local core types.
-
-Implementation results for the first approved Phase 2 vertical slice are recorded in
-`docs/phase-2-canonical-types-results.md`.
-
-## Phase 3: Merge Transcript and Streaming
-
-Goals:
-
-- Create one transcript model that works for FoundationModels-style usage and agent-grade UX.
-- Upgrade streaming to be transcript-first.
-- Add replay-friendly transcript versioning, diffing, and structured-output source tracking.
-
-Tasks:
-
-- Create `plans/phase-3-transcript-streaming-plan.md`.
-- Add `instructions` and `image` support to the SwiftAgent-style transcript.
-- Preserve `reasoning`, `status`, `callId`, structured segment type/source, grounding metadata, and transcript resolution.
-- Define internal model update events.
-- Define public snapshots with content, raw content, transcript, and token usage.
-- Move snapshot throttling into the canonical session engine.
-- Treat provider streaming gaps as priority blockers, not follow-up polish.
-- Add tests for transcript upsert behavior and final snapshot completeness.
-- Add transcript schema version and focused diff helpers for fixture review.
-- Track structured output source as provider-native, prompt-fallback, or constrained-decoder.
-
-Exit criteria:
-
+- `GenerationOptions`, `LanguageModel`, `LanguageModelSession`, transcript/streaming, OpenAI, and Anthropic are coherent parts of one stack.
 - Streaming snapshots are derived from transcript/token state.
 - Tool calls and tool outputs are visible during streaming.
 - Content-only snapshot streams are no longer the provider contract for agent-capable providers.
-
-## Phase 4: Replace OpenAI Provider Path
-
-Goals:
-
-- Remove the OpenAI SDK implementation path.
-- Route OpenAI generation through the direct AnyLanguageModel provider code.
-- Preserve `OpenAILanguageModel` and `OpenResponsesLanguageModel` as distinct providers.
-
-Tasks:
-
-- Create `plans/phase-4-openai-provider-plan.md`.
-- Move both `OpenAILanguageModel` and `OpenResponsesLanguageModel` into SwiftAgent's provider area.
-- Do not merge them into one provider unless a later design decision explicitly chooses that.
-- Map current SwiftAgent OpenAI model names and defaults.
-- Fold `OpenAIGenerationOptions` into canonical `GenerationOptions` custom options.
-- Upgrade OpenAI streaming provider events to emit transcript and token updates.
-- Surface normalized provider metadata, warnings, rate-limit details, and retry-after hints where OpenAI provides them.
-- Port OpenAI request/response fixture tests.
-- Delete or deprecate `OpenAIAdapter` once parity is proven.
-
-Exit criteria:
-
 - OpenAI text, structured output, tool calling, streaming, token usage, and reasoning tests pass through the direct provider path.
-- Package no longer needs MacPaw/OpenAI for OpenAI behavior.
 - OpenAI provider streaming emits transcript-first updates, including tool call argument deltas and reasoning events where available.
-
-## Phase 5: Replace Anthropic Provider Path
-
-Goals:
-
-- Remove the SwiftAnthropic implementation path.
-- Route Anthropic generation through the direct AnyLanguageModel provider code.
-
-Tasks:
-
-- Create `plans/phase-5-anthropic-provider-plan.md`.
-- Merge `AnthropicLanguageModel` into the provider area.
-- Map current SwiftAgent Anthropic model names and defaults.
-- Fold `AnthropicGenerationOptions` into canonical `GenerationOptions` custom options.
-- Upgrade Anthropic streaming provider events to emit transcript and token updates.
-- Preserve thinking/reasoning behavior and validation rules.
-- Surface normalized provider metadata, warnings, rate-limit details, and retry-after hints where Anthropic provides them.
-- Port Anthropic request/response fixture tests.
-- Delete or deprecate `AnthropicAdapter` once parity is proven.
-
-Exit criteria:
-
 - Anthropic text, structured output, tool calling, streaming, token usage, and reasoning tests pass through the direct provider path.
-- Package no longer needs SwiftAnthropic.
 - Anthropic provider streaming emits transcript-first updates, including tool use JSON deltas and thinking/signature deltas where available.
+- Package dependency removal proposals for MacPaw/OpenAI and SwiftAnthropic have explicit approval and evidence before removal.
+- `import SwiftAgent` exposes the canonical core API.
+- README/examples use the canonical merged session API.
 
-## Phase 6: Integrate Additional Providers
+Implementation results for earlier canonical-type work are recorded in `docs/phase-2-canonical-types-results.md`.
+
+## Phase 3: Integrate Additional Providers
 
 Goals:
 
@@ -214,7 +151,7 @@ Goals:
 
 Tasks:
 
-- Create `plans/phase-6-additional-providers-plan.md`.
+- Create `plans/phase-3-additional-providers-plan.md`.
 - Integrate `SystemLanguageModel` / Apple Foundation Models.
 - Integrate Gemini, Ollama, MLX, CoreML, Llama, and other OpenResponses-compatible providers.
 - Keep the core API folded into `SwiftAgent`.
@@ -232,7 +169,7 @@ Exit criteria:
 - Optional providers compile under intended platform/dependency conditions.
 - Provider differences are expressed through capabilities/options, not separate session architectures.
 
-## Phase 7: Cleanup and API Polish
+## Phase 4: Cleanup and API Polish
 
 Goals:
 
@@ -240,7 +177,7 @@ Goals:
 
 Tasks:
 
-- Create `plans/phase-7-cleanup-api-polish-plan.md`.
+- Create `plans/phase-4-cleanup-api-polish-plan.md`.
 - Delete unused adapter protocols and provider SDK helpers.
 - Delete duplicate transcript/session/option types.
 - Update README and examples.

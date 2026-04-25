@@ -149,7 +149,7 @@ Some AnyLanguageModel providers currently stream content snapshots and ignore or
 
 ### Duplicate Type Removal
 
-Removing duplicate `Transcript`, `LanguageModelSession`, and `GenerationOptions` types will touch many files and macros. This should be done in vertical slices with tests.
+Removing duplicate `Transcript`, `LanguageModelSession`, and `GenerationOptions` types will touch many files and macros. This should be done as durable feature work with tests. Do not create interim protocols, placeholder types, or bridge sessions just to split naturally connected architecture across old phase boundaries.
 
 ### Test Fixture Drift
 

@@ -1,111 +1,106 @@
-# Phase 2 Completion Checklist
+# Phase 2 Core Model Stack Merge Checklist
 
-## Phase Definition
+## Status
 
-Phase 2 is complete when SwiftAgent has a coherent local FoundationModels-style core replacement layer.
+Status: in progress / partially completed canonical core work.
 
-Phase 2 does not include transcript/session streaming redesign, direct OpenAI/Anthropic provider replacement, provider SDK removal, dependency removal, or optional local-provider product work.
+This checklist supersedes the earlier narrow Phase 2 checklist. The old plan separated canonical types, transcript/streaming, OpenAI provider replacement, and Anthropic provider replacement into separate phases. That split is no longer the working model because it encourages temporary protocols and compatibility scaffolding.
 
-Small implementation slices are allowed, but they are only a way to complete this checklist. They do not redefine Phase 2.
+Phase 2 now means the full core model stack merge:
 
-## Current Status
+- canonical core primitives and options
+- `LanguageModel`
+- `LanguageModelSession`
+- transcript-first streaming
+- tool execution policy
+- direct OpenAI provider parity
+- direct Anthropic provider parity
+- AgentRecorder/examples/docs migration to the canonical API
 
-Status: partial / local primitives, prompt ownership, defaulted-property parity, and initial ALM core test migration slices complete.
+## Rule
 
-The first Phase 2 implementation slice completed the local primitive stack and macro/reference updates recorded in `docs/phase-2-canonical-types-results.md`. Later slices resolved `@Generable` defaulted-property parity, completed canonical `Prompt` ownership, migrated focused ALM core tests for `ConvertibleToGeneratedContent`, `DynamicGenerationSchema`, `GenerationGuide`, `Prompt`, and `Instructions`, and moved the ALM-derived `Availability` primitive into SwiftAgent. Phase 2 remains incomplete because the broader merge docs still require additional canonical core work, especially `GenerationOptions`, `LanguageModel`, broader ALM core test migration/classification, and dependency decisions for any moved ALM JSON/schema/partial-decoding code.
+Build whole durable features across their natural boundaries.
 
-## Reconciliation Sources
+Do not introduce interim protocols, placeholder types, bridge sessions, adapter shims, or compatibility-only typealiases just to keep work inside an artificial phase boundary. If an ALM type naturally depends on `LanguageModel`, `LanguageModelSession`, `Transcript`, `GenerationOptions`, provider requests, or streaming events, move or design the connected pieces together.
 
-This checklist was reconciled against:
+## Reverification Summary
 
-- `docs/any-language-model-merge-plan.md`
-- `docs/any-language-model-merge-spec.md`
-- `docs/any-language-model-merge-decisions.md`
-- `docs/dependency-migration-plan.md`
-- `docs/merge-test-matrix.md`
-- `docs/package-layout-spec.md`
-- `docs/phase-0-inventory.md`
-- `docs/phase-1-copy-results.md`
-- `docs/phase-2-canonical-types-results.md`
-- `docs/agent-recorder-merge-plan.md`
-- `docs/provider-capability-streaming-reference.md`
-- `docs/streaming-provider-gaps-spec.md`
-- `plans/README.md`
-- `plans/phase-0-inventory-plan.md`
-- `plans/phase-1-copy-any-language-model-plan.md`
-- `plans/phase-2-canonical-types-plan.md`
+Reverified on April 25, 2026:
 
-## Completion Criteria
+- The previous completed primitive items are valid carry-forward work.
+- Those items should not be counted as completing the broader Phase 2 model-stack workstreams.
+- No completed item below was found to be false, but several old `Done` labels were narrowed to `Verified carry-forward` so they do not imply full session/provider/streaming completion.
+- `GenerationOptions`, `JSONValue`, `LanguageModel`, `LanguageModelSession`, transcript-first streaming, tool execution policy, OpenAI direct provider parity, Anthropic direct provider parity, and AgentRecorder/example migration remain not complete.
+
+Evidence checked:
+
+- `grep -RIn "FoundationModels" Sources Tests AgentRecorder Examples Package.swift` returned no results.
+- `Sources/SwiftAgent/Core/` contains the ALM-derived primitive files listed below.
+- No canonical SwiftAgent `GenerationOptions`, `JSONValue`, `LanguageModel`, or `LanguageModelSession(model:tools:instructions:)` implementation exists yet.
+- Current provider paths still reference `AdapterGenerationOptions`, `OpenAIGenerationOptions`, `AnthropicGenerationOptions`, and `SimulationGenerationOptions`.
+- `Package.swift` does not yet expose a `SwiftAgent` library product; public products are still provider-session shaped.
+- `README.md` still documents old `OpenAISession` / `AnthropicSession` usage and includes Apple `FoundationModels` imports.
+
+## Verified Carry-Forward Work
+
+The earlier canonical-type work remains valid and is recorded in `docs/phase-2-canonical-types-results.md`. These items are complete only for their stated primitive/macro/test scope.
 
 | Item | Status | Evidence / Notes |
 | --- | --- | --- |
-| SwiftAgent core no longer imports Apple `FoundationModels` for `Generable`, `GeneratedContent`, `GenerationSchema`, `Tool`, and related core constraints. | Done | Verified with `grep -RInE "import FoundationModels|FoundationModels\\." Sources Tests AgentRecorder Examples Package.swift`; no results. Apple FoundationModels compatibility remains only in copied ALM/SystemLanguageModel material for later phases. |
-| SwiftAgent owns local `GeneratedContent`. | Done | Implemented in `Sources/SwiftAgent/Core/GeneratedContent.swift`; compiled by `SwiftAgentTests` build and full test plan. Stable JSON behavior verified by `TranscriptCodableTests`. |
-| SwiftAgent owns local `Generable`. | Done | Implemented in `Sources/SwiftAgent/Core/Generable.swift`; consumed by SwiftAgent source, providers, examples, AgentRecorder scenarios, and tests. |
-| SwiftAgent owns local `GenerationSchema`. | Done | Implemented in `Sources/SwiftAgent/Core/GenerationSchema.swift`; current provider SDK schema conversion remained compatible under full `SwiftAgentTests`. |
-| SwiftAgent owns local `DynamicGenerationSchema`. | Done for first slice | Implemented in `Sources/SwiftAgent/Core/DynamicGenerationSchema.swift`. Dedicated ALM dynamic schema tests still need migration/classification before Phase 2 can be complete. |
-| SwiftAgent owns local `GenerationGuide`. | Done for first slice | Implemented in `Sources/SwiftAgent/Core/GenerationGuide.swift` and consumed by local `@Guide`. Dedicated ALM guide tests still need migration/classification before Phase 2 can be complete. |
-| SwiftAgent owns local `GenerationID`. | Done | Implemented in `Sources/SwiftAgent/Core/GenerationID.swift`. |
-| SwiftAgent owns local `Tool`. | Done | Implemented in `Sources/SwiftAgent/Core/Tool.swift`; provider/test/example/AgentRecorder tool conformances now use `SwiftAgent.Tool`. |
-| SwiftAgent owns local `Instructions`. | Done for first slice | Implemented in `Sources/SwiftAgent/Core/Instructions.swift`. Full transcript/session integration for instruction entries remains Phase 3/session work. |
-| Required conversion protocols are local. | Done | Implemented in `Sources/SwiftAgent/Core/ConvertibleFromGeneratedContent.swift` and `Sources/SwiftAgent/Core/ConvertibleToGeneratedContent.swift`. |
-| `@Generable` and `@Guide` macro wiring exists in SwiftAgent. | Done for first slice | Added `Sources/SwiftAgentMacros/GenerableMacro.swift`, `Sources/SwiftAgentMacros/GuideMacro.swift`, and `SwiftAgentMacroPlugin` registration. Macro test plan passed. Defaulted-property parity is tracked separately below and is now done. |
-| `@SessionSchema` emits local core types. | Done | `SessionSchemaMacro` emits `SwiftAgent.Tool`; macro expansion expectations updated and macro test plan passed. |
-| Existing transcript codable/stable JSON behavior still works. | Done | Focused `TranscriptCodableTests` passed; full `SwiftAgentTests` passed. |
-| Existing prompt/source rendering behavior still works. | Done | Full `SwiftAgentTests` passed in earlier slices. Current prompt slice passed focused `PromptBuilderTests`, migrated ALM `PromptTests`, and migrated ALM `InstructionsTests`. No transcript/source metadata redesign was attempted. |
-| Existing decodable tool schema behavior still works. | Done | Focused `DecodableToolJSONSchemaTests` passed; full `SwiftAgentTests` passed. |
-| Existing provider schema conversion through current SDK adapters still works. | Done | Full OpenAI/Anthropic/Simulated SwiftAgent test suite passed while MacPaw `OpenAI` and `SwiftAnthropic` remain in place. |
-| Example and AgentRecorder compile after local primitive adoption. | Done with environment note | ExampleApp iPhone 17 Pro simulator build passed. AgentRecorder compiled with `CODE_SIGNING_ALLOWED=NO`; plain AgentRecorder build is blocked locally by a missing Mac Development signing certificate. |
-| `External/AnyLanguageModel` remains intact. | Done | No uncommitted diffs under `External/AnyLanguageModel`; stray generated `External/.DS_Store` was removed. |
-| Root package dependencies remain unchanged. | Done | No uncommitted diffs in `Package.swift` or `Package.resolved`; no dependency additions/removals. |
-| Provider SDK replacement did not start. | Done | MacPaw `OpenAI` and `SwiftAnthropic` usage remains; no direct-provider migration or adapter deletion occurred. |
-| Phase 3 transcript/session streaming redesign did not start. | Done | No canonical transcript/session streaming reducer, provider capability model, or direct provider event stream was implemented in this slice. |
-| Relevant ALM core tests are moved/adapted or explicitly deferred with reasons. | Incomplete | Focused core migrations added SwiftAgent-native tests adapted from ALM for `ConvertibleToGeneratedContent`, `DynamicGenerationSchema`, `GenerationGuide`, `Prompt`, and `Instructions` under `Tests/SwiftAgentTests/Core/`; focused tests passed. Broader ALM core tests for generated content, schemas, transcript, generation options, and tool execution still need migration/classification. |
-| `Prompt` canonical ownership is implemented or explicitly tracked as remaining Phase 2 work. | Done | SwiftAgent's richer local `Prompt`/`PromptBuilder` remains the canonical prompt type. This slice added ALM-compatible `Prompt.description` and newline array prompt representation while preserving existing section/tag/source-rendering behavior. Verified by migrated ALM `PromptTests` and existing `PromptBuilderTests`. |
-| `LanguageModel` canonical ownership is implemented or explicitly tracked as remaining Phase 2 work. | Incomplete | Merge spec lists `LanguageModel` as a canonical primitive/provider boundary. This slice did not move ALM `LanguageModel` into SwiftAgent. |
-| `Availability` canonical ownership is implemented or explicitly tracked as remaining Phase 2 work. | Done | Implemented in `Sources/SwiftAgent/Core/Availability.swift` from the ALM primitive shape. Verified by focused `AvailabilityTests` for available/unavailable state, `Equatable`, `Hashable`, and `Sendable` behavior. |
-| `GenerationOptions` canonical decision is implemented or explicitly marked as remaining Phase 2 work. | Incomplete | Decisions/spec require unified `GenerationOptions`; this slice preserved provider-specific generation options and records the unified options work as a follow-up. |
-| `JSONValue` / `JSONSchema` dependency decision is resolved for Phase 2. | Incomplete | No `JSONValue`, direct provider request builders, or provider-neutral schema conversion moved into SwiftAgent yet. If they do, docs require proposing `JSONSchema` rather than rewriting around it, with explicit approval before `Package.swift` changes. |
-| `PartialJSONDecoder` decision is resolved for Phase 2. | Incomplete | No structured streaming engine or ALM partial snapshot path moved in this slice. Docs allow deferring this to the structured streaming/session work if Phase 2 does not need it. |
-| `@Generable` defaulted-property parity is resolved or explicitly deferred with approval. | Done | `Sources/SwiftAgentMacros/GenerableMacro.swift` now preserves stored-property default expressions in generated memberwise initializers and uses them for missing generated-content fields. Verified by `Tests/SwiftAgentTests/Protocols/GenerableMacroDefaultedPropertyTests.swift`, focused SwiftAgent test, macro test plan, full SwiftAgent test plan, and required builds. |
-| `docs/phase-2-canonical-types-results.md` records implementation status, commands, validation, dependency decisions, and deferred work. | Done | Results doc says `Phase 2 status: partial`, records validation, cleanup, dependency decisions, and follow-ups. |
+| SwiftAgent core no longer imports Apple `FoundationModels` for local core primitive constraints. | Verified carry-forward | Reverified with `grep`; no `FoundationModels` references remain in `Sources`, `Tests`, `AgentRecorder`, `Examples`, or `Package.swift`. |
+| SwiftAgent owns local `GeneratedContent`. | Verified carry-forward | Implemented in `Sources/SwiftAgent/Core/GeneratedContent.swift`; existing stable JSON behavior is carry-forward evidence, but broader transcript/session integration remains part of merged Phase 2. |
+| SwiftAgent owns local `Generable`. | Verified carry-forward | Implemented in `Sources/SwiftAgent/Core/Generable.swift`. |
+| SwiftAgent owns local `GenerationSchema`. | Verified carry-forward | Implemented in `Sources/SwiftAgent/Core/GenerationSchema.swift`; current provider SDK schema conversion remains old-adapter behavior until direct providers migrate. |
+| SwiftAgent owns local `DynamicGenerationSchema`. | Verified carry-forward | Implemented in `Sources/SwiftAgent/Core/DynamicGenerationSchema.swift`; broader ALM test migration can move with full stack work. |
+| SwiftAgent owns local `GenerationGuide`. | Verified carry-forward | Implemented in `Sources/SwiftAgent/Core/GenerationGuide.swift`; local `@Guide` wiring exists. |
+| SwiftAgent owns local `GenerationID`. | Verified carry-forward | Implemented in `Sources/SwiftAgent/Core/GenerationID.swift`. |
+| SwiftAgent owns local `Tool`. | Verified carry-forward | Implemented in `Sources/SwiftAgent/Core/Tool.swift`; this does not complete session-owned tool execution policy. |
+| SwiftAgent owns local `Instructions`. | Verified carry-forward | Implemented in `Sources/SwiftAgent/Core/Instructions.swift`; transcript/session instruction integration remains part of merged Phase 2. |
+| SwiftAgent owns local `Prompt` behavior. | Verified carry-forward | SwiftAgent prompt/source rendering remains canonical with ALM-compatible prompt tests migrated; prompt response-format/options integration remains part of merged transcript/session work. |
+| SwiftAgent owns local `Availability`. | Verified carry-forward | Implemented in `Sources/SwiftAgent/Core/Availability.swift` with focused tests. |
+| Required conversion protocols are local. | Verified carry-forward | Implemented in `Sources/SwiftAgent/Core/ConvertibleFromGeneratedContent.swift` and `Sources/SwiftAgent/Core/ConvertibleToGeneratedContent.swift`. |
+| `@Generable` and `@Guide` macro wiring exists in SwiftAgent. | Verified carry-forward | ALM macro implementations were folded into `SwiftAgentMacros`; defaulted-property parity was fixed. |
+| `@SessionSchema` emits local core types. | Verified carry-forward | Macro expansions use `SwiftAgent.Tool`; generated code still needs to align with the final merged transcript/session API when that API lands. |
+| Initial ALM core tests migrated. | Partial carry-forward | Focused tests for conversion, dynamic schema, guide, prompt, instructions, availability, and macro parity exist. More tests move with the relevant full feature workstreams. |
 
-## Remaining Phase 2 Work
+## Remaining Phase 2 Workstreams
 
-- Commit the current Availability canonical ownership slice if accepted.
-- Continue moving/adapting relevant ALM core tests or explicitly defer them with reasons.
-- Decide whether current first-slice and initial migrated coverage is sufficient or add more dedicated SwiftAgent tests for local `GeneratedContent`, `GenerationSchema`, `DynamicGenerationSchema`, `GenerationGuide`, and `@Generable` parity.
-- Resolve canonical `LanguageModel` ownership for SwiftAgent or explicitly amend Phase 2 scope.
-- Resolve the `GenerationOptions` / `JSONValue` slice.
-- Request approval for `JSONSchema` if the `GenerationOptions` / `JSONValue` slice naturally needs it.
-- Decide whether `PartialJSONDecoder` is needed in Phase 2 or explicitly deferred to Phase 3.
-- Update this checklist as items move to done.
+| Workstream | Status | Completion Meaning |
+| --- | --- | --- |
+| Canonical `GenerationOptions` / `JSONValue` / custom options | Not complete | Move ALM `GenerationOptions` with its real `LanguageModel` relationship. Add `JSONSchema` when moving `JSONValue` or provider request/custom option code. Do not introduce a smaller custom-options-only provider protocol. |
+| Canonical `LanguageModel` | Not complete | Move/design `LanguageModel` as the actual provider boundary used by direct providers and session APIs. |
+| Canonical `LanguageModelSession` | Not complete | Implement the real `LanguageModelSession(model:tools:instructions:)` engine with SwiftAgent transcript, token usage, replay/logging, schema, and tool policy behavior. |
+| Merged transcript | Not complete | Merge ALM additions into SwiftAgent's agent-grade transcript without losing reasoning, call IDs, statuses, source metadata, stable coding, or resolver behavior. |
+| Transcript-first streaming | Not complete | Providers emit rich events; session reduces them into transcript/token state; snapshots derive from that state. |
+| Tool execution policy | Not complete | Session owns tool execution, parallelism, retries, missing-tool behavior, failure behavior, and approval hooks. |
+| OpenAI direct provider parity | Not complete | `OpenAILanguageModel` and `OpenResponsesLanguageModel` pass text, structured output, tool, streaming, reasoning, token usage, metadata, and replay tests through the canonical session. |
+| Anthropic direct provider parity | Not complete | `AnthropicLanguageModel` passes text, structured output, tool, streaming thinking/reasoning, token usage, metadata, and replay tests through the canonical session. |
+| Public package/API surface | Not complete | `import SwiftAgent` exposes the canonical core API through a `SwiftAgent` library product. Provider-session products are removed or retained only as thin conveniences after parity decisions. |
+| AgentRecorder/examples/docs | Not complete | Public examples, `README.md`, and recorder scenarios use the canonical merged API after provider parity exists. |
+| Dependency removal proposals | Not complete | MacPaw `OpenAI` and `SwiftAnthropic` removal require explicit approval after parity evidence. |
 
-## Dependency Guidance
+## Approved Dependency Additions
 
-Do not rewrite AnyLanguageModel JSON/schema/provider code merely to avoid dependencies.
+The user approved adding these dependencies during the merged Phase 2 when the implementation needs them:
 
-`JSONSchema` is likely the correct provider-neutral dependency once AnyLanguageModel `GenerationOptions`, `JSONValue`, direct provider request builders, or provider-neutral schema conversion move into SwiftAgent.
+- `JSONSchema`
+- `PartialJSONDecoder`
 
-`PartialJSONDecoder` is likely the correct dependency when structured streaming or partial snapshots move into the merged session engine.
+Do not rewrite ALM JSON/schema or partial structured decoding code just to avoid these dependencies.
 
-Both still require explicit approval before editing `Package.swift`.
+## Still Requires Explicit Approval
 
-## Out Of Scope For Phase 2
-
-- Transcript/session streaming redesign.
-- Direct OpenAI provider replacement.
-- Direct Anthropic provider replacement.
-- Provider SDK removal.
-- Dependency removal.
-- Optional MLX/CoreML/Llama provider product work.
-- AgentRecorder migration to direct providers, except for compile fixes required by the local primitive slice.
+- Removing MacPaw `OpenAI`.
+- Removing `SwiftAnthropic`.
+- Removing dependencies from `External/AnyLanguageModel`.
+- Adding MLX, Llama, CoreML, or AsyncHTTPClient to the base SwiftAgent target.
+- Pruning or deleting `External/AnyLanguageModel`.
 
 ## Completion Rule
 
-Phase 2 is complete only when every completion criterion above is either:
+Phase 2 is complete only when every remaining workstream above is either:
 
-- `Done`, with evidence, or
-- `Deferred with approval`, with a reason and a later-phase owner.
+- implemented with validation evidence, or
+- explicitly deferred with a reason and a new owner phase that does not require temporary architecture in the meantime.
 
-If any criterion is still `In progress`, `Incomplete`, `Not verified`, or `Needs verification`, Phase 2 remains partial.
+An item must not be marked complete if it was satisfied by an interim protocol, placeholder type, bridge session, adapter shim, or compatibility-only typealias that exists only to avoid connected architecture.

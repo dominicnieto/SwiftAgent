@@ -134,7 +134,7 @@ It does not replace SwiftAgent's canonical `GenerationSchema`, stable generated-
 
 `PartialJSONDecoder` is likely useful when structured streaming and partial snapshots move into the merged session engine. It covers partial JSON decoding for partially generated structured output. It does not replace transcript-first streaming reducers, tool-call streaming events, provider event parsing, or token usage assembly.
 
-If a future slice moves ALM code that naturally depends on `JSONSchema` or `PartialJSONDecoder`, pause and request explicit dependency approval with current users, affected targets, replacement path, and test/build evidence. Prefer the dependency-backed ALM implementation over hand-rolling replacement JSON/schema infrastructure.
+For the merged Phase 2 model-stack work, adding `JSONSchema` and `PartialJSONDecoder` is approved when moved ALM code naturally needs them. Record the current users, affected targets, and validation evidence when editing `Package.swift`. Prefer the dependency-backed ALM implementation over hand-rolling replacement JSON/schema infrastructure. Dependency removals or replacements still require separate explicit approval.
 
 ## Transcript Model
 

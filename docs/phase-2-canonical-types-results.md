@@ -2,14 +2,21 @@
 
 ## Summary
 
-Implemented the first Phase 2 vertical slice for local FoundationModels-style primitives.
+Implemented the earlier Phase 2 canonical core work for local FoundationModels-style primitives.
 
-Phase 2 status: partial. Phase 2 is not complete. This result covers the first vertical slice:
+Planning update: the original split between Phase 2 canonical types, Phase 3 transcript/streaming,
+Phase 4 OpenAI, and Phase 5 Anthropic has been superseded. New implementation should use the
+updated `plans/phase-2-canonical-types-plan.md` and treat those areas as one coherent model-stack
+merge. Do not use this results file as justification for adding interim protocols, placeholder
+types, bridge sessions, or compatibility-only typealiases to preserve old phase boundaries.
+
+Phase 2 status: partial. Phase 2 is not complete. This result covers the earlier canonical core work:
 local core primitives, macro references, and the current provider/test/example call sites needed
 to consume those primitives. Later slices also resolved `@Generable` defaulted-property parity,
 migrated focused ALM core tests for canonical SwiftAgent primitives, and completed the Phase 2
 prompt ownership slice. Transcript/session/provider replacement, unified generation options,
-provider capabilities, and direct provider migration remain deferred to later approved slices.
+provider capabilities, and direct provider migration remain open workstreams in the merged Phase 2
+plan.
 
 SwiftAgent now owns ALM-derived local definitions for:
 
@@ -68,9 +75,8 @@ Dependency decisions:
 - No dependency removals.
 - `Package.swift` was not edited.
 - `JSONSchema` remains deferred until `GenerationOptions`, `JSONValue`, direct provider request
-  builders, or provider-neutral schema conversion move into SwiftAgent with explicit approval.
-- `PartialJSONDecoder` remains deferred until structured streaming / partial snapshot work needs it
-  with explicit approval.
+  builders, or provider-neutral schema conversion move into SwiftAgent.
+- `PartialJSONDecoder` remains deferred until structured streaming / partial snapshot work needs it.
 
 Validation succeeded:
 
@@ -142,9 +148,8 @@ Dependency decisions:
 - No dependency removals.
 - `Package.swift` was not edited.
 - `JSONSchema` remains deferred until `GenerationOptions`, `JSONValue`, direct provider request
-  builders, or provider-neutral schema conversion move into SwiftAgent with explicit approval.
-- `PartialJSONDecoder` remains deferred until structured streaming / partial snapshot work needs it
-  with explicit approval.
+  builders, or provider-neutral schema conversion move into SwiftAgent.
+- `PartialJSONDecoder` remains deferred until structured streaming / partial snapshot work needs it.
 
 Validation succeeded:
 
@@ -240,7 +245,7 @@ Dependency decisions:
 - `Package.swift` was not edited.
 - This prompt slice did not need `JSONSchema`, `JSONValue`, or `PartialJSONDecoder`.
 - For later `GenerationOptions` / `JSONValue` work, preserve the dependency-backed ALM path and
-  request explicit approval before adding `JSONSchema` to the root package.
+  use `JSONSchema` when the moved implementation naturally needs it.
 
 Validation succeeded:
 
@@ -283,8 +288,8 @@ Follow-ups:
 
 - Continue with feature-shaped Phase 2 blockers: `Availability`, `LanguageModel`, and
   `GenerationOptions` / `JSONValue`.
-- Ask for explicit `JSONSchema` approval before editing `Package.swift` for the
-  `GenerationOptions` / `JSONValue` slice.
+- Add `JSONSchema` when editing `Package.swift` for `GenerationOptions` / `JSONValue` if the
+  moved implementation naturally needs it, and record the validation evidence.
 - Broader ALM core tests for generated content, schemas, transcript, generation options, and tool
   execution still need migration/classification.
 
@@ -296,8 +301,8 @@ Final review on April 25, 2026:
   `.swiftpm/xcode/xcshareddata/xcschemes/*.xcscheme` changes.
 - Confirmed no `.DS_Store` files are present.
 - Confirmed MacPaw `OpenAI` and `SwiftAnthropic` dependencies/imports remain in place.
-- Confirmed this slice did not start Phase 3 transcript/session streaming redesign, Phase 4/5
-  provider replacement, dependency removal, or `External/AnyLanguageModel` pruning.
+- Confirmed this slice did not start the now-merged transcript/session streaming or direct-provider
+  replacement workstreams, dependency removal, or `External/AnyLanguageModel` pruning.
 
 Validation rerun during final review:
 
@@ -361,8 +366,9 @@ Dependency decisions:
   builders, or structured streaming code.
 - `LanguageModel` remains incomplete because the ALM protocol is coupled to the future canonical
   `LanguageModelSession` and unified `GenerationOptions` boundary.
-- `GenerationOptions` / `JSONValue` remains incomplete. Ask for explicit `JSONSchema` approval
-  before editing `Package.swift` for that slice if moved ALM code naturally needs it.
+- `GenerationOptions` / `JSONValue` remains incomplete. Add `JSONSchema` when editing
+  `Package.swift` for that slice if moved ALM code naturally needs it, and record the validation
+  evidence.
 
 Validation succeeded:
 
@@ -394,15 +400,15 @@ Follow-ups:
 
 - Resolve canonical `LanguageModel` ownership, or explicitly amend/defer that Phase 2 item with
   approval if its implementation requires pulling later `LanguageModelSession` work into Phase 2.
-- Resolve the `GenerationOptions` / `JSONValue` slice, including explicit `JSONSchema` approval if
-  required.
+- Resolve the `GenerationOptions` / `JSONValue` workstream, adding `JSONSchema` if the moved
+  implementation naturally needs it.
 - Continue ALM core test migration/classification for generated content, schemas, transcript,
   generation options, and tool execution.
 
 Review status:
 
 - No provider SDK replacement, dependency removal, `External/AnyLanguageModel` pruning, or
-  unapproved Phase 3/4/5 runtime behavior was done.
+  transcript/session/direct-provider runtime behavior was done.
 - Final review on April 25, 2026 rechecked the uncommitted scope: only `Availability` source/tests
   and Phase 2 tracking docs are changed.
 - Confirmed no uncommitted `Package.swift`, `Package.resolved`, `External/AnyLanguageModel`, or
@@ -535,6 +541,8 @@ The same target compiled with signing disabled using the command recorded above.
 
 ## Follow-ups
 
-- Decide in a later approved slice how much of ALM `GenerationOptions` should move into SwiftAgent without adding `JSONSchema` or other dependencies prematurely.
+- Resolve ALM `GenerationOptions` as part of the merged Phase 2 work, adding `JSONSchema` if the
+  moved implementation naturally needs it.
 - Move or adapt more ALM core tests for `GeneratedContent`, `GenerationSchema`, `DynamicGenerationSchema`, and `GenerationGuide`.
-- Keep transcript/session/provider replacement work for later phases; this slice only updated provider paths enough to consume local core primitives.
+- Keep transcript/session/provider replacement work in the remaining merged Phase 2 workstreams;
+  this slice only updated provider paths enough to consume local core primitives.
