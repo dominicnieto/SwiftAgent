@@ -10,9 +10,9 @@ Small implementation slices are allowed, but they are only a way to complete thi
 
 ## Current Status
 
-Status: partial / first vertical slice plus defaulted-property parity and initial ALM core test migration slices complete.
+Status: partial / local primitives, prompt ownership, defaulted-property parity, and initial ALM core test migration slices complete.
 
-The first Phase 2 implementation slice completed the local primitive stack and macro/reference updates recorded in `docs/phase-2-canonical-types-results.md`. The next slice resolved `@Generable` defaulted-property parity. The latest slice migrated focused ALM core tests for `ConvertibleToGeneratedContent`, `DynamicGenerationSchema`, and `GenerationGuide` into `SwiftAgentTests`. Phase 2 remains incomplete because the broader merge docs still require additional canonical core work, especially `Prompt`, `GenerationOptions`, `LanguageModel`, `Availability`, broader ALM core test migration/classification, and dependency decisions for any moved ALM JSON/schema/partial-decoding code.
+The first Phase 2 implementation slice completed the local primitive stack and macro/reference updates recorded in `docs/phase-2-canonical-types-results.md`. Later slices resolved `@Generable` defaulted-property parity, completed canonical `Prompt` ownership, migrated focused ALM core tests for `ConvertibleToGeneratedContent`, `DynamicGenerationSchema`, `GenerationGuide`, `Prompt`, and `Instructions`, and moved the ALM-derived `Availability` primitive into SwiftAgent. Phase 2 remains incomplete because the broader merge docs still require additional canonical core work, especially `GenerationOptions`, `LanguageModel`, broader ALM core test migration/classification, and dependency decisions for any moved ALM JSON/schema/partial-decoding code.
 
 ## Reconciliation Sources
 
@@ -63,7 +63,7 @@ This checklist was reconciled against:
 | Relevant ALM core tests are moved/adapted or explicitly deferred with reasons. | Incomplete | Focused core migrations added SwiftAgent-native tests adapted from ALM for `ConvertibleToGeneratedContent`, `DynamicGenerationSchema`, `GenerationGuide`, `Prompt`, and `Instructions` under `Tests/SwiftAgentTests/Core/`; focused tests passed. Broader ALM core tests for generated content, schemas, transcript, generation options, and tool execution still need migration/classification. |
 | `Prompt` canonical ownership is implemented or explicitly tracked as remaining Phase 2 work. | Done | SwiftAgent's richer local `Prompt`/`PromptBuilder` remains the canonical prompt type. This slice added ALM-compatible `Prompt.description` and newline array prompt representation while preserving existing section/tag/source-rendering behavior. Verified by migrated ALM `PromptTests` and existing `PromptBuilderTests`. |
 | `LanguageModel` canonical ownership is implemented or explicitly tracked as remaining Phase 2 work. | Incomplete | Merge spec lists `LanguageModel` as a canonical primitive/provider boundary. This slice did not move ALM `LanguageModel` into SwiftAgent. |
-| `Availability` canonical ownership is implemented or explicitly tracked as remaining Phase 2 work. | Incomplete | Merge spec lists `Availability` as a canonical model primitive. This slice did not move ALM `Availability` into SwiftAgent. |
+| `Availability` canonical ownership is implemented or explicitly tracked as remaining Phase 2 work. | Done | Implemented in `Sources/SwiftAgent/Core/Availability.swift` from the ALM primitive shape. Verified by focused `AvailabilityTests` for available/unavailable state, `Equatable`, `Hashable`, and `Sendable` behavior. |
 | `GenerationOptions` canonical decision is implemented or explicitly marked as remaining Phase 2 work. | Incomplete | Decisions/spec require unified `GenerationOptions`; this slice preserved provider-specific generation options and records the unified options work as a follow-up. |
 | `JSONValue` / `JSONSchema` dependency decision is resolved for Phase 2. | Incomplete | No `JSONValue`, direct provider request builders, or provider-neutral schema conversion moved into SwiftAgent yet. If they do, docs require proposing `JSONSchema` rather than rewriting around it, with explicit approval before `Package.swift` changes. |
 | `PartialJSONDecoder` decision is resolved for Phase 2. | Incomplete | No structured streaming engine or ALM partial snapshot path moved in this slice. Docs allow deferring this to the structured streaming/session work if Phase 2 does not need it. |
@@ -72,10 +72,10 @@ This checklist was reconciled against:
 
 ## Remaining Phase 2 Work
 
-- Commit the current prompt ownership and prompt/instructions test migration slice if accepted.
+- Commit the current Availability canonical ownership slice if accepted.
 - Continue moving/adapting relevant ALM core tests or explicitly defer them with reasons.
 - Decide whether current first-slice and initial migrated coverage is sufficient or add more dedicated SwiftAgent tests for local `GeneratedContent`, `GenerationSchema`, `DynamicGenerationSchema`, `GenerationGuide`, and `@Generable` parity.
-- Resolve canonical `LanguageModel` and `Availability` ownership for SwiftAgent or explicitly amend Phase 2 scope.
+- Resolve canonical `LanguageModel` ownership for SwiftAgent or explicitly amend Phase 2 scope.
 - Resolve the `GenerationOptions` / `JSONValue` slice.
 - Request approval for `JSONSchema` if the `GenerationOptions` / `JSONValue` slice naturally needs it.
 - Decide whether `PartialJSONDecoder` is needed in Phase 2 or explicitly deferred to Phase 3.

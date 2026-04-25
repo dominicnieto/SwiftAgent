@@ -13,6 +13,7 @@ provider capabilities, and direct provider migration remain deferred to later ap
 
 SwiftAgent now owns ALM-derived local definitions for:
 
+- `Availability`
 - `GeneratedContent`
 - `Generable`
 - `GenerationSchema`
@@ -328,6 +329,86 @@ Review status:
 
 - No review findings remain open for this prompt ownership and prompt/instructions test slice.
 - This implementation step is ready to commit.
+- Phase 2 remains partial according to `docs/phase-2-completion-checklist.md`.
+
+## Availability Canonical Ownership Slice
+
+Completed the next feature-shaped Phase 2 implementation step from
+`docs/phase-2-completion-checklist.md`: canonical `Availability` ownership.
+
+Implementation:
+
+- Added SwiftAgent's local `Availability<UnavailableReason>` primitive using the ALM source shape.
+- Preserved the ALM semantics: `.available`, `.unavailable(reason)`, and conditional
+  `Equatable`, `Hashable`, and `Sendable` conformances.
+- Added focused SwiftAgent-native Swift Testing coverage for available/unavailable state,
+  equality, hashing, and sendability across a task boundary.
+- Marked the `Availability` checklist item done with evidence.
+
+Files changed:
+
+- `Sources/SwiftAgent/Core/Availability.swift`
+- `Tests/SwiftAgentTests/Core/AvailabilityTests.swift`
+- `docs/phase-2-completion-checklist.md`
+- `docs/phase-2-canonical-types-results.md`
+
+Dependency decisions:
+
+- No dependency additions.
+- No dependency removals.
+- `Package.swift` was not edited.
+- This slice did not need `JSONSchema`, `JSONValue`, `PartialJSONDecoder`, provider request
+  builders, or structured streaming code.
+- `LanguageModel` remains incomplete because the ALM protocol is coupled to the future canonical
+  `LanguageModelSession` and unified `GenerationOptions` boundary.
+- `GenerationOptions` / `JSONValue` remains incomplete. Ask for explicit `JSONSchema` approval
+  before editing `Package.swift` for that slice if moved ALM code naturally needs it.
+
+Validation succeeded:
+
+```bash
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests -only-testing:SwiftAgentTests/AvailabilityTests test -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests build -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests test -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme ExampleApp -destination "platform=iOS Simulator,name=iPhone 17 Pro,OS=latest" build -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO build -quiet
+```
+
+Attempted and blocked by local environment:
+
+```bash
+swiftformat --config ".swiftformat" Sources/SwiftAgent/Core/Availability.swift Tests/SwiftAgentTests/Core/AvailabilityTests.swift
+which swiftformat || true
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" build -quiet
+```
+
+Results:
+
+```text
+zsh:1: command not found: swiftformat
+swiftformat not found
+No signing certificate "Mac Development" found: No "Mac Development" signing certificate matching team ID "7F6BJZY5B3" with a private key was found.
+```
+
+Follow-ups:
+
+- Resolve canonical `LanguageModel` ownership, or explicitly amend/defer that Phase 2 item with
+  approval if its implementation requires pulling later `LanguageModelSession` work into Phase 2.
+- Resolve the `GenerationOptions` / `JSONValue` slice, including explicit `JSONSchema` approval if
+  required.
+- Continue ALM core test migration/classification for generated content, schemas, transcript,
+  generation options, and tool execution.
+
+Review status:
+
+- No provider SDK replacement, dependency removal, `External/AnyLanguageModel` pruning, or
+  unapproved Phase 3/4/5 runtime behavior was done.
+- Final review on April 25, 2026 rechecked the uncommitted scope: only `Availability` source/tests
+  and Phase 2 tracking docs are changed.
+- Confirmed no uncommitted `Package.swift`, `Package.resolved`, `External/AnyLanguageModel`, or
+  `.swiftpm/xcode/xcshareddata/xcschemes/*.xcscheme` changes.
+- Confirmed no `.DS_Store` files are present.
+- The Availability canonical ownership slice is ready to commit.
 - Phase 2 remains partial according to `docs/phase-2-completion-checklist.md`.
 
 ## Source Movement
