@@ -4,10 +4,11 @@
 
 Implemented the first Phase 2 vertical slice for local FoundationModels-style primitives.
 
-Phase 2 status: partial. Phase 2 is not complete. This result covers only the first vertical slice: local core primitives,
-macro references, and the current provider/test/example call sites needed to consume those
-primitives. Transcript/session/provider replacement, unified generation options, provider
-capabilities, and direct provider migration remain deferred to later approved slices.
+Phase 2 status: partial. Phase 2 is not complete. This result covers the first vertical slice:
+local core primitives, macro references, and the current provider/test/example call sites needed
+to consume those primitives. A later slice also resolved `@Generable` defaulted-property parity.
+Transcript/session/provider replacement, unified generation options, provider capabilities, and
+direct provider migration remain deferred to later approved slices.
 
 SwiftAgent now owns ALM-derived local definitions for:
 
@@ -27,10 +28,103 @@ The slice also folded ALM's `@Generable` and `@Guide` macro implementations into
 
 No provider SDK replacement, direct-provider migration, dependency removal, or `External/AnyLanguageModel` pruning was done.
 
-Review cleanup removed the stray generated artifact `External/.DS_Store`. The
+Review cleanup removed stray generated artifacts `External/.DS_Store` and `./.DS_Store`. The
 `.swiftpm/xcode/xcshareddata/xcschemes/SwiftAgentMacroTests.xcscheme` diff was inspected and
 reverted as incidental Xcode metadata because the existing `TestAction` already referenced the
 macro test plan and the Phase 2 slice does not require scheme metadata changes.
+
+## Defaulted-Property Parity Slice
+
+Completed the next Phase 2 implementation step from `docs/phase-2-completion-checklist.md`:
+`@Generable` defaulted-property parity.
+
+Implementation:
+
+- `GenerableMacro` now records stored-property initializer expressions while extracting guided
+  properties.
+- Generated memberwise initializers preserve those defaults, so callers can omit defaulted
+  arguments just like Swift's native memberwise initializer.
+- Generated `init(_ generatedContent:)` uses explicit stored-property defaults when fields are
+  missing, while preserving explicit `null` as `nil` for optional fields.
+- Property type syntax is trimmed before macro code generation so optional detection is stable.
+
+Files changed:
+
+- `Sources/SwiftAgentMacros/GenerableMacro.swift`
+- `Tests/SwiftAgentTests/Protocols/GenerableMacroDefaultedPropertyTests.swift`
+- `docs/phase-2-completion-checklist.md`
+- `docs/phase-2-canonical-types-results.md`
+
+Dependency decisions:
+
+- No dependency additions.
+- No dependency removals.
+- `Package.swift` was not edited.
+- `JSONSchema` remains deferred until `GenerationOptions`, `JSONValue`, direct provider request
+  builders, or provider-neutral schema conversion move into SwiftAgent with explicit approval.
+- `PartialJSONDecoder` remains deferred until structured streaming / partial snapshot work needs it
+  with explicit approval.
+
+Validation succeeded:
+
+The same validation set was rerun during final review on April 25, 2026, with the same outcomes:
+
+```bash
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests -only-testing:SwiftAgentTests/GenerableMacroDefaultedPropertyTests test -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentMacroTests -testPlan SwiftAgentMacroTests test -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests build -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests test -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme ExampleApp -destination "platform=iOS Simulator,name=iPhone 17 Pro,OS=latest" build -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO build -quiet
+```
+
+Attempted and blocked by local environment:
+
+```bash
+swiftformat --config ".swiftformat" Sources/SwiftAgentMacros/GenerableMacro.swift Tests/SwiftAgentTests/Protocols/GenerableMacroDefaultedPropertyTests.swift
+which swiftformat || true
+```
+
+Result:
+
+```text
+zsh:1: command not found: swiftformat
+swiftformat not found
+```
+
+```bash
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" build -quiet
+```
+
+Result:
+
+```text
+No signing certificate "Mac Development" found: No "Mac Development" signing certificate matching team ID "7F6BJZY5B3" with a private key was found.
+```
+
+Failed during implementation and fixed:
+
+```bash
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests -only-testing:SwiftAgentTests/GenerableMacroDefaultedPropertyTests test -quiet
+```
+
+Result before the type-trimming fix:
+
+```text
+Cannot convert value of type 'GeneratedContent' to expected argument type 'String'
+```
+
+Transient validation issue from running two `xcodebuild` commands concurrently:
+
+```text
+unable to attach DB: error: accessing build database ".../XCBuildData/build.db": database is locked
+```
+
+Follow-ups:
+
+- Broader ALM core tests still need migration/classification before Phase 2 can be complete.
+- `Prompt`, `LanguageModel`, `Availability`, `GenerationOptions`, `JSONValue`/`JSONSchema`, and
+  `PartialJSONDecoder` checklist items remain unresolved or deferred pending later approved work.
 
 ## Source Movement
 
@@ -157,6 +251,5 @@ The same target compiled with signing disabled using the command recorded above.
 ## Follow-ups
 
 - Decide in a later approved slice how much of ALM `GenerationOptions` should move into SwiftAgent without adding `JSONSchema` or other dependencies prematurely.
-- Improve `@Generable` parity for defaulted stored properties instead of requiring explicit arguments where SwiftAgent relies on default member values.
 - Move or adapt more ALM core tests for `GeneratedContent`, `GenerationSchema`, `DynamicGenerationSchema`, and `GenerationGuide`.
 - Keep transcript/session/provider replacement work for later phases; this slice only updated provider paths enough to consume local core primitives.

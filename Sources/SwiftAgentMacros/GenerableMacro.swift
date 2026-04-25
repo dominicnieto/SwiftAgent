@@ -107,13 +107,17 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                 let identifier = binding.pattern.as(IdentifierPatternSyntax.self)
             {
                 let propertyName = identifier.identifier.text
-                let propertyType = binding.typeAnnotation?.type.description ?? "String"
+                let propertyType = (binding.typeAnnotation?.type.description ?? "String")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let defaultValue = binding.initializer?.value.description
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 let guideInfo = extractGuideInfo(from: varDecl.attributes)
 
                 properties.append(
                     PropertyInfo(
                         name: propertyName,
                         type: propertyType,
+                        defaultValue: defaultValue,
                         guide: guideInfo
                     )
                 )
@@ -482,7 +486,11 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         return "\(baseType).PartiallyGenerated"
     }
 
-    private static func getDefaultValue(for type: String) -> String {
+    private static func getDefaultValue(for type: String, explicitDefault: String? = nil) -> String {
+        if let explicitDefault {
+            return explicitDefault
+        }
+
         let trimmedType = type.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if trimmedType.hasSuffix("?") {
@@ -514,7 +522,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
     private static func generatePropertyAssignment(for property: PropertyInfo) -> String {
         let propertyName = property.name
         let propertyType = property.type.trimmingCharacters(in: .whitespacesAndNewlines)
-        let defaultValue = getDefaultValue(for: propertyType)
+        let defaultValue = getDefaultValue(for: propertyType, explicitDefault: property.defaultValue)
 
         switch propertyType {
         case "String":
@@ -555,7 +563,11 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         }
 
         let parameters = properties.map { prop in
-            "\(prop.name): \(prop.type)"
+            if let defaultValue = prop.defaultValue {
+                "\(prop.name): \(prop.type) = \(defaultValue)"
+            } else {
+                "\(prop.name): \(prop.type)"
+            }
         }.joined(separator: ", ")
 
         let assignments = properties.map { prop in
@@ -633,7 +645,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         properties: [PropertyInfo]
     ) -> DeclSyntax {
         let propertyExtractions = properties.map { prop in
-            generatePropertyExtraction(propertyName: prop.name, propertyType: prop.type)
+            generatePropertyExtraction(for: prop)
         }.joined(separator: "\n            ")
 
         if properties.isEmpty {
@@ -720,29 +732,31 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
         }
     }
 
-    private static func generatePropertyExtraction(propertyName: String, propertyType: String)
-        -> String
-    {
+    private static func generatePropertyExtraction(for property: PropertyInfo) -> String {
+        let propertyName = property.name
+        let propertyType = property.type
+        let defaultValue = getDefaultValue(for: propertyType, explicitDefault: property.defaultValue)
+
         switch propertyType {
         case "String":
             return """
-                self.\(propertyName) = try properties["\(propertyName)"]?.value(String.self) ?? ""
+                self.\(propertyName) = try properties["\(propertyName)"]?.value(String.self) ?? \(defaultValue)
                 """
         case "Int":
             return """
-                self.\(propertyName) = try properties["\(propertyName)"]?.value(Int.self) ?? 0
+                self.\(propertyName) = try properties["\(propertyName)"]?.value(Int.self) ?? \(defaultValue)
                 """
         case "Double":
             return """
-                self.\(propertyName) = try properties["\(propertyName)"]?.value(Double.self) ?? 0.0
+                self.\(propertyName) = try properties["\(propertyName)"]?.value(Double.self) ?? \(defaultValue)
                 """
         case "Float":
             return """
-                self.\(propertyName) = try properties["\(propertyName)"]?.value(Float.self) ?? 0.0
+                self.\(propertyName) = try properties["\(propertyName)"]?.value(Float.self) ?? \(defaultValue)
                 """
         case "Bool":
             return """
-                self.\(propertyName) = try properties["\(propertyName)"]?.value(Bool.self) ?? false
+                self.\(propertyName) = try properties["\(propertyName)"]?.value(Bool.self) ?? \(defaultValue)
                 """
         default:
             let isOptional = propertyType.hasSuffix("?")
@@ -767,7 +781,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                                 self.\(propertyName) = try value.value(\(baseType).self)
                             }
                         } else {
-                            self.\(propertyName) = nil
+                            self.\(propertyName) = \(defaultValue)
                         }
                         """
                 } else {
@@ -780,7 +794,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                                 self.\(propertyName) = try \(baseType)(value)
                             }
                         } else {
-                            self.\(propertyName) = nil
+                            self.\(propertyName) = \(defaultValue)
                         }
                         """
                 }
@@ -790,7 +804,7 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                     if let value = properties["\(propertyName)"] {
                         self.\(propertyName) = try \(propertyType)(value)
                     } else {
-                        self.\(propertyName) = [:]
+                        self.\(propertyName) = \(defaultValue)
                     }
                     """
             } else if isArray {
@@ -798,15 +812,17 @@ public struct GenerableMacro: MemberMacro, ExtensionMacro {
                     if let value = properties["\(propertyName)"] {
                         self.\(propertyName) = try \(propertyType)(value)
                     } else {
-                        self.\(propertyName) = []
+                        self.\(propertyName) = \(defaultValue)
                     }
                     """
             } else {
+                let missingAssignment = property.defaultValue
+                    ?? "try \(propertyType)(GeneratedContent(\"{}\"))"
                 return """
                     if let value = properties["\(propertyName)"] {
                         self.\(propertyName) = try \(propertyType)(value)
                     } else {
-                        self.\(propertyName) = try \(propertyType)(GeneratedContent("{}"))
+                        self.\(propertyName) = \(missingAssignment)
                     }
                     """
             }
@@ -1497,5 +1513,6 @@ private struct Constraints {
 private struct PropertyInfo {
     let name: String
     let type: String
+    let defaultValue: String?
     let guide: GuideInfo
 }
