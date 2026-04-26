@@ -496,6 +496,8 @@ public struct OpenAILanguageModel: LanguageModel {
         var entries: [Transcript.Entry] = []
         var text = ""
         var messages = messages
+        var lastMetadata: ResponseMetadata?
+        var lastTokenUsage: TokenUsage?
 
         // Loop until no more tool calls
         while true {
@@ -516,6 +518,9 @@ public struct OpenAILanguageModel: LanguageModel {
                 body: params,
                 responseType: ChatCompletions.Response.self
             )
+
+            lastMetadata = resp.responseMetadata(providerName: "OpenAI", defaultModelID: model)
+            lastTokenUsage = resp.usage?.tokenUsage
 
             guard let choice = resp.choices.first else {
                 throw OpenAILanguageModelError.noResponseGenerated
@@ -548,7 +553,9 @@ public struct OpenAILanguageModel: LanguageModel {
                     return LanguageModelSession.Response(
                         content: empty.content,
                         rawContent: empty.rawContent,
-                        transcriptEntries: entries
+                        transcriptEntries: entries,
+                        tokenUsage: lastTokenUsage,
+                        responseMetadata: lastMetadata
                     )
                 case .invocations(let invocations):
                     if !invocations.isEmpty {
@@ -576,7 +583,9 @@ public struct OpenAILanguageModel: LanguageModel {
             return LanguageModelSession.Response(
                 content: text as! Content,
                 rawContent: GeneratedContent(text),
-                transcriptEntries: entries
+                transcriptEntries: entries,
+                tokenUsage: lastTokenUsage,
+                responseMetadata: lastMetadata
             )
         }
 
@@ -585,7 +594,9 @@ public struct OpenAILanguageModel: LanguageModel {
         return LanguageModelSession.Response(
             content: content,
             rawContent: generatedContent,
-            transcriptEntries: entries
+            transcriptEntries: entries,
+            tokenUsage: lastTokenUsage,
+            responseMetadata: lastMetadata
         )
     }
 
@@ -600,6 +611,8 @@ public struct OpenAILanguageModel: LanguageModel {
         var text = ""
         var lastOutput: [JSONValue]?
         var messages = messages
+        var lastMetadata: ResponseMetadata?
+        var lastTokenUsage: TokenUsage?
 
             // Loop until no more tool calls
             while true {
@@ -621,6 +634,9 @@ public struct OpenAILanguageModel: LanguageModel {
                 responseType: Responses.Response.self
             )
 
+            lastMetadata = resp.responseMetadata(providerName: "OpenAI", defaultModelID: model)
+            lastTokenUsage = resp.usage?.tokenUsage
+
             let toolCalls = extractToolCallsFromOutput(resp.output)
             lastOutput = resp.output
             if !toolCalls.isEmpty {
@@ -639,7 +655,9 @@ public struct OpenAILanguageModel: LanguageModel {
                     return LanguageModelSession.Response(
                         content: empty.content,
                         rawContent: empty.rawContent,
-                        transcriptEntries: entries
+                        transcriptEntries: entries,
+                        tokenUsage: lastTokenUsage,
+                        responseMetadata: lastMetadata
                     )
                 case .invocations(let invocations):
                     if !invocations.isEmpty {
@@ -650,7 +668,7 @@ public struct OpenAILanguageModel: LanguageModel {
                             entries.append(.toolOutput(output))
                             messages.append(
                                 OpenAIMessage(
-                                    role: .tool(id: invocation.call.id),
+                                    role: .tool(id: invocation.call.callId),
                                     content: .text(convertSegmentsToToolContentString(output.segments))
                                 )
                             )
@@ -669,7 +687,9 @@ public struct OpenAILanguageModel: LanguageModel {
             return LanguageModelSession.Response(
                 content: text as! Content,
                 rawContent: GeneratedContent(text),
-                transcriptEntries: entries
+                transcriptEntries: entries,
+                tokenUsage: lastTokenUsage,
+                responseMetadata: lastMetadata
             )
         }
 
@@ -679,7 +699,9 @@ public struct OpenAILanguageModel: LanguageModel {
             return LanguageModelSession.Response(
                 content: content,
                 rawContent: generatedContent,
-                transcriptEntries: entries
+                transcriptEntries: entries,
+                tokenUsage: lastTokenUsage,
+                responseMetadata: lastMetadata
             )
         }
         throw OpenAILanguageModelError.noResponseGenerated
@@ -787,6 +809,12 @@ public struct OpenAILanguageModel: LanguageModel {
                                     case .completed(let response):
                                         if let usage = response?.usage?.tokenUsage {
                                             continuation.yield(.init(tokenUsage: usage))
+                                        }
+                                        if let metadata = response?.responseMetadata(
+                                            providerName: "OpenAI",
+                                            defaultModelID: model
+                                        ) {
+                                            continuation.yield(.init(responseMetadata: metadata))
                                         }
 
                                     case .ignored:
@@ -1037,7 +1065,17 @@ private enum ChatCompletions {
 
     struct Response: Decodable, Sendable {
         let id: String
+        let model: String?
         let choices: [Choice]
+        let usage: OpenAIUsage?
+
+        func responseMetadata(providerName: String, defaultModelID: String) -> ResponseMetadata {
+            ResponseMetadata(
+                id: id,
+                providerName: providerName,
+                modelID: model ?? defaultModelID
+            )
+        }
 
         struct Choice: Codable, Sendable {
             let message: Message
@@ -1286,17 +1324,29 @@ private enum Responses {
 
     struct Response: Decodable, Sendable {
         let id: String
+        let model: String?
         let output: [JSONValue]?
         let error: [JSONValue]?
         let outputText: String?
         let finishReason: String?
+        let usage: OpenAIUsage?
 
         private enum CodingKeys: String, CodingKey {
             case id
+            case model
             case output
             case outputText = "output_text"
             case finishReason = "finish_reason"
             case error = "error"
+            case usage
+        }
+
+        func responseMetadata(providerName: String, defaultModelID: String) -> ResponseMetadata {
+            ResponseMetadata(
+                id: id,
+                providerName: providerName,
+                modelID: model ?? defaultModelID
+            )
         }
     }
 }
@@ -1702,6 +1752,14 @@ private struct OpenAIResponseCompleted: Decodable, Sendable {
     let id: String?
     let model: String?
     let usage: OpenAIUsage?
+
+    func responseMetadata(providerName: String, defaultModelID: String) -> ResponseMetadata {
+        ResponseMetadata(
+            id: id,
+            providerName: providerName,
+            modelID: model ?? defaultModelID
+        )
+    }
 }
 
 private struct OpenAIUsage: Decodable, Sendable {
@@ -1729,9 +1787,23 @@ private struct OpenAIUsage: Decodable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case inputTokens = "input_tokens"
+        case promptTokens = "prompt_tokens"
         case outputTokens = "output_tokens"
+        case completionTokens = "completion_tokens"
         case totalTokens = "total_tokens"
         case outputTokensDetails = "output_tokens_details"
+        case completionTokensDetails = "completion_tokens_details"
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        inputTokens = try container.decodeIfPresent(Int.self, forKey: .inputTokens)
+            ?? container.decodeIfPresent(Int.self, forKey: .promptTokens)
+        outputTokens = try container.decodeIfPresent(Int.self, forKey: .outputTokens)
+            ?? container.decodeIfPresent(Int.self, forKey: .completionTokens)
+        totalTokens = try container.decodeIfPresent(Int.self, forKey: .totalTokens)
+        outputTokensDetails = try container.decodeIfPresent(OutputTokensDetails.self, forKey: .outputTokensDetails)
+            ?? container.decodeIfPresent(OutputTokensDetails.self, forKey: .completionTokensDetails)
     }
 }
 

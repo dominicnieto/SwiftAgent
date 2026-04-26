@@ -1,42 +1,34 @@
-// By Dennis Müller
+// By Dennis Muller
 
-import OpenAISession
 import SwiftAgent
 
 enum OpenAIToolCallsWeatherScenario {
-  /// Matches: `Tests/SwiftAgentTests/OpenAISession/OpenAIToolCallsTests.swift`
   static let scenario = AgentRecorderScenario(
     id: "openai/tool-calls/weather",
     provider: .openAI,
-    unitTestFile: "Tests/SwiftAgentTests/OpenAISession/OpenAIToolCallsTests.swift",
+    unitTestFile: "Tests/SwiftAgentTests/Core/DirectProviderReplayTests.swift",
     expectedRecordedResponsesCount: 2,
     run: { recorder, secrets in
-      let configuration = try OpenAIConfiguration.recording(
-        apiKey: secrets.openAIAPIKey(),
-        recorder: recorder,
+      let apiKey = try secrets.openAIAPIKey()
+      let model = OpenAILanguageModel(
+        apiKey: apiKey,
+        model: "gpt-4o",
+        apiVariant: .responses,
+        httpClient: OpenAIRecordingHTTPClient.make(apiKey: apiKey, recorder: recorder),
       )
-
-      let session = OpenAISession(
-        schema: RecordingSchema(),
+      let session = LanguageModelSession(
+        model: model,
+        tools: [WeatherTool()],
         instructions: """
         Always call `get_weather` exactly once before answering.
         Call it with exactly: { "location": "New York City, USA" }.
         After tool output, reply with exactly: Done.
         """,
-        configuration: configuration,
       )
 
-      _ = try await session.respond(
-        to: "What is the weather in New York City, USA?",
-        using: .gpt4o,
-      )
+      _ = try await session.respond(to: "What is the weather in New York City, USA?")
     },
   )
-}
-
-@SessionSchema
-private struct RecordingSchema {
-  @Tool var weather = WeatherTool()
 }
 
 private struct WeatherTool: SwiftAgent.Tool {

@@ -2,7 +2,7 @@
 
 ## Phase Goal
 
-Mechanically copy the full `/Users/dominicnieto/Desktop/AnyLanguageModel` repository into SwiftAgent as first-class repo content while preserving its layout and dependency graph. This phase is copy-only and must not perform semantic convergence, provider integration, dependency migration into SwiftAgent, or canonical type selection.
+Mechanically copy the full `/Users/dominicnieto/Desktop/AnyLanguageModel` repository into SwiftAgent as first-class repo content while preserving its layout and dependency graph. This phase is copy-only and must not perform semantic convergence, provider integration, dependency migration into SwiftAgent, or main type selection.
 
 ## Source Docs Read
 
@@ -30,7 +30,7 @@ Mechanically copy the full `/Users/dominicnieto/Desktop/AnyLanguageModel` reposi
 - Do not integrate ALM providers into SwiftAgent targets.
 - Do not add ALM dependencies to SwiftAgent's root `Package.swift`.
 - Do not remove dependencies from SwiftAgent or the copied ALM package.
-- Do not start Phase 2 or choose canonical implementations.
+- Do not start Phase 2 or choose main implementations.
 
 ## Files And Areas Expected To Change
 

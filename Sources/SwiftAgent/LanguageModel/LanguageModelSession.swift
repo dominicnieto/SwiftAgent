@@ -1,6 +1,6 @@
 import Foundation
 
-/// A canonical session that coordinates a language model, tools, instructions, transcript, and usage state.
+/// Main session that coordinates a language model, tools, instructions, transcript, and usage state.
 public final class LanguageModelSession: @unchecked Sendable {
   private let model: any LanguageModel
   private let state: Locked<State>
@@ -34,6 +34,11 @@ public final class LanguageModelSession: @unchecked Sendable {
   /// Cumulative token usage reported by the model during this session.
   public var tokenUsage: TokenUsage? {
     state.withLock { $0.tokenUsage }
+  }
+
+  /// Metadata reported for the latest provider response in this session.
+  public var responseMetadata: ResponseMetadata? {
+    state.withLock { $0.responseMetadata }
   }
 
   /// Creates a session with a model, tools, and instructions.
@@ -104,6 +109,7 @@ public final class LanguageModelSession: @unchecked Sendable {
     recordProviderEntries(response.transcriptEntries)
     recordResponse(rawContent: response.rawContent, status: .completed)
     recordTokenUsage(response.tokenUsage)
+    recordResponseMetadata(response.responseMetadata)
 
     return response
   }
@@ -136,6 +142,7 @@ public final class LanguageModelSession: @unchecked Sendable {
           for try await snapshot in upstream {
             self.recordProviderEntries(snapshot.transcriptEntries)
             self.recordTokenUsage(snapshot.tokenUsage)
+            self.recordResponseMetadata(snapshot.responseMetadata)
 
             if let rawContent = snapshot.rawContent {
               self.recordResponse(rawContent: rawContent, status: .inProgress)
@@ -146,9 +153,12 @@ public final class LanguageModelSession: @unchecked Sendable {
               rawContent: snapshot.rawContent,
               transcript: self.transcript,
               tokenUsage: self.tokenUsage,
+              responseMetadata: self.responseMetadata,
               transcriptEntries: snapshot.transcriptEntries,
             )
-            lastSnapshot = derived
+            if derived.rawContent != nil || lastSnapshot == nil {
+              lastSnapshot = derived
+            }
             continuation.yield(derived)
           }
 
@@ -159,6 +169,7 @@ public final class LanguageModelSession: @unchecked Sendable {
               rawContent: rawContent,
               transcript: self.transcript,
               tokenUsage: self.tokenUsage,
+              responseMetadata: self.responseMetadata,
             ))
           }
 
@@ -236,17 +247,22 @@ public extension LanguageModelSession {
     /// Token usage reported for this response.
     public let tokenUsage: TokenUsage?
 
+    /// Provider metadata reported for this response.
+    public let responseMetadata: ResponseMetadata?
+
     /// Creates a complete response.
     public init(
       content: Content,
       rawContent: GeneratedContent,
       transcriptEntries: [Transcript.Entry] = [],
       tokenUsage: TokenUsage? = nil,
+      responseMetadata: ResponseMetadata? = nil,
     ) {
       self.content = content
       self.rawContent = rawContent
       self.transcriptEntries = transcriptEntries
       self.tokenUsage = tokenUsage
+      self.responseMetadata = responseMetadata
     }
   }
 
@@ -256,11 +272,17 @@ public extension LanguageModelSession {
     private let stream: AsyncThrowingStream<Snapshot, any Error>?
 
     /// Creates a stream with one already-complete snapshot.
-    public init(content: Content, rawContent: GeneratedContent, tokenUsage: TokenUsage? = nil) {
+    public init(
+      content: Content,
+      rawContent: GeneratedContent,
+      tokenUsage: TokenUsage? = nil,
+      responseMetadata: ResponseMetadata? = nil,
+    ) {
       fallbackSnapshot = Snapshot(
         content: content.asPartiallyGenerated(),
         rawContent: rawContent,
         tokenUsage: tokenUsage,
+        responseMetadata: responseMetadata,
       )
       stream = nil
     }
@@ -285,6 +307,9 @@ public extension LanguageModelSession {
       /// Token usage state after applying this snapshot.
       public var tokenUsage: TokenUsage?
 
+      /// Provider metadata state after applying this snapshot.
+      public var responseMetadata: ResponseMetadata?
+
       /// Provider-emitted transcript entries represented by this snapshot.
       public var transcriptEntries: [Transcript.Entry]
 
@@ -294,18 +319,20 @@ public extension LanguageModelSession {
         rawContent: GeneratedContent? = nil,
         transcript: Transcript = Transcript(),
         tokenUsage: TokenUsage? = nil,
+        responseMetadata: ResponseMetadata? = nil,
         transcriptEntries: [Transcript.Entry] = [],
       ) {
         self.content = content
         self.rawContent = rawContent
         self.transcript = transcript
         self.tokenUsage = tokenUsage
+        self.responseMetadata = responseMetadata
         self.transcriptEntries = transcriptEntries
       }
     }
   }
 
-  /// Errors produced by canonical model sessions.
+  /// Errors produced by main model sessions.
   enum GenerationError: Error, LocalizedError {
     /// Context describing a generation failure.
     public struct Context: Sendable {
@@ -521,6 +548,7 @@ extension LanguageModelSession.ResponseStream: AsyncSequence {
       rawContent: rawContent,
       transcriptEntries: lastSnapshot.transcriptEntries,
       tokenUsage: lastSnapshot.tokenUsage,
+      responseMetadata: lastSnapshot.responseMetadata,
     )
   }
 }
@@ -595,6 +623,14 @@ private extension LanguageModelSession {
       } else {
         state.tokenUsage?.merge(usage)
       }
+    }
+  }
+
+  func recordResponseMetadata(_ metadata: ResponseMetadata?) {
+    guard let metadata else { return }
+
+    state.withLock { state in
+      state.responseMetadata = state.responseMetadata?.merging(metadata) ?? metadata
     }
   }
 
@@ -733,6 +769,7 @@ private struct State: Sendable {
 
   var transcript: Transcript
   var tokenUsage: TokenUsage?
+  var responseMetadata: ResponseMetadata?
   var responseDepth = 0
 
   init(transcript: Transcript) {

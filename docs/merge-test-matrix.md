@@ -103,7 +103,7 @@ Likely ALM test groups:
 
 ## New Merge Tests
 
-### Canonical Types
+### Core Model Stack
 
 - `Generable`, `GeneratedContent`, and `GenerationSchema` compile and behave through SwiftAgent imports.
 - `Tool` arguments and output conversion work through the merged protocols.

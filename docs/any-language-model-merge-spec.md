@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Merge AnyLanguageModel into SwiftAgent as the canonical model foundation and provider implementation layer. The target is one coherent SwiftAgent model stack, not two packages connected by adapter bridges.
+Merge AnyLanguageModel into SwiftAgent as the main model foundation and provider implementation layer. The target is one coherent SwiftAgent model stack, not two packages connected by adapter bridges.
 
 SwiftAgent should keep its agent-focused ergonomics, schema macros, transcript resolution, grounding, token accounting, and UI streaming behavior. AnyLanguageModel should contribute the FoundationModels-compatible core primitives and direct provider implementations that remove the need for Apple's FoundationModels module and provider SDK dependencies.
 
@@ -10,7 +10,7 @@ SwiftAgent should keep its agent-focused ergonomics, schema macros, transcript r
 
 - Do not add AnyLanguageModel as a permanent external package dependency.
 - Do not keep a long-term bridge where SwiftAgent adapters translate into AnyLanguageModel sessions.
-- Do not preserve duplicate canonical definitions for `Transcript`, `LanguageModelSession`, `GenerationOptions`, `Tool`, `GeneratedContent`, or `GenerationSchema`.
+- Do not preserve duplicate main definitions for `Transcript`, `LanguageModelSession`, `GenerationOptions`, `Tool`, `GeneratedContent`, or `GenerationSchema`.
 - Do not regress SwiftAgent's agent transcript fidelity to content-only streaming snapshots.
 - Do not optimize for exact Apple FoundationModels source compatibility when it conflicts with agent capability.
 
@@ -56,11 +56,11 @@ SwiftAgent package
 
 The final public API should be folded into SwiftAgent rather than exposing AnyLanguageModel as a long-term separate module. Temporary target boundaries are allowed only to keep migration steps reviewable.
 
-## Canonical Type Ownership
+## Primary Type Ownership
 
 ### Model Primitives
 
-AnyLanguageModel's replacements for FoundationModels primitives should become the canonical local definitions:
+AnyLanguageModel's replacements for FoundationModels primitives should become the main local definitions:
 
 - `Generable`
 - `GeneratedContent`
@@ -91,7 +91,7 @@ It should own:
 - tool execution policy/delegate hooks
 - schema/grounding integration hooks needed by SwiftAgent
 
-Provider-specific session types like `OpenAISession` and `AnthropicSession` are not required for compatibility because there are no existing app consumers. If they remain, they should be thin convenience APIs over the canonical session rather than parallel session architectures.
+Provider-specific session types like `OpenAISession` and `AnthropicSession` are not required for compatibility because there are no existing app consumers. If they remain, they should be thin convenience APIs over the main session rather than parallel session architectures.
 
 ### GenerationOptions
 
@@ -130,7 +130,7 @@ Do not rewrite AnyLanguageModel's JSON/schema code merely to avoid package depen
 - JSON Schema encoding/decoding as a neutral interchange layer for providers.
 - Less handwritten schema plumbing when replacing provider SDK-specific schema types.
 
-It does not replace SwiftAgent's canonical `GenerationSchema`, stable generated-content JSON behavior, transcript/replay infrastructure, or provider-specific normalization rules such as OpenAI strict-mode adjustments.
+It does not replace SwiftAgent's main `GenerationSchema`, stable generated-content JSON behavior, transcript/replay infrastructure, or provider-specific normalization rules such as OpenAI strict-mode adjustments.
 
 `PartialJSONDecoder` is likely useful when structured streaming and partial snapshots move into the merged session engine. It covers partial JSON decoding for partially generated structured output. It does not replace transcript-first streaming reducers, tool-call streaming events, provider event parsing, or token usage assembly.
 
@@ -140,7 +140,7 @@ For the merged Phase 2 model-stack work, adding `JSONSchema` and `PartialJSONDec
 
 AnyLanguageModel's current transcript is too limited for agent UX. The merged transcript should be a superset, biased toward SwiftAgent's agent-grade transcript semantics while adding AnyLanguageModel's FoundationModels-compatible concepts.
 
-Canonical entries:
+Primary entries:
 
 ```swift
 public enum Transcript.Entry {
@@ -153,7 +153,7 @@ public enum Transcript.Entry {
 }
 ```
 
-Canonical segments:
+Primary segments:
 
 ```swift
 public enum Transcript.Segment {
@@ -284,10 +284,10 @@ SwiftAgent macros should generate code against the merged local primitives.
 
 Expected updates:
 
-- `@SessionSchema` tool storage should use the canonical `Tool`
-- structured output declarations should use the canonical `Generable` and `GeneratedContent`
+- `@SessionSchema` tool storage should use the main `Tool`
+- structured output declarations should use the main `Generable` and `GeneratedContent`
 - generated transcript resolver code should target the merged transcript
-- documentation examples should import the canonical SwiftAgent module(s), not Apple FoundationModels
+- documentation examples should import the main SwiftAgent module(s), not Apple FoundationModels
 
 ## Logging
 

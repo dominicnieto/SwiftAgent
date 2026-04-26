@@ -1,44 +1,35 @@
-// By Dennis Müller
+// By Dennis Muller
 
-import AnthropicSession
 import SwiftAgent
 
 enum AnthropicStreamingToolCallsNoArgsPingScenario {
-  /// Matches: `Tests/SwiftAgentTests/AnthropicSession/AnthropicStreamingToolCallsNoArgsTests.swift`
   static let scenario = AgentRecorderScenario(
     id: "anthropic/streaming-tool-calls/no-args-ping",
     provider: .anthropic,
-    unitTestFile: "Tests/SwiftAgentTests/AnthropicSession/AnthropicStreamingToolCallsNoArgsTests.swift",
+    unitTestFile: "Tests/SwiftAgentTests/Core/DirectProviderReplayTests.swift",
     expectedRecordedResponsesCount: 2,
     run: { recorder, secrets in
-      let configuration = try AnthropicConfiguration.recording(
-        apiKey: secrets.anthropicAPIKey(),
-        recorder: recorder,
+      let apiKey = try secrets.anthropicAPIKey()
+      let model = AnthropicLanguageModel(
+        apiKey: apiKey,
+        model: AnthropicRecordingModel.model,
+        httpClient: AnthropicRecordingHTTPClient.make(apiKey: apiKey, recorder: recorder),
       )
-
-      let session = AnthropicSession(
-        schema: RecordingSchema(),
+      let session = LanguageModelSession(
+        model: model,
+        tools: [PingTool()],
         instructions: """
         Do not write any text before the tool call.
         Call `ping` exactly once with empty JSON {}.
         After tool output, reply with exactly: pong
         """,
-        configuration: configuration,
       )
 
-      let stream = try session.streamResponse(
-        to: "Ping",
-        using: AnthropicRecordingModel.model,
-      )
+      let stream = session.streamResponse(to: "Ping")
 
       for try await _ in stream {}
     },
   )
-}
-
-@SessionSchema
-private struct RecordingSchema {
-  @Tool var ping = PingTool()
 }
 
 private struct PingTool: SwiftAgent.Tool {

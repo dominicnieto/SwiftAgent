@@ -1,55 +1,42 @@
-// By Dennis Müller
+// By Dennis Muller
 
-import OpenAI
-import OpenAISession
 import SwiftAgent
 
 enum OpenAIStructuredOutputScenario {
-  /// Matches: `Tests/SwiftAgentTests/OpenAISession/OpenAIStructuredOutputTests.swift`
   static let scenario = AgentRecorderScenario(
     id: "openai/structured-output",
     provider: .openAI,
-    unitTestFile: "Tests/SwiftAgentTests/OpenAISession/OpenAIStructuredOutputTests.swift",
+    unitTestFile: "Tests/SwiftAgentTests/Core/DirectProviderReplayTests.swift",
     expectedRecordedResponsesCount: 1,
     run: { recorder, secrets in
-      let configuration = try OpenAIConfiguration.recording(
-        apiKey: secrets.openAIAPIKey(),
-        recorder: recorder,
+      let apiKey = try secrets.openAIAPIKey()
+      let model = OpenAILanguageModel(
+        apiKey: apiKey,
+        model: OpenAIRecordingModel.model,
+        apiVariant: .responses,
+        httpClient: OpenAIRecordingHTTPClient.make(apiKey: apiKey, recorder: recorder),
+      )
+      let session = LanguageModelSession(
+        model: model,
+        instructions: "Return temperatureCelsius=22 and condition=Partly Cloudy.",
       )
 
-      let session = OpenAISession(
-        schema: RecordingSchema(),
-        instructions: "Return temperatureCelsius=22 and condition=Partly Cloudy.",
-        configuration: configuration,
+      var options = GenerationOptions()
+      options[custom: OpenAILanguageModel.self] = .init(
+        reasoning: .init(effort: .low, summary: "detailed"),
       )
 
       _ = try await session.respond(
-        to: "Provide the latest weather update.",
+        to: Prompt("Provide the latest weather update."),
         generating: WeatherForecast.self,
-        using: OpenAIRecordingModel.model,
-        options: .init(
-          include: [.reasoning_encryptedContent],
-          reasoning: .init(
-            effort: .low,
-            summary: .detailed,
-          ),
-        ),
+        options: options,
       )
     },
   )
 }
 
-@SessionSchema
-private struct RecordingSchema {
-  @StructuredOutput(WeatherForecast.self) var weatherForecast
-}
-
-private struct WeatherForecast: StructuredOutput {
-  static let name: String = "weather_forecast"
-
-  @Generable
-  struct Schema {
-    var temperatureCelsius: Double
-    var condition: String
-  }
+@Generable
+private struct WeatherForecast {
+  var temperatureCelsius: Double
+  var condition: String
 }

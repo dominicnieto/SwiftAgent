@@ -22,7 +22,7 @@ docs/phase-1-copy-results.md
 docs/phase-2-core-model-stack-merge-results.md
 ```
 
-The original split between Phase 2 canonical types, Phase 3 transcript/streaming, Phase 4 OpenAI,
+The original split between Phase 2 main types, Phase 3 transcript/streaming, Phase 4 OpenAI,
 and Phase 5 Anthropic is superseded. Those areas are one model-stack architecture and should be
 planned together in `phase-2-canonical-types-plan.md`.
 
@@ -60,5 +60,5 @@ Plan and implement whole durable features, not artificial type slices.
 If an AnyLanguageModel type depends on another architectural type, move or design the connected
 pieces together. Do not create interim protocols, placeholder types, bridge sessions, adapter
 shims, or compatibility-only typealiases just to satisfy a phase boundary. Compatibility wrappers
-are acceptable only when they are thin conveniences over the canonical implementation and have a
+are acceptable only when they are thin conveniences over the main implementation and have a
 documented permanence or removal decision.

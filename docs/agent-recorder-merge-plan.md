@@ -42,7 +42,7 @@ AgentRecorder currently depends on pre-merge APIs:
 - `AnthropicConfiguration.recording`
 - provider-specific recording model helpers
 
-These need to move to the merged canonical API.
+These need to move to the merged main API.
 
 ## Target API Shape
 

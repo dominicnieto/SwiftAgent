@@ -2,7 +2,7 @@
 
 ## Phase Goal
 
-Record the current SwiftAgent and AnyLanguageModel surfaces before any no-bridge merge work. Phase 0 is documentation-only: inventory APIs, targets, providers, tests, fixtures, and duplicate concepts without copying source or choosing canonical implementations.
+Record the current SwiftAgent and AnyLanguageModel surfaces before any no-bridge merge work. Phase 0 is documentation-only: inventory APIs, targets, providers, tests, fixtures, and duplicate concepts without copying source or choosing main implementations.
 
 ## Source Docs Read
 
@@ -22,7 +22,7 @@ Record the current SwiftAgent and AnyLanguageModel surfaces before any no-bridge
 - Inventory AnyLanguageModel package structure, targets, tests, providers, dependencies, and overlapping core types.
 - Inventory all `import FoundationModels` usage.
 - Inventory all OpenAI and Anthropic SDK usage.
-- Inventory duplicate concepts between the repos that need Phase 2 canonical-type decisions, without deciding them.
+- Inventory duplicate concepts between the repos that need Phase 2 main-type decisions, without deciding them.
 - Identify current tests/fixtures that must be preserved, adapted, or replaced.
 - Capture current SwiftAgent streaming behavior from existing tests/replay fixtures.
 - Capture AnyLanguageModel provider coverage.
@@ -33,7 +33,7 @@ Record the current SwiftAgent and AnyLanguageModel surfaces before any no-bridge
 - Scope: read manifests, source layout, public declarations, imports, tests, AgentRecorder scenarios, replay fixture patterns, and merge docs.
 - Non-goal: copy AnyLanguageModel source into SwiftAgent.
 - Non-goal: modify implementation code.
-- Non-goal: choose canonical Phase 2 types.
+- Non-goal: choose main Phase 2 types.
 - Non-goal: update tests, fixtures, package products, dependencies, or provider implementations.
 
 ## Files and Areas Expected To Change
@@ -61,7 +61,7 @@ If implementation files are accidentally changed, revert those changes and run t
 ## Approval Gates
 
 - Phase 0 may complete once both docs exist and no implementation files changed.
-- Phase 2 canonical type choices require a separate plan and explicit approval before implementation.
+- Phase 2 main type choices require a separate plan and explicit approval before implementation.
 
 ## Rollback or Cleanup Notes
 
@@ -70,6 +70,6 @@ If implementation files are accidentally changed, revert those changes and run t
 
 ## Open Questions
 
-- Which duplicate concepts should be proposed as canonical in Phase 2?
+- Which duplicate concepts should be proposed as main in Phase 2?
 - Which AnyLanguageModel live provider tests should become replay tests first?
 - How should AnyLanguageModel transport injection be adapted to preserve `HTTPReplayRecorder`?

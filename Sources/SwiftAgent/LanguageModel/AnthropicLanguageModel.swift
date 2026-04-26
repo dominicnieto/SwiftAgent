@@ -351,6 +351,8 @@ public struct AnthropicLanguageModel: LanguageModel {
         var entries: [Transcript.Entry] = []
         var messages = session.transcript.toAnthropicMessages()
         var text = ""
+        var lastMetadata: ResponseMetadata?
+        var lastTokenUsage: TokenUsage?
 
         while true {
             let params = try createMessageParams(
@@ -371,6 +373,9 @@ public struct AnthropicLanguageModel: LanguageModel {
                 responseType: AnthropicMessageResponse.self
             )
 
+            lastMetadata = message.responseMetadata(providerName: "Anthropic")
+            lastTokenUsage = message.usage?.tokenUsage
+
             let toolUses: [AnthropicToolUse] = message.content.compactMap { block in
                 if case .toolUse(let u) = block { return u }
                 return nil
@@ -389,7 +394,9 @@ public struct AnthropicLanguageModel: LanguageModel {
                     return LanguageModelSession.Response(
                         content: empty.content,
                         rawContent: empty.rawContent,
-                        transcriptEntries: entries
+                        transcriptEntries: entries,
+                        tokenUsage: lastTokenUsage,
+                        responseMetadata: lastMetadata
                     )
                 case .invocations(let invocations):
                     if !invocations.isEmpty {
@@ -428,7 +435,9 @@ public struct AnthropicLanguageModel: LanguageModel {
             return LanguageModelSession.Response(
                 content: text as! Content,
                 rawContent: GeneratedContent(text),
-                transcriptEntries: entries
+                transcriptEntries: entries,
+                tokenUsage: lastTokenUsage,
+                responseMetadata: lastMetadata
             )
         }
 
@@ -437,7 +446,9 @@ public struct AnthropicLanguageModel: LanguageModel {
         return LanguageModelSession.Response(
             content: content,
             rawContent: rawContent,
-            transcriptEntries: entries
+            transcriptEntries: entries,
+            tokenUsage: lastTokenUsage,
+            responseMetadata: lastMetadata
         )
     }
 
@@ -487,8 +498,13 @@ public struct AnthropicLanguageModel: LanguageModel {
 
                         for try await event in events {
                             switch event {
-                            case .messageStart:
-                                break
+                            case .messageStart(let event):
+                                continuation.yield(.init(responseMetadata: event.message.responseMetadata(
+                                    providerName: "Anthropic"
+                                )))
+                                if let usage = event.message.usage?.tokenUsage {
+                                    continuation.yield(.init(tokenUsage: usage))
+                                }
 
                             case .contentBlockStart(let event):
                                 switch event.contentBlock.type {
@@ -1064,10 +1080,19 @@ private struct AnthropicMessageResponse: Codable, Sendable {
     let content: [AnthropicContent]
     let model: String
     let stopReason: StopReason?
+    let usage: AnthropicUsage?
 
     enum CodingKeys: String, CodingKey {
-        case id, type, role, content, model
+        case id, type, role, content, model, usage
         case stopReason = "stop_reason"
+    }
+
+    func responseMetadata(providerName: String) -> ResponseMetadata {
+        ResponseMetadata(
+            id: id,
+            providerName: providerName,
+            modelID: model
+        )
     }
 
     enum StopReason: String, Codable {
@@ -1085,6 +1110,30 @@ private struct AnthropicErrorResponse: Codable { let error: AnthropicErrorDetail
 private struct AnthropicErrorDetail: Codable {
     let type: String
     let message: String
+}
+
+private struct AnthropicUsage: Codable, Sendable {
+    let inputTokens: Int?
+    let outputTokens: Int?
+    let cacheCreationInputTokens: Int?
+    let cacheReadInputTokens: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+        case cacheCreationInputTokens = "cache_creation_input_tokens"
+        case cacheReadInputTokens = "cache_read_input_tokens"
+    }
+
+    var tokenUsage: TokenUsage {
+        let cachedTokens = [cacheCreationInputTokens, cacheReadInputTokens].compactMap(\.self).reduce(0, +)
+        return TokenUsage(
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            totalTokens: [inputTokens, outputTokens].compactMap(\.self).reduce(0, +),
+            cachedTokens: cachedTokens == 0 ? nil : cachedTokens
+        )
+    }
 }
 
 // MARK: - Streaming Event Types
@@ -1246,7 +1295,7 @@ private enum AnthropicStreamEvent: Codable, Sendable {
     struct MessageDeltaEvent: Codable, Sendable {
         let type: String
         let delta: Delta
-        let usage: Usage?
+        let usage: AnthropicUsage?
 
         struct Delta: Codable, Sendable {
             let stopReason: String?
@@ -1258,29 +1307,6 @@ private enum AnthropicStreamEvent: Codable, Sendable {
             }
         }
 
-        struct Usage: Codable, Sendable {
-            let inputTokens: Int?
-            let outputTokens: Int?
-            let cacheCreationInputTokens: Int?
-            let cacheReadInputTokens: Int?
-
-            enum CodingKeys: String, CodingKey {
-                case inputTokens = "input_tokens"
-                case outputTokens = "output_tokens"
-                case cacheCreationInputTokens = "cache_creation_input_tokens"
-                case cacheReadInputTokens = "cache_read_input_tokens"
-            }
-
-            var tokenUsage: TokenUsage {
-                let cachedTokens = [cacheCreationInputTokens, cacheReadInputTokens].compactMap(\.self).reduce(0, +)
-                return TokenUsage(
-                    inputTokens: inputTokens,
-                    outputTokens: outputTokens,
-                    totalTokens: [inputTokens, outputTokens].compactMap(\.self).reduce(0, +),
-                    cachedTokens: cachedTokens == 0 ? nil : cachedTokens
-                )
-            }
-        }
     }
 }
 

@@ -2,9 +2,9 @@
 
 ## Direction
 
-This is an absorb-and-converge migration. AnyLanguageModel is moved into SwiftAgent and its useful primitives/providers become SwiftAgent's canonical model layer. The final architecture should not contain a bridge between two independent model stacks.
+This is an absorb-and-converge migration. AnyLanguageModel is moved into SwiftAgent and its useful primitives/providers become SwiftAgent's main model layer. The final architecture should not contain a bridge between two independent model stacks.
 
-The final API should be clean rather than compatibility-driven. There are no existing app consumers, so migration should prefer the canonical `LanguageModelSession(model:tools:instructions:)` shape over preserving `OpenAISession` or `AnthropicSession`.
+The final API should be clean rather than compatibility-driven. There are no existing app consumers, so migration should prefer the main `LanguageModelSession(model:tools:instructions:)` shape over preserving `OpenAISession` or `AnthropicSession`.
 
 ## Phase Planning Requirement
 
@@ -100,30 +100,30 @@ Architecture rule:
 - If an ALM type naturally depends on another ALM architectural type, move or design the related type with it.
 - Do not introduce a smaller temporary protocol, typealias, wrapper, adapter, or placeholder only to keep an old phase boundary intact.
 - If a feature cannot be completed coherently in the current change, defer the whole feature or split it by durable product behavior, not by dependency avoidance.
-- Compatibility wrappers are acceptable only when they are thin convenience APIs over the canonical implementation and have a clear removal or permanence decision.
+- Compatibility wrappers are acceptable only when they are thin convenience APIs over the main implementation and have a clear removal or permanence decision.
 
 Feature-complete workstreams:
 
-- **Canonical core and options:** `Generable`, `GeneratedContent`, `GenerationSchema`, `DynamicGenerationSchema`, `GenerationGuide`, `Prompt`, `Instructions`, `Tool`, `Availability`, `GenerationOptions`, `JSONValue`, and provider-specific custom options compile through SwiftAgent's public API.
-- **Provider/session boundary:** `LanguageModel` and `LanguageModelSession(model:tools:instructions:)` become the real provider/session boundary. Existing `LanguageModelProvider`, `Adapter`, `OpenAISession`, and `AnthropicSession` may remain only as compatibility conveniences over the canonical engine or be removed once tests and examples move.
+- **Primary core and options:** `Generable`, `GeneratedContent`, `GenerationSchema`, `DynamicGenerationSchema`, `GenerationGuide`, `Prompt`, `Instructions`, `Tool`, `Availability`, `GenerationOptions`, `JSONValue`, and provider-specific custom options compile through SwiftAgent's public API.
+- **Provider/session boundary:** `LanguageModel` and `LanguageModelSession(model:tools:instructions:)` become the real provider/session boundary. Existing `LanguageModelProvider`, `Adapter`, `OpenAISession`, and `AnthropicSession` may remain only as compatibility conveniences over the main engine or be removed once tests and examples move.
 - **Transcript and streaming:** the merged transcript supports instructions, prompts, reasoning, tool calls, tool output, responses, images, structured output source tracking, stable IDs, token usage outside transcript entries, replay-friendly coding, and snapshots derived from transcript/token state.
 - **Tool execution:** providers emit tool calls; the session owns execution policy, approval hooks, parallelism, retry/missing-tool behavior, and tool output transcript updates.
 - **OpenAI direct provider:** `OpenAILanguageModel` and `OpenResponsesLanguageModel` replace the MacPaw SDK path for text, structured output, tool calling, streaming, reasoning, metadata, and replay fixture coverage.
 - **Anthropic direct provider:** `AnthropicLanguageModel` replaces the SwiftAnthropic path for text, structured output, tool calling, streaming thinking/reasoning, metadata, and replay fixture coverage.
-- **Public package/API surface:** `import SwiftAgent` exposes the canonical core API through a `SwiftAgent` library product. Provider-session products may remain only as compatibility conveniences after parity decisions.
+- **Public package/API surface:** `import SwiftAgent` exposes the main core API through a `SwiftAgent` library product. Provider-session products may remain only as compatibility conveniences after parity decisions.
 - **AgentRecorder/examples/docs:** AgentRecorder and examples use the merged session/provider API once the provider paths are ready.
 
 Tasks:
 
-- Finish convergence of local core primitives already started in the earlier canonical-type work.
+- Finish convergence of local core primitives already started in the earlier main-type work.
 - Add `JSONSchema` and `PartialJSONDecoder` when moved ALM code needs them. These dependency additions are approved for this merged phase; dependency removals still require separate approval.
 - Move `GenerationOptions` with its real `LanguageModel` relationship rather than introducing an interim custom-options provider protocol.
-- Design and implement the canonical `LanguageModel`/`LanguageModelSession` surface before wiring provider-specific option and request paths that depend on it.
+- Design and implement the main `LanguageModel`/`LanguageModelSession` surface before wiring provider-specific option and request paths that depend on it.
 - Merge transcript and streaming reducers before declaring direct providers migrated.
 - Replace OpenAI and Anthropic provider paths through direct ALM-derived providers only when transcript-first streaming, tool calls, structured output, token usage, metadata, and replay coverage are present.
 - Remove or deprecate old SDK adapter paths only after parity is proven and dependency removal is explicitly approved.
 - Keep heavy optional providers out of the base product unless separately approved.
-- Add the public `SwiftAgent` library product as part of exposing the canonical API.
+- Add the public `SwiftAgent` library product as part of exposing the main API.
 
 Exit criteria:
 
@@ -137,16 +137,16 @@ Exit criteria:
 - Anthropic text, structured output, tool calling, streaming, token usage, and reasoning tests pass through the direct provider path.
 - Anthropic provider streaming emits transcript-first updates, including tool use JSON deltas and thinking/signature deltas where available.
 - Package dependency removal proposals for MacPaw/OpenAI and SwiftAnthropic have explicit approval and evidence before removal.
-- `import SwiftAgent` exposes the canonical core API.
-- README/examples use the canonical merged session API.
+- `import SwiftAgent` exposes the main core API.
+- README/examples use the main merged session API.
 
-Implementation results for earlier canonical-type work are recorded in `docs/phase-2-canonical-types-results.md`.
+Implementation results for earlier main-type work are recorded in `docs/phase-2-canonical-types-results.md`.
 
 ## Phase 3: Integrate Additional Providers
 
 Goals:
 
-- Make the non-OpenAI/non-Anthropic AnyLanguageModel providers available through the same canonical session and transcript model.
+- Make the non-OpenAI/non-Anthropic AnyLanguageModel providers available through the same main session and transcript model.
 - Keep Apple Foundation Models support through `SystemLanguageModel`.
 
 Tasks:
@@ -188,7 +188,7 @@ Tasks:
 
 Exit criteria:
 
-- One canonical model/session/transcript stack remains.
+- One main model/session/transcript stack remains.
 - Public examples demonstrate the merged API.
 - Build and test commands pass.
 

@@ -8,7 +8,7 @@ Content-only streaming is not sufficient. The merged SwiftAgent stack needs tran
 
 ## Required Streaming Contract
 
-Each provider should emit normalized updates into the canonical session engine:
+Each provider should emit normalized updates into the main session engine:
 
 ```swift
 public enum LanguageModelUpdate {
@@ -95,7 +95,7 @@ Observed capability from docs:
 Required work:
 
 - Treat Open Responses as a normalized provider input, not as a substitute for SwiftAgent's internal transcript model.
-- Map item-based output, tool invocation, and stream events into the canonical transcript/update contract.
+- Map item-based output, tool invocation, and stream events into the main transcript/update contract.
 - Add conformance tests against Open Responses acceptance behavior where practical.
 
 ### Anthropic Messages
@@ -222,7 +222,7 @@ Observed capability from docs:
 Required work:
 
 - Keep SystemLanguageModel / Apple Foundation Models support.
-- Adapt snapshot streaming into the canonical transcript-first update model.
+- Adapt snapshot streaming into the main transcript-first update model.
 - Preserve tool calls and structured output in transcript entries.
 - Mark any unavailable lower-level details, such as raw token deltas or provider token usage, as unsupported capabilities.
 

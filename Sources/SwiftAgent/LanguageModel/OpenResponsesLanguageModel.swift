@@ -21,6 +21,9 @@ import JSONSchema
 /// )
 /// ```
 public struct OpenResponsesLanguageModel: LanguageModel {
+    /// Default OpenAI-compatible Responses API base URL.
+    public static let defaultBaseURL = URL(string: "https://api.openai.com/v1/")!
+
     /// The reason the model is unavailable.
     /// This model is always available.
     public typealias UnavailableReason = Never
@@ -396,7 +399,7 @@ public struct OpenResponsesLanguageModel: LanguageModel {
     ///   - model: Model identifier (e.g. `gpt-4o-mini` or provider-specific id).
     ///   - httpClient: Optional SwiftAgent HTTP client used for network requests.
     public init(
-        baseURL: URL,
+        baseURL: URL = defaultBaseURL,
         apiKey tokenProvider: @escaping @autoclosure @Sendable () -> String,
         model: String,
         httpClient: (any HTTPClient)? = nil,
@@ -510,6 +513,12 @@ public struct OpenResponsesLanguageModel: LanguageModel {
                                 if let usage = response?.usage?.tokenUsage {
                                     continuation.yield(.init(tokenUsage: usage))
                                 }
+                                if let metadata = response?.responseMetadata(
+                                    providerName: "Open Responses",
+                                    defaultModelID: model
+                                ) {
+                                    continuation.yield(.init(responseMetadata: metadata))
+                                }
                             case .failed:
                                 continuation.finish(throwing: OpenResponsesLanguageModelError.streamFailed)
                                 return
@@ -578,6 +587,8 @@ public struct OpenResponsesLanguageModel: LanguageModel {
         var entries: [Transcript.Entry] = []
         var text = ""
         var lastOutput: [JSONValue]?
+        var lastMetadata: ResponseMetadata?
+        var lastTokenUsage: TokenUsage?
         var messages = messages
         while true {
             let params = try OpenResponsesAPI.createRequestBody(
@@ -597,6 +608,8 @@ public struct OpenResponsesLanguageModel: LanguageModel {
                 responseType: OpenResponsesAPI.Response.self
             )
 
+            lastMetadata = resp.responseMetadata(providerName: "Open Responses", defaultModelID: model)
+            lastTokenUsage = resp.usage?.tokenUsage
             let toolCalls = extractToolCallsFromOutput(resp.output)
             lastOutput = resp.output
             if !toolCalls.isEmpty {
@@ -615,7 +628,9 @@ public struct OpenResponsesLanguageModel: LanguageModel {
                     return LanguageModelSession.Response(
                         content: empty.content,
                         rawContent: empty.rawContent,
-                        transcriptEntries: entries
+                        transcriptEntries: entries,
+                        tokenUsage: lastTokenUsage,
+                        responseMetadata: lastMetadata
                     )
                 case .invocations(let invocations):
                     if !invocations.isEmpty {
@@ -642,7 +657,9 @@ public struct OpenResponsesLanguageModel: LanguageModel {
             return LanguageModelSession.Response(
                 content: text as! Content,
                 rawContent: GeneratedContent(text),
-                transcriptEntries: entries
+                transcriptEntries: entries,
+                tokenUsage: lastTokenUsage,
+                responseMetadata: lastMetadata
             )
         }
         if let jsonString = extractJSONFromOutput(lastOutput) {
@@ -651,7 +668,9 @@ public struct OpenResponsesLanguageModel: LanguageModel {
             return LanguageModelSession.Response(
                 content: content,
                 rawContent: generatedContent,
-                transcriptEntries: entries
+                transcriptEntries: entries,
+                tokenUsage: lastTokenUsage,
+                responseMetadata: lastMetadata
             )
         }
         throw OpenResponsesLanguageModelError.noResponseGenerated
@@ -813,15 +832,27 @@ private enum OpenResponsesAPI {
 
     struct Response: Decodable, Sendable {
         let id: String
+        let model: String?
         let output: [JSONValue]?
         let outputText: String?
         let error: OpenResponsesError?
+        let usage: OpenResponsesUsage?
 
         private enum CodingKeys: String, CodingKey {
             case id
+            case model
             case output
             case outputText = "output_text"
             case error
+            case usage
+        }
+
+        func responseMetadata(providerName: String, defaultModelID: String) -> ResponseMetadata {
+            ResponseMetadata(
+                id: id,
+                providerName: providerName,
+                modelID: model ?? defaultModelID
+            )
         }
     }
 
@@ -1269,7 +1300,17 @@ private struct OpenResponsesOutputItem: Decodable, Sendable {
 }
 
 private struct OpenResponsesCompleted: Decodable, Sendable {
+    let id: String?
+    let model: String?
     let usage: OpenResponsesUsage?
+
+    func responseMetadata(providerName: String, defaultModelID: String) -> ResponseMetadata {
+        ResponseMetadata(
+            id: id,
+            providerName: providerName,
+            modelID: model ?? defaultModelID
+        )
+    }
 }
 
 private struct OpenResponsesUsage: Decodable, Sendable {

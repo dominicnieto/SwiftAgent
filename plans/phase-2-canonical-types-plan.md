@@ -1,10 +1,10 @@
-# Phase 2 Canonical Types And Core Model Stack Plan
+# Phase 2 Core Model Stack Plan
 
 ## Phase Goal
 
 Merge the SwiftAgent and AnyLanguageModel model stacks into one coherent implementation.
 
-The original version of this plan chose canonical type ownership. That inventory and ownership table remain authoritative, but Phase 2 is no longer limited to isolated core-type slices. Phase 2 now includes the connected model-stack work needed to avoid temporary architecture: `GenerationOptions`, `LanguageModel`, `LanguageModelSession`, transcript-first streaming, tool execution policy, direct OpenAI provider parity, and direct Anthropic provider parity.
+The original version of this plan chose main type ownership. That inventory and ownership table remain authoritative, but Phase 2 is no longer limited to isolated core-type slices. Phase 2 now includes the connected model-stack work needed to avoid temporary architecture: `GenerationOptions`, `LanguageModel`, `LanguageModelSession`, transcript-first streaming, tool execution policy, direct OpenAI provider parity, and direct Anthropic provider parity.
 
 Build whole durable features across their natural boundaries. Do not introduce interim protocols, placeholder types, bridge sessions, adapter shims, or compatibility-only typealiases just to satisfy an artificial phase boundary. If an ALM type depends on `LanguageModel`, `LanguageModelSession`, `Transcript`, `GenerationOptions`, provider requests, or streaming events, move or design the connected pieces together.
 
@@ -41,16 +41,16 @@ Additional source layout checked for planning context only:
 ## Scope
 
 - Inventory duplicate core concepts between SwiftAgent and copied AnyLanguageModel.
-- Propose one canonical source for each concept that must converge.
+- Propose one primary source for each concept that must converge.
 - Preserve SwiftAgent's agent-grade transcript, transcript resolution, token usage, replay, logging, and streaming UX requirements.
 - Preserve AnyLanguageModel's useful FoundationModels-style core primitives and direct provider boundary.
 - Merge `GenerationOptions` and `JSONValue` with the real ALM `LanguageModel` relationship.
-- Design and implement canonical `LanguageModel`.
-- Design and implement canonical `LanguageModelSession(model:tools:instructions:)`.
+- Design and implement main `LanguageModel`.
+- Design and implement main `LanguageModelSession(model:tools:instructions:)`.
 - Merge transcript and streaming behavior into a transcript-first session engine.
 - Move direct ALM OpenAI and Anthropic provider implementations into SwiftAgent.
 - For OpenAI and Anthropic, satisfy the Phase 2 provider capability and streaming acceptance criteria in `docs/provider-capability-streaming-reference.md` and `docs/streaming-provider-gaps-spec.md`.
-- Fold provider-specific options into canonical `GenerationOptions` custom options.
+- Fold provider-specific options into main `GenerationOptions` custom options.
 - Move AgentRecorder, examples, and docs to the merged API when provider parity is ready.
 - Define approval gates for dependency removals and optional providers.
 
@@ -67,22 +67,22 @@ Additional source layout checked for planning context only:
 Implementation will likely touch these areas:
 
 - `Sources/SwiftAgent/`: local core primitives, transcript, token usage, response/snapshot models, prompt/instructions, tool protocols, schema protocols, provider/session API, transport integration hooks.
-- `Sources/SwiftAgent/LanguageModelProvider/`: replacement or collapse of `LanguageModelProvider`, `Adapter`, and provider update APIs into the canonical `LanguageModelSession` engine.
-- `Sources/SwiftAgent/Models/`: merged `Transcript`, `AgentResponse`/`AgentSnapshot` or canonical response/snapshot shapes, `TokenUsage`, structured-output snapshot behavior.
+- `Sources/SwiftAgent/LanguageModelProvider/`: replacement or collapse of `LanguageModelProvider`, `Adapter`, and provider update APIs into the main `LanguageModelSession` engine.
+- `Sources/SwiftAgent/Models/`: merged `Transcript`, `AgentResponse`/`AgentSnapshot` or main response/snapshot shapes, `TokenUsage`, structured-output snapshot behavior.
 - `Sources/SwiftAgent/Protocols/`: convergence of remaining adapter/session/schema protocols around local `Generable`, `GeneratedContent`, `GenerationSchema`, and `Tool`.
 - `Sources/SwiftAgent/Prompting/`: reconciliation of SwiftAgent prompt source metadata with AnyLanguageModel `Prompt` and `Instructions`.
 - `Sources/SwiftAgent/Networking/`: keep SwiftAgent `HTTPClient`, `HTTPReplayRecorder`, `NetworkLog`, and SSE helpers as the long-term transport/replay direction.
 - `Sources/SwiftAgentMacros/`: keep `@SessionSchema` expansions on local core types and align generated resolver code with the final merged transcript/session API.
-- `Sources/OpenAISession/`, `Sources/AnthropicSession/`, `Sources/SimulatedSession/`: later migration or deprecation of provider-specific session/adapters once canonical `LanguageModelSession` can preserve behavior.
-- `AgentRecorder/AgentRecorder/`: later migration from provider-specific sessions and SDK imports to canonical session/direct provider APIs.
-- `Examples/` and `Sources/ExampleCode/`: later import/API updates after the canonical public surface exists.
+- `Sources/OpenAISession/`, `Sources/AnthropicSession/`, `Sources/SimulatedSession/`: later migration or deprecation of provider-specific session/adapters once main `LanguageModelSession` can preserve behavior.
+- `AgentRecorder/AgentRecorder/`: later migration from provider-specific sessions and SDK imports to main session/direct provider APIs.
+- `Examples/` and `Sources/ExampleCode/`: later import/API updates after the main public surface exists.
 - `External/AnyLanguageModel/Sources/AnyLanguageModel/`: source material for core primitives and provider implementations. Files should remain unmoved during this planning phase.
 - `External/AnyLanguageModel/Sources/AnyLanguageModelMacros/`: source material for `@Generable` and `@Guide` macros.
 - `Tests/SwiftAgentTests/`, `Tests/SwiftAgentMacroTests/`, and `External/AnyLanguageModel/Tests/AnyLanguageModelTests/`: later adaptation of SwiftAgent behavior tests and ALM core tests into the merged API.
 - `Package.swift`: add the public `SwiftAgent` product, add approved dependencies when needed, and edit provider products/dependencies only after parity and approval gates are satisfied.
-- `README.md`: later migration from old `OpenAISession`/`AnthropicSession` and Apple `FoundationModels` examples to the canonical `SwiftAgent` API.
+- `README.md`: later migration from old `OpenAISession`/`AnthropicSession` and Apple `FoundationModels` examples to the main `SwiftAgent` API.
 
-## Reverified Starting State
+## Historical Starting State
 
 Reverified on April 25, 2026 while converting this plan to the broader Phase 2 definition:
 
@@ -90,11 +90,19 @@ Reverified on April 25, 2026 while converting this plan to the broader Phase 2 d
 - SwiftAgent already owns local primitive files for `GeneratedContent`, `Generable`, `GenerationSchema`, `DynamicGenerationSchema`, `GenerationGuide`, `GenerationID`, `Instructions`, `Tool`, `Availability`, and the generated-content conversion protocols.
 - SwiftAgent macros already include ALM-derived `@Generable` and `@Guide` implementations, and `@SessionSchema` emits local `SwiftAgent.Tool`.
 - Focused carry-forward tests exist for conversion, dynamic schema, guide, prompt, instructions, availability, decodable tool schema, macro expansion, and defaulted-property parity.
-- SwiftAgent does not yet own canonical `GenerationOptions`, `JSONValue`, `LanguageModel`, or `LanguageModelSession`.
-- OpenAI, Anthropic, and Simulated provider paths still use the old `AdapterGenerationOptions` / provider-specific options architecture.
-- No direct OpenAI or Anthropic ALM providers have been migrated into the canonical SwiftAgent session stack.
-- `Package.swift` does not yet expose a `.library(name: "SwiftAgent", targets: ["SwiftAgent"])` product; public products are still provider-session shaped.
-- `README.md` still documents the old provider-session API and includes Apple `FoundationModels` imports.
+- SwiftAgent did not yet own main `GenerationOptions`, `JSONValue`, `LanguageModel`, or `LanguageModelSession`.
+- OpenAI, Anthropic, and Simulated provider paths still used the old `AdapterGenerationOptions` / provider-specific options architecture.
+- No direct OpenAI or Anthropic ALM providers had been migrated into the main SwiftAgent session stack.
+- `Package.swift` did not yet expose a `.library(name: "SwiftAgent", targets: ["SwiftAgent"])` product; public products were still provider-session shaped.
+- `README.md` still documented the old provider-session API and included Apple `FoundationModels` imports.
+
+Current implementation checkpoints have moved beyond this starting state:
+
+- `Package.swift` exposes the `SwiftAgent` product.
+- `SwiftAgent` owns main `JSONValue`, `GenerationOptions`, `LanguageModel`, and `LanguageModelSession(model:tools:instructions:)` APIs.
+- Direct OpenAI, Open Responses, and Anthropic providers run through `SwiftAgent.HTTPClient`, session-owned tool execution, transcript-first streaming, token usage, and response metadata.
+- AgentRecorder scenarios and README example source use `import SwiftAgent` and `LanguageModelSession(model:tools:instructions:)`.
+- The old provider-session products still remain until dependency removal and product-surface cleanup are explicitly approved.
 
 The already completed primitive work should remain credited as carry-forward work, but it must not be treated as completing the broader Phase 2 model-stack workstreams.
 
@@ -108,21 +116,21 @@ The already completed primitive work should remain credited as carry-forward wor
 - Generation options: SwiftAgent has provider-specific `OpenAIGenerationOptions`, `AnthropicGenerationOptions`, and simulation options; AnyLanguageModel has one `GenerationOptions` with common fields and model-specific custom options.
 - Transcript: SwiftAgent has agent-grade prompt/reasoning/tool/response entries, status, call IDs, upsert, resolved transcript APIs, and stable JSON helpers; AnyLanguageModel adds instructions entries, image segments, prompt options, response formats, and tool definitions.
 - Streaming: SwiftAgent streams transcript/token updates and derives snapshots; AnyLanguageModel streams content/raw-content snapshots and appends transcript after completion in several paths.
-- Token usage: SwiftAgent has public `TokenUsage` and accumulation outside transcript; AnyLanguageModel does not provide equivalent agent-grade token usage as a canonical session/snapshot concern.
+- Token usage: SwiftAgent has public `TokenUsage` and accumulation outside transcript; AnyLanguageModel does not provide equivalent agent-grade token usage as a main session/snapshot concern.
 - Structured output: SwiftAgent has `StructuredOutput`, `DecodableStructuredOutput`, `@SessionSchema`, transcript resolving, and UX snapshots; AnyLanguageModel has `@Generable`, `@Guide`, `StructuredGeneration`, and partial structured decoding.
 - Observation/session UI state: SwiftAgent provider sessions are `@Observable` and expose transcript/token state for UI use; AnyLanguageModel's `LanguageModelSession` is `@Observable` and exposes `isResponding` plus transcript.
 - Transport/replay/logging: SwiftAgent has replay-aware `HTTPClient`, `HTTPReplayRecorder`, `NetworkLog`, and `AgentLog`; AnyLanguageModel has URLSession/AsyncHTTPClient helpers and provider-local request helpers.
 - Public package surface: the target architecture requires `import SwiftAgent`, but current package products are still `OpenAISession`, `AnthropicSession`, and `ExampleCode`.
 - Provider identities/capabilities: SwiftAgent has typed provider model enums per SDK adapter; AnyLanguageModel has direct providers and mostly string model IDs, but the target architecture needs explicit capability metadata.
 - Provider metadata/rate limits/warnings: SwiftAgent has logging/replay surfaces for request and network metadata; provider replacement needs normalized request IDs, provider model IDs, warnings, retry hints, and rate-limit details outside transcript.
-- Optional provider dependencies: AnyLanguageModel includes CoreML, MLX, Llama, and AsyncHTTPClient dependency paths that affect canonicalization boundaries but are not core runtime types.
+- Optional provider dependencies: AnyLanguageModel includes CoreML, MLX, Llama, and AsyncHTTPClient dependency paths that affect standardization boundaries but are not core runtime types.
 - Transcript replay/diff: SwiftAgent replay fixtures and transcript codable tests need stable encoding; the merge docs also require transcript schema versioning and focused diff helpers.
 - Structured output source tracking: merged structured output must identify provider-native, prompt-fallback, or constrained-decoder output paths.
 - Reasoning representation: SwiftAgent has a dedicated reasoning transcript entry with summary, encrypted reasoning payload, and status; this must not collapse into normal assistant text.
 
-## Proposed Canonical Sources
+## Proposed Main Sources
 
-| Concept | Proposed canonical source | Rationale |
+| Concept | Proposed primary source | Rationale |
 | --- | --- | --- |
 | `Generable` | AnyLanguageModel | ALM already provides the local FoundationModels-style replacement required to remove Apple `FoundationModels` imports. SwiftAgent should consume this directly instead of keeping a wrapper. |
 | `GeneratedContent` | AnyLanguageModel, with SwiftAgent stable encoding behavior preserved | ALM owns the local content model and conversion protocols. SwiftAgent's stable JSON behavior must be folded in because replay fixtures and transcript codable tests depend on deterministic output. |
@@ -130,25 +138,25 @@ The already completed primitive work should remain credited as carry-forward wor
 | `DynamicGenerationSchema` | AnyLanguageModel | ALM already has a local dynamic schema model and tests; SwiftAgent now owns the ALM-derived primitive and should continue folding broader schema/session behavior into that local stack. |
 | `GenerationGuide` | AnyLanguageModel | ALM's guide model pairs with `@Guide`, `Generable`, and schema generation, so it should move with that stack. |
 | `Prompt` | Merged, AnyLanguageModel-biased public type with SwiftAgent source metadata retained | ALM should provide the FoundationModels-style prompt builder shape. SwiftAgent must keep input/source metadata needed for transcript resolving, grounding, and replay/debuggability. |
-| `Instructions` | AnyLanguageModel, extended for SwiftAgent transcript requirements | ALM has the canonical local instructions builder and transcript instructions entry. SwiftAgent needs this added without losing tool definition visibility. |
-| `Tool` | AnyLanguageModel, with SwiftAgent `DecodableTool` ergonomics folded in where useful | ALM's tool protocol is already local, schema-aware, and model-session oriented. SwiftAgent's decodable tool and rejection/reporting behavior should become helpers or conformances around the canonical tool model. |
-| `ToolExecutionDelegate / tool execution policy` | Merged, session-owned, SwiftAgent-biased policy semantics plus ALM delegate hook | ALM has a delegate hook, but merge docs require policy controls for parallel execution, retries, missing tools, failures, and approval. Providers should emit calls; canonical session should execute policy. |
+| `Instructions` | AnyLanguageModel, extended for SwiftAgent transcript requirements | ALM has the main local instructions builder and transcript instructions entry. SwiftAgent needs this added without losing tool definition visibility. |
+| `Tool` | AnyLanguageModel, with SwiftAgent `DecodableTool` ergonomics folded in where useful | ALM's tool protocol is already local, schema-aware, and model-session oriented. SwiftAgent's decodable tool and rejection/reporting behavior should become helpers or conformances around the main tool model. |
+| `ToolExecutionDelegate / tool execution policy` | Merged, session-owned, SwiftAgent-biased policy semantics plus ALM delegate hook | ALM has a delegate hook, but merge docs require policy controls for parallel execution, retries, missing tools, failures, and approval. Providers should emit calls; main session should execute policy. |
 | `LanguageModel` | AnyLanguageModel | ALM's `LanguageModel` is the desired direct provider boundary and enables replacing SDK adapters without a permanent bridge. |
-| `LanguageModelSession` | Merged: ALM construction/provider boundary plus SwiftAgent state, transcript, streaming, token usage, schema, replay, and tool policy | The public API should prefer `LanguageModelSession(model:tools:instructions:)`, but ALM's current session is not agent-grade enough. SwiftAgent's transcript-first stream processing and token/state behavior must be built into the canonical session engine. |
+| `LanguageModelSession` | Merged: ALM construction/provider boundary plus SwiftAgent state, transcript, streaming, token usage, schema, replay, and tool policy | The public API should prefer `LanguageModelSession(model:tools:instructions:)`, but ALM's current session is not agent-grade enough. SwiftAgent's transcript-first stream processing and token/state behavior must be built into the main session engine. |
 | `GenerationOptions` | AnyLanguageModel, with SwiftAgent provider-specific options folded into custom options | The accepted decision is one common options type with model-specific custom options. This removes provider-specific session API pressure while preserving OpenAI/Anthropic power. |
 | `Transcript` | Merged, SwiftAgent-biased with ALM additions | SwiftAgent's reasoning, call IDs, status, upsert, resolved transcript, and stable fixture behavior are mandatory. Reasoning remains its own transcript entry. Add ALM instructions, image segments, prompt options/response format, and tool definitions. |
 | streaming events / snapshots | Merged, SwiftAgent-biased transcript-first model | SwiftAgent's `AdapterUpdate.transcript` and `AdapterUpdate.tokenUsage` model matches the target direction. ALM content-only snapshots are insufficient; retain ALM `content`/`rawContent` convenience in public snapshots while adding transcript and token usage. |
 | `TokenUsage` | SwiftAgent | SwiftAgent already models input/output/total/cached/reasoning usage and accumulates it outside transcript. This aligns with accepted decisions. |
 | structured output protocols/macros | Merged: ALM `Generable`/content/schema as primitives, SwiftAgent `StructuredOutput`/resolver semantics preserved | ALM supplies local schema/content generation. SwiftAgent supplies agent-facing output registrations, transcript resolving, grounding, and UX behavior. The merged model must track whether structured output came from provider-native support, prompt fallback, or constrained decoding. |
-| `@SessionSchema` | SwiftAgent, aligned with the merged session/transcript API | This macro is a SwiftAgent agent-layer feature. It already emits local core type constraints and should remain canonical while generated resolver code follows the final merged transcript/session model. |
+| `@SessionSchema` | SwiftAgent, aligned with the merged session/transcript API | This macro is a SwiftAgent agent-layer feature. It already emits local core type constraints and should remain main while generated resolver code follows the final merged transcript/session model. |
 | `@Generable / @Guide` | AnyLanguageModel | These macros belong with ALM's local `Generable`, `GenerationGuide`, and schema model and should be folded into SwiftAgent's macro target/API. |
 | transport / HTTP client / replay | SwiftAgent | SwiftAgent's replay recorder, HTTP abstraction, network logging, and AgentRecorder workflow are core to provider parity and test review. Direct providers should use `SwiftAgent.HTTPClient` as their provider transport. `URLSessionHTTPClient` remains the default implementation. ALM's optional `AsyncHTTPClient` capability should be absorbed as an optional SwiftAgent `HTTPClient` implementation in a separate target/product, not as the base transport and not through ALM's `HTTPSession` typealias. |
 | provider model identifiers | Merged, direct-provider-biased | Preserve ALM direct provider types and string/custom endpoint flexibility. Map SwiftAgent's current `OpenAIModel`, `AnthropicModel`, and `SimulationModel` defaults/convenience only where they remain useful. |
 | provider capabilities | New merged capability model | Neither current stack fully owns the desired model. Implement the accepted hybrid: capability `OptionSet` checks, protocol inference, model/provider/runtime separation, and rich per-run streaming events. |
-| Observation / session UI state | Merged | Preserve ALM's canonical `@Observable LanguageModelSession` shape with `isResponding` and transcript, plus SwiftAgent's observable transcript/token usage behavior for agent UIs. |
+| Observation / session UI state | Merged | Preserve ALM's main `@Observable LanguageModelSession` shape with `isResponding` and transcript, plus SwiftAgent's observable transcript/token usage behavior for agent UIs. |
 | Provider metadata / rate limits / warnings | New merged metadata model outside transcript | Provider request IDs, normalized model IDs, warnings, rate-limit state, and retry-after hints are execution metadata. They should be available to responses, snapshots, logs, and replay without becoming model-visible transcript content. |
-| Optional provider dependencies | SwiftAgent package-layout decision, not a core type | Optional providers affect canonicalization boundaries but are not runtime core types. MLX, CoreML, Llama, and similar dependencies should stay out of the base product and move only through later approved optional target/product work. |
-| Transcript replay / diff | SwiftAgent-biased merged transcript support | Preserve deterministic replay review, stable generated-content JSON, transcript schema versioning, and focused diff helpers as canonical transcript infrastructure. |
+| Optional provider dependencies | SwiftAgent package-layout decision, not a core type | Optional providers affect standardization boundaries but are not runtime core types. MLX, CoreML, Llama, and similar dependencies should stay out of the base product and move only through later approved optional target/product work. |
+| Transcript replay / diff | SwiftAgent-biased merged transcript support | Preserve deterministic replay review, stable generated-content JSON, transcript schema versioning, and focused diff helpers as main transcript infrastructure. |
 | Structured output source tracking | Merged structured output behavior | Track whether structured output was produced by provider-native structured output, prompt fallback parsing, or constrained decoding so tests and debugging can distinguish reliability/failure modes. |
 | Reasoning representation | SwiftAgent transcript behavior | Reasoning remains separate from normal assistant response text and must preserve summary, `encryptedReasoning`, and status where providers support them. |
 
@@ -172,14 +180,14 @@ The already completed primitive work should remain credited as carry-forward wor
 - Move `GenerationOptions` with its actual `LanguageModel` custom-options constraint.
 - Fold `OpenAIGenerationOptions` and `AnthropicGenerationOptions` into model-specific custom option types.
 - Preserve SwiftAgent stable JSON and provider schema normalization behavior.
-- Expose the canonical core through a `SwiftAgent` library product.
+- Expose the main core through a `SwiftAgent` library product.
 
 ### LanguageModel And Session
 
 - Make ALM-style `LanguageModel` the provider boundary.
-- Make `LanguageModelSession(model:tools:instructions:)` the canonical session engine.
+- Make `LanguageModelSession(model:tools:instructions:)` the main session engine.
 - Preserve SwiftAgent observable transcript, cumulative token usage, replay/logging hooks, structured-output registration, and transcript resolver integration.
-- Keep `OpenAISession`, `AnthropicSession`, and `LanguageModelProvider` only if they are thin compatibility conveniences over the canonical session.
+- Keep `OpenAISession`, `AnthropicSession`, and `LanguageModelProvider` only if they are thin compatibility conveniences over the main session.
 
 ### Transcript And Streaming
 
@@ -236,7 +244,7 @@ xcodebuild -workspace SwiftAgent.xcworkspace -scheme ExampleApp -destination "pl
 xcodebuild -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" build -quiet
 ```
 
-Additional focused tests expected as canonical types are merged:
+Additional focused tests expected as main types are merged:
 
 - SwiftAgent macro tests for `@SessionSchema` output after the merged transcript/session API lands.
 - ALM core tests for `GeneratedContent`, conversion protocols, `GenerationSchema`, `DynamicGenerationSchema`, `GenerationGuide`, `Prompt`, `Instructions`, `ToolExecutionDelegate`, custom generation options, `@Generable`, and `@Guide`.
@@ -250,25 +258,25 @@ Provider replay tests should be preserved and expanded before removing SDK adapt
 
 ## Approval Gates
 
-- The canonical source table must be followed unless explicitly amended.
-- Any merged type whose canonical source is listed as "merged" needs design acceptance before replacement begins.
+- The primary source table must be followed unless explicitly amended.
+- Any merged type whose primary source is listed as "merged" needs design acceptance before replacement begins.
 - `JSONSchema` and `PartialJSONDecoder` additions are approved for the connected Phase 2 work when needed.
 - Dependency removals or replacements require separate explicit approval.
 - Moving, pruning, or renaming files under `External/AnyLanguageModel/` requires explicit approval.
 - Removing MacPaw `OpenAI`, `SwiftAnthropic`, ALM dependencies, or copied ALM package metadata requires explicit approval after parity evidence.
-- Provider-specific session deprecation or deletion requires canonical session parity and replay evidence.
+- Provider-specific session deprecation or deletion requires main session parity and replay evidence.
 
 ## Rollback And Cleanup Notes
 
 - If the proposed ownership table is rejected, update this plan rather than changing Swift source.
-- If implementation reveals that a chosen canonical source cannot preserve required behavior, stop and revise the design before adding compatibility scaffolding.
+- If implementation reveals that a chosen primary source cannot preserve required behavior, stop and revise the design before adding compatibility scaffolding.
 - If a temporary compatibility wrapper is introduced, document whether it is a permanent convenience or the exact condition for removal.
 - Keep `External/AnyLanguageModel/` intact until cleanup is approved.
-- Keep old SwiftAgent provider/session paths until canonical session parity and migration tests justify removal.
+- Keep old SwiftAgent provider/session paths until main session parity and migration tests justify removal.
 
 ## Open Questions
 
-- Should `GeneratedContent` stable JSON behavior live directly on the canonical ALM-derived type, or in a SwiftAgent replay/test helper extension?
+- Should `GeneratedContent` stable JSON behavior live directly on the main ALM-derived type, or in a SwiftAgent replay/test helper extension?
 - Should `Prompt` expose SwiftAgent source metadata publicly, package-internally, or through a transcript-only wrapper?
 - Should `Instructions` become a top-level user value only, or should transcript instructions use a distinct nested representation with tool definitions?
 - How should SwiftAgent `StructuredOutput` relate to `Generable`: should all structured outputs become `Generable`, or should `StructuredOutput.Schema` remain the generable payload?

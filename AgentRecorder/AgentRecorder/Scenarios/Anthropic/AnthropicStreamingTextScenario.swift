@@ -1,36 +1,28 @@
-// By Dennis Müller
+// By Dennis Muller
 
-import AnthropicSession
 import SwiftAgent
 
 enum AnthropicStreamingTextScenario {
-  /// Matches: `Tests/SwiftAgentTests/AnthropicSession/AnthropicStreamingTextTests.swift`
   static let scenario = AgentRecorderScenario(
     id: "anthropic/streaming-text",
     provider: .anthropic,
-    unitTestFile: "Tests/SwiftAgentTests/AnthropicSession/AnthropicStreamingTextTests.swift",
+    unitTestFile: "Tests/SwiftAgentTests/Core/DirectProviderReplayTests.swift",
     expectedRecordedResponsesCount: 1,
     run: { recorder, secrets in
-      let configuration = try AnthropicConfiguration.recording(
-        apiKey: secrets.anthropicAPIKey(),
-        recorder: recorder,
+      let apiKey = try secrets.anthropicAPIKey()
+      let model = AnthropicLanguageModel(
+        apiKey: apiKey,
+        model: AnthropicRecordingModel.model,
+        httpClient: AnthropicRecordingHTTPClient.make(apiKey: apiKey, recorder: recorder),
       )
-
-      let session = AnthropicSession(
-        schema: RecordingSchema(),
+      let session = LanguageModelSession(
+        model: model,
         instructions: "Reply with exactly: Hello",
-        configuration: configuration,
       )
 
-      let stream = try session.streamResponse(
-        to: "prompt",
-        using: AnthropicRecordingModel.model,
-      )
+      let stream = session.streamResponse(to: "prompt")
 
       for try await _ in stream {}
     },
   )
 }
-
-@SessionSchema
-private struct RecordingSchema {}

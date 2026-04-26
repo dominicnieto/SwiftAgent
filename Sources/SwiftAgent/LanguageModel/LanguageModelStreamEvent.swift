@@ -1,6 +1,6 @@
 import Foundation
 
-/// A normalized warning emitted by a provider or the canonical session.
+/// A normalized warning emitted by a provider or the main session.
 public struct LanguageModelWarning: Sendable, Equatable {
   public var code: String
   public var message: String
@@ -63,6 +63,23 @@ public struct ResponseMetadata: Sendable, Equatable {
   }
 }
 
+public extension ResponseMetadata {
+  /// Returns metadata formed by using non-empty values from `other` over this value.
+  func merging(_ other: ResponseMetadata) -> ResponseMetadata {
+    ResponseMetadata(
+      id: other.id ?? id,
+      requestID: other.requestID ?? requestID,
+      providerRequestID: other.providerRequestID ?? providerRequestID,
+      providerName: other.providerName ?? providerName,
+      modelID: other.modelID ?? modelID,
+      timestamp: other.timestamp ?? timestamp,
+      rateLimits: rateLimits.merging(other.rateLimits) { _, new in new },
+      warnings: warnings + other.warnings,
+      providerMetadata: providerMetadata.merging(other.providerMetadata) { _, new in new },
+    )
+  }
+}
+
 /// Normalized reason a provider finished a generation.
 public enum FinishReason: Sendable, Equatable {
   case completed
@@ -92,7 +109,7 @@ public struct LanguageModelStreamError: Error, LocalizedError, Sendable, Equatab
   }
 }
 
-/// Rich provider-originated stream events that the canonical session reduces into transcript and usage state.
+/// Rich provider-originated stream events that the main session reduces into transcript and usage state.
 public enum LanguageModelStreamEvent: Sendable, Equatable {
   case streamStarted(warnings: [LanguageModelWarning])
 

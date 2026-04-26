@@ -2,7 +2,7 @@
 
 ## Scope
 
-Inventory for the planned no-bridge merge of `/Users/dominicnieto/Desktop/AnyLanguageModel` into SwiftAgent. This phase records current surfaces and overlap only. It does not choose canonical Phase 2 types.
+Inventory for the planned no-bridge merge of `/Users/dominicnieto/Desktop/AnyLanguageModel` into SwiftAgent. This phase records current surfaces and overlap only. It does not choose main Phase 2 types.
 
 ## SwiftAgent Inventory
 
@@ -141,7 +141,7 @@ Do not decide these in Phase 0.
 
 - Session engine:
   - SwiftAgent: `LanguageModelProvider` plus provider-specific `OpenAISession`/`AnthropicSession`.
-  - AnyLanguageModel: canonical-looking `LanguageModelSession(model:tools:instructions:)`.
+  - AnyLanguageModel: main-looking `LanguageModelSession(model:tools:instructions:)`.
 - Provider boundary:
   - SwiftAgent: `Adapter`, `AdapterUpdate`, `AdapterModel`, `AdapterGenerationOptions`, provider SDK adapters.
   - AnyLanguageModel: `LanguageModel` providers with direct HTTP/local implementations.
@@ -211,7 +211,7 @@ Do not decide these in Phase 0.
 ## Initial Source-Compatible APIs Worth Preserving
 
 - `@SessionSchema` and resolved transcript ergonomics.
-- `LanguageModelSession(model:tools:instructions:)` as the preferred canonical construction shape.
+- `LanguageModelSession(model:tools:instructions:)` as the preferred main construction shape.
 - `OpenAILanguageModel`, `OpenResponsesLanguageModel`, and `AnthropicLanguageModel` as distinct provider types.
 - SwiftAgent `AgentResponse`/`AgentSnapshot` behavior: content plus transcript plus token usage.
 - SwiftAgent transcript fidelity: reasoning entries, tool call/output correlation IDs, status, stable upsert.
@@ -416,7 +416,7 @@ AnyLanguageModel has conditional direct `import FoundationModels` lines and Appl
 - Complete: tests that must continue to pass or be rewritten are identified under "Tests and Fixtures" and "Test Coverage Checklist".
 - Complete: `FoundationModels` imports/references are inventoried in prose and file lists.
 - Complete: OpenAI and SwiftAnthropic SDK imports are inventoried in prose and file lists.
-- Complete: duplicate concepts are listed under "Duplicate Concepts For Phase 2 Decision" without selecting canonical sources.
+- Complete: duplicate concepts are listed under "Duplicate Concepts For Phase 2 Decision" without selecting primary sources.
 - Complete: Observation/session UI state is inventoried as a merge surface and tied to AnyLanguageModel observation tests.
 - Complete: current SwiftAgent streaming behavior is captured under "Transcript and Streaming Behavior To Preserve" and "Streaming Baseline Fixtures".
 - Complete: AnyLanguageModel provider coverage and gating are captured under "Provider Coverage and Gating".

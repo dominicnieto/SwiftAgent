@@ -4,7 +4,7 @@
 
 Define how AnyLanguageModel package dependencies should move into SwiftAgent during the no-bridge merge.
 
-This is a dependency plan only. It does not choose canonical core types, does not merge providers, and does not require editing SwiftAgent's root `Package.swift` during Phase 1.
+This is a dependency plan only. It does not choose main core types, does not merge providers, and does not require editing SwiftAgent's root `Package.swift` during Phase 1.
 
 ## Current SwiftAgent Dependencies
 
@@ -69,7 +69,7 @@ AnyLanguageModel traits:
 
 ## Phase Guidance
 
-The original split between Phase 2 canonical types, Phase 3 transcript/streaming, Phase 4 OpenAI,
+The original split between Phase 2 main types, Phase 3 transcript/streaming, Phase 4 OpenAI,
 and Phase 5 Anthropic is superseded. These areas now move together in Phase 2 Core Model Stack
 Merge because their dependencies and types are architecturally coupled.
 

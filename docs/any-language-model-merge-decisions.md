@@ -40,7 +40,7 @@ Implication: Docs and examples should eventually import SwiftAgent only, unless 
 
 ### Public Session Names
 
-Decision: Design around the clean canonical API, not compatibility session names.
+Decision: Design around the clean main API, not compatibility session names.
 
 Preferred shape:
 

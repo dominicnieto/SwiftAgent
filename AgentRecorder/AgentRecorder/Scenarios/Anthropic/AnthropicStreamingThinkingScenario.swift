@@ -1,36 +1,32 @@
-// By Dennis Müller
+// By Dennis Muller
 
-import AnthropicSession
 import SwiftAgent
-import SwiftAnthropic
 
 enum AnthropicStreamingThinkingScenario {
-  /// Matches: `Tests/SwiftAgentTests/AnthropicSession/AnthropicStreamingThinkingRoundtripTests.swift`
   static let scenario = AgentRecorderScenario(
     id: "anthropic/streaming-thinking",
     provider: .anthropic,
-    unitTestFile: "Tests/SwiftAgentTests/AnthropicSession/AnthropicStreamingThinkingRoundtripTests.swift",
+    unitTestFile: "Tests/SwiftAgentTests/Core/DirectProviderReplayTests.swift",
     expectedRecordedResponsesCount: 2,
     run: { recorder, secrets in
-      let configuration = try AnthropicConfiguration.recording(
-        apiKey: secrets.anthropicAPIKey(),
-        recorder: recorder,
+      let apiKey = try secrets.anthropicAPIKey()
+      let model = AnthropicLanguageModel(
+        apiKey: apiKey,
+        model: AnthropicRecordingModel.model,
+        httpClient: AnthropicRecordingHTTPClient.make(apiKey: apiKey, recorder: recorder),
       )
-
-      let session = AnthropicSession(
-        schema: RecordingSchema(),
+      let session = LanguageModelSession(
+        model: model,
         instructions: "Reply with exactly: Hello",
-        configuration: configuration,
       )
 
-      let options = AnthropicGenerationOptions(
-        maxOutputTokens: 2048,
-        thinking: .init(budgetTokens: 1024),
+      var options = GenerationOptions(maximumResponseTokens: 2_048)
+      options[custom: AnthropicLanguageModel.self] = .init(
+        thinking: .init(budgetTokens: 1_024),
       )
 
-      let stream = try session.streamResponse(
+      let stream = session.streamResponse(
         to: "First prompt",
-        using: AnthropicRecordingModel.model,
         options: options,
       )
 
@@ -38,12 +34,8 @@ enum AnthropicStreamingThinkingScenario {
 
       _ = try await session.respond(
         to: "Second prompt",
-        using: AnthropicRecordingModel.model,
         options: options,
       )
     },
   )
 }
-
-@SessionSchema
-private struct RecordingSchema {}

@@ -129,7 +129,7 @@ Moved AnyLanguageModel tests should first be copied intact, then relocated into 
 
 ## Exit Criteria
 
-- `import SwiftAgent` exposes the canonical core API.
+- `import SwiftAgent` exposes the main core API.
 - optional local providers do not affect base builds.
 - AgentRecorder builds against merged providers.
 - tests are discoverable by concern.

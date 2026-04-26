@@ -8,8 +8,14 @@ struct DirectProviderReplayTests {
     let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(body: """
     {
       "id": "resp_1",
+      "model": "openai/gpt-test",
       "output": [],
-      "output_text": "Hello from Open Responses"
+      "output_text": "Hello from Open Responses",
+      "usage": {
+        "input_tokens": 3,
+        "output_tokens": 4,
+        "total_tokens": 7
+      }
     }
     """))
     let model = OpenResponsesLanguageModel(
@@ -23,6 +29,11 @@ struct DirectProviderReplayTests {
     let response = try await session.respond(to: "Hello")
 
     #expect(response.content == "Hello from Open Responses")
+    #expect(response.responseMetadata?.id == "resp_1")
+    #expect(response.responseMetadata?.providerName == "Open Responses")
+    #expect(response.responseMetadata?.modelID == "openai/gpt-test")
+    #expect(response.tokenUsage?.totalTokens == 7)
+    #expect(session.responseMetadata?.id == "resp_1")
     let requests = await replay.recordedRequests()
     #expect(requests.count == 1)
     #expect(requests.first?.path == "responses")
@@ -43,7 +54,7 @@ struct DirectProviderReplayTests {
     data: {"type":"response.output_text.delta","delta":"lo"}
 
     event: response.completed
-    data: {"type":"response.completed"}
+    data: {"type":"response.completed","response":{"id":"resp_stream","model":"openai/gpt-test","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}}
 
     """))
     let model = OpenResponsesLanguageModel(
@@ -59,8 +70,11 @@ struct DirectProviderReplayTests {
       snapshots.append(snapshot)
     }
 
-    #expect(snapshots.map(\.content) == ["Hel", "Hello", "Hello"])
+    #expect(snapshots.compactMap(\.content) == ["Hel", "Hello", "Hello"])
     #expect(session.transcript.lastResponseEntry()?.text == "Hello")
+    #expect(session.responseMetadata?.id == "resp_stream")
+    #expect(session.responseMetadata?.modelID == "openai/gpt-test")
+    #expect(session.tokenUsage?.totalTokens == 5)
     let requests = await replay.recordedRequests()
     guard case let .object(body)? = requests.first?.body else {
       Issue.record("Expected Open Responses streaming request body object")
@@ -203,6 +217,12 @@ struct DirectProviderReplayTests {
     let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(body: """
     {
       "id": "chatcmpl_1",
+      "model": "gpt-test",
+      "usage": {
+        "prompt_tokens": 2,
+        "completion_tokens": 3,
+        "total_tokens": 5
+      },
       "choices": [
         {
           "message": {
@@ -227,6 +247,10 @@ struct DirectProviderReplayTests {
     let response = try await session.respond(to: "Hello")
 
     #expect(response.content == "Hello from Chat")
+    #expect(response.responseMetadata?.id == "chatcmpl_1")
+    #expect(response.responseMetadata?.providerName == "OpenAI")
+    #expect(response.responseMetadata?.modelID == "gpt-test")
+    #expect(response.tokenUsage?.totalTokens == 5)
     let requests = await replay.recordedRequests()
     #expect(requests.first?.path == "chat/completions")
   }
@@ -244,7 +268,11 @@ struct DirectProviderReplayTests {
         }
       ],
       "model": "claude-test",
-      "stop_reason": "end_turn"
+      "stop_reason": "end_turn",
+      "usage": {
+        "input_tokens": 4,
+        "output_tokens": 5
+      }
     }
     """))
     let model = AnthropicLanguageModel(
@@ -257,12 +285,19 @@ struct DirectProviderReplayTests {
     let response = try await session.respond(to: "Hello")
 
     #expect(response.content == "Hello from Claude")
+    #expect(response.responseMetadata?.id == "msg_1")
+    #expect(response.responseMetadata?.providerName == "Anthropic")
+    #expect(response.responseMetadata?.modelID == "claude-test")
+    #expect(response.tokenUsage?.totalTokens == 9)
     let requests = await replay.recordedRequests()
     #expect(requests.first?.path == "v1/messages")
   }
 
   @Test func anthropicProviderStreamsTextThroughCanonicalSessionAndHTTPClient() async throws {
     let replay = ReplayHTTPClient<[String: JSONValue]>(recordedResponse: .init(body: """
+    event: message_start
+    data: {"type":"message_start","message":{"id":"msg_stream","type":"message","role":"assistant","content":[],"model":"claude-test","stop_reason":null,"usage":{"input_tokens":1,"output_tokens":0}}}
+
     event: content_block_delta
     data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}
 
@@ -285,8 +320,11 @@ struct DirectProviderReplayTests {
       snapshots.append(snapshot)
     }
 
-    #expect(snapshots.map(\.content) == ["Hel", "Hello", "Hello"])
+    #expect(snapshots.compactMap(\.content) == ["Hel", "Hello", "Hello"])
     #expect(session.transcript.lastResponseEntry()?.text == "Hello")
+    #expect(session.responseMetadata?.id == "msg_stream")
+    #expect(session.responseMetadata?.providerName == "Anthropic")
+    #expect(session.responseMetadata?.modelID == "claude-test")
     let requests = await replay.recordedRequests()
     #expect(requests.first?.body["stream"] == .bool(true))
   }

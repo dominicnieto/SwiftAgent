@@ -1,44 +1,34 @@
-// By Dennis Müller
+// By Dennis Muller
 
-import OpenAI
-import OpenAISession
 import SwiftAgent
 
 enum OpenAIStreamingTextScenario {
-  /// Matches: `Tests/SwiftAgentTests/OpenAISession/OpenAIStreamingTextTests.swift`
   static let scenario = AgentRecorderScenario(
     id: "openai/streaming-text",
     provider: .openAI,
-    unitTestFile: "Tests/SwiftAgentTests/OpenAISession/OpenAIStreamingTextTests.swift",
+    unitTestFile: "Tests/SwiftAgentTests/Core/DirectProviderReplayTests.swift",
     expectedRecordedResponsesCount: 1,
     run: { recorder, secrets in
-      let configuration = try OpenAIConfiguration.recording(
-        apiKey: secrets.openAIAPIKey(),
-        recorder: recorder,
+      let apiKey = try secrets.openAIAPIKey()
+      let model = OpenAILanguageModel(
+        apiKey: apiKey,
+        model: OpenAIRecordingModel.model,
+        apiVariant: .responses,
+        httpClient: OpenAIRecordingHTTPClient.make(apiKey: apiKey, recorder: recorder),
       )
-
-      let session = OpenAISession(
-        schema: RecordingSchema(),
+      let session = LanguageModelSession(
+        model: model,
         instructions: "Reply with exactly: Hello, World!",
-        configuration: configuration,
       )
 
-      let stream = try session.streamResponse(
-        to: "prompt",
-        using: OpenAIRecordingModel.model,
-        options: .init(
-          include: [.reasoning_encryptedContent],
-          reasoning: .init(
-            effort: .low,
-            summary: .detailed,
-          ),
-        ),
+      var options = GenerationOptions()
+      options[custom: OpenAILanguageModel.self] = .init(
+        reasoning: .init(effort: .low, summary: "detailed"),
       )
+
+      let stream = session.streamResponse(to: "prompt", options: options)
 
       for try await _ in stream {}
     },
   )
 }
-
-@SessionSchema
-private struct RecordingSchema {}

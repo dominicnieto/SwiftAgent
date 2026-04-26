@@ -1,19 +1,19 @@
-# Phase 2 Canonical Types Results
+# Phase 2 Core Model Stack Results
 
 ## Summary
 
-Implemented the earlier Phase 2 canonical core work for local FoundationModels-style primitives.
+Implemented the earlier Phase 2 main core work for local FoundationModels-style primitives.
 
-Planning update: the original split between Phase 2 canonical types, Phase 3 transcript/streaming,
+Planning update: the original split between Phase 2 main types, Phase 3 transcript/streaming,
 Phase 4 OpenAI, and Phase 5 Anthropic has been superseded. New implementation should use the
 updated `plans/phase-2-canonical-types-plan.md` and treat those areas as one coherent model-stack
 merge. Do not use this results file as justification for adding interim protocols, placeholder
 types, bridge sessions, or compatibility-only typealiases to preserve old phase boundaries.
 
-Phase 2 status: partial. Phase 2 is not complete. This result covers the earlier canonical core work:
+Phase 2 status: partial. Phase 2 is not complete. This result covers the earlier main core work:
 local core primitives, macro references, and the current provider/test/example call sites needed
 to consume those primitives. Later slices also resolved `@Generable` defaulted-property parity,
-migrated focused ALM core tests for canonical SwiftAgent primitives, and completed the Phase 2
+migrated focused ALM core tests for main SwiftAgent primitives, and completed the Phase 2
 prompt ownership slice. Transcript/session/provider replacement, unified generation options,
 provider capabilities, and direct provider migration remain open workstreams in the merged Phase 2
 plan.
@@ -110,7 +110,7 @@ Follow-ups:
 
 - Continue ALM core test migration/classification for generated content, broader generation schema
   behavior, prompt, instructions, transcript, generation options, and tool execution.
-- Phase 2 remains partial because the checklist still has incomplete canonical ownership and
+- Phase 2 remains partial because the checklist still has incomplete primary ownership and
   dependency-decision items.
 
 Final review status:
@@ -212,14 +212,14 @@ Follow-ups:
 - `LanguageModel`, `Availability`, `GenerationOptions`, `JSONValue`/`JSONSchema`, and
   `PartialJSONDecoder` checklist items remain unresolved or deferred pending later approved work.
 
-## Prompt Canonical Ownership And Prompt/Instructions Test Slice
+## Prompt Main Ownership And Prompt/Instructions Test Slice
 
 Completed the next Phase 2 implementation step from `docs/phase-2-completion-checklist.md`:
-canonical `Prompt` ownership plus another focused ALM core test migration slice.
+primary `Prompt` ownership plus another focused ALM core test migration slice.
 
 Implementation:
 
-- Kept SwiftAgent's existing `Prompt`/`PromptBuilder` as the canonical prompt implementation
+- Kept SwiftAgent's existing `Prompt`/`PromptBuilder` as the main prompt implementation
   because it already preserves richer section/tag rendering used by SwiftAgent prompt/source tests.
 - Added ALM-compatible `CustomStringConvertible` behavior so `Prompt.description` returns the
   formatted model input text.
@@ -336,10 +336,10 @@ Review status:
 - This implementation step is ready to commit.
 - Phase 2 remains partial according to `docs/phase-2-completion-checklist.md`.
 
-## Availability Canonical Ownership Slice
+## Availability Main Ownership Slice
 
 Completed the next feature-shaped Phase 2 implementation step from
-`docs/phase-2-completion-checklist.md`: canonical `Availability` ownership.
+`docs/phase-2-completion-checklist.md`: main `Availability` ownership.
 
 Implementation:
 
@@ -364,7 +364,7 @@ Dependency decisions:
 - `Package.swift` was not edited.
 - This slice did not need `JSONSchema`, `JSONValue`, `PartialJSONDecoder`, provider request
   builders, or structured streaming code.
-- `LanguageModel` remains incomplete because the ALM protocol is coupled to the future canonical
+- `LanguageModel` remains incomplete because the ALM protocol is coupled to the future main
   `LanguageModelSession` and unified `GenerationOptions` boundary.
 - `GenerationOptions` / `JSONValue` remains incomplete. Add `JSONSchema` when editing
   `Package.swift` for that slice if moved ALM code naturally needs it, and record the validation
@@ -398,7 +398,7 @@ No signing certificate "Mac Development" found: No "Mac Development" signing cer
 
 Follow-ups:
 
-- Resolve canonical `LanguageModel` ownership, or explicitly amend/defer that Phase 2 item with
+- Resolve main `LanguageModel` ownership, or explicitly amend/defer that Phase 2 item with
   approval if its implementation requires pulling later `LanguageModelSession` work into Phase 2.
 - Resolve the `GenerationOptions` / `JSONValue` workstream, adding `JSONSchema` if the moved
   implementation naturally needs it.
@@ -414,7 +414,7 @@ Review status:
 - Confirmed no uncommitted `Package.swift`, `Package.resolved`, `External/AnyLanguageModel`, or
   `.swiftpm/xcode/xcshareddata/xcschemes/*.xcscheme` changes.
 - Confirmed no `.DS_Store` files are present.
-- The Availability canonical ownership slice is ready to commit.
+- The Availability primary ownership slice is ready to commit.
 - Phase 2 remains partial according to `docs/phase-2-completion-checklist.md`.
 
 ## Source Movement
@@ -549,15 +549,15 @@ The same target compiled with signing disabled using the command recorded above.
 
 ## GenerationOptions, JSONValue, LanguageModel, Session Surface Slice
 
-Completed the next merged Phase 2 implementation step: initial canonical SwiftAgent options/model/session surface.
+Completed the next merged Phase 2 implementation step: initial main SwiftAgent options/model/session surface.
 
 Implementation:
 
-- Added a public `SwiftAgent` library product so `import SwiftAgent` exposes the canonical core target directly.
+- Added a public `SwiftAgent` library product so `import SwiftAgent` exposes the main core target directly.
 - Added `JSONSchema` to the root package and SwiftAgent target, then exposed `SwiftAgent.JSONValue` as `JSONSchema.JSONValue`.
-- Added canonical `GenerationOptions` with shared sampling, temperature, maximum response token, minimum snapshot interval fields, and typed model-specific custom options keyed by `LanguageModel`.
-- Added the initial canonical `LanguageModel` protocol, `LanguageModelFeedback`, and `LanguageModelSession(model:tools:instructions:)`.
-- The new canonical session owns SwiftAgent transcript state, token usage accumulation, instructions/prompt/response transcript entries, and transcript-derived streaming snapshots.
+- Added main `GenerationOptions` with shared sampling, temperature, maximum response token, minimum snapshot interval fields, and typed model-specific custom options keyed by `LanguageModel`.
+- Added the initial main `LanguageModel` protocol, `LanguageModelFeedback`, and `LanguageModelSession(model:tools:instructions:)`.
+- The new main session owns SwiftAgent transcript state, token usage accumulation, instructions/prompt/response transcript entries, and transcript-derived streaming snapshots.
 - Merged the first ALM transcript addition into SwiftAgent by adding instruction transcript entries with model-visible tool definitions.
 - Updated existing OpenAI, Anthropic, resolver, and example transcript switches to account for instruction entries without changing old SDK adapter behavior.
 - Added focused Swift Testing coverage for `JSONValue`, custom options, response transcript/token state, and transcript-derived streaming snapshots.
@@ -585,7 +585,7 @@ Files changed:
 
 Dependency decisions:
 
-- Added approved `JSONSchema` to the root package because this slice moved `JSONValue` and canonical `GenerationOptions` custom-option payloads into SwiftAgent.
+- Added approved `JSONSchema` to the root package because this slice moved `JSONValue` and main `GenerationOptions` custom-option payloads into SwiftAgent.
 - `JSONSchema` resolved to `1.3.1`.
 - Did not add `PartialJSONDecoder`; structured streaming and partial snapshot decoding were not moved in this slice.
 - Did not remove MacPaw `OpenAI`.
@@ -630,19 +630,19 @@ Result: failed with Xcode build database locking because multiple `xcodebuild` c
 
 Follow-ups:
 
-- Migrate provider-specific OpenAI and Anthropic custom option types into the canonical `GenerationOptions` custom-options model.
-- Make direct OpenAI and Anthropic language models conform to the canonical `LanguageModel` boundary after transcript-first provider events and replay parity are ready.
+- Migrate provider-specific OpenAI and Anthropic custom option types into the main `GenerationOptions` custom-options model.
+- Make direct OpenAI and Anthropic language models conform to the main `LanguageModel` boundary after transcript-first provider events and replay parity are ready.
 - Continue merging transcript additions, tool execution policy, replay/logging hooks, and AgentRecorder/example/docs migration.
 
-Phase 2 status: partial. This slice is durable canonical surface work, but Phase 2 is not complete because direct provider parity, full transcript merge, tool execution policy, and documentation/example migration remain open.
+Phase 2 status: partial. This slice is durable main surface work, but Phase 2 is not complete because direct provider parity, full transcript merge, tool execution policy, and documentation/example migration remain open.
 
 ## Direct Provider, Transport, Streaming Tool Policy Checkpoint
 
-Completed the next merged Phase 2 checkpoint: direct OpenAI/Open Responses and Anthropic providers now run through the canonical SwiftAgent model/session/tool-policy/transport path for replay-backed text, tool, structured-streaming, and streamed tool-call scenarios.
+Completed the next merged Phase 2 checkpoint: direct OpenAI/Open Responses and Anthropic providers now run through the main SwiftAgent model/session/tool-policy/transport path for replay-backed text, tool, structured-streaming, and streamed tool-call scenarios.
 
 Implementation:
 
-- Mechanically copied ALM direct provider source files into SwiftAgent, then refactored them into SwiftAgent's canonical architecture.
+- Mechanically copied ALM direct provider source files into SwiftAgent, then refactored them into SwiftAgent's main architecture.
 - Added direct `OpenAILanguageModel`, `OpenResponsesLanguageModel`, and `AnthropicLanguageModel` conformances to `LanguageModel`.
 - Added provider capability reporting for the direct providers.
 - Added `LanguageModelCapabilities`, rich stream event/metadata primitives, and `PartialJSONDecoder`-backed partial structured generation.
@@ -714,7 +714,7 @@ swift test --filter DirectProviderReplayTests
 Result before fixing the Open Responses streaming loop:
 
 ```text
-openResponsesProviderStreamsToolCallsThroughCanonicalSessionPolicy failed because OpenResponsesLanguageModel still used the old content-only streaming loop.
+openResponsesProviderStreamsToolCallsThroughMainSessionPolicy failed because OpenResponsesLanguageModel still used the old content-only streaming loop.
 ```
 
 Attempted and blocked by local environment:
@@ -733,6 +733,91 @@ Follow-ups:
 
 - Phase 2 remains partial.
 - Provider response metadata, warnings, rate-limit details, and normalized stream errors still need to be surfaced through response/snapshot/logging APIs.
-- Old `OpenAISession`, `AnthropicSession`, and `LanguageModelProvider` paths still need to become thin conveniences over the canonical session or be deprecated after parity evidence.
-- AgentRecorder, README, examples, and public docs still need migration to the canonical API after provider parity is complete.
+- Old `OpenAISession`, `AnthropicSession`, and `LanguageModelProvider` paths still need to become thin conveniences over the main session or be deprecated after parity evidence.
+- AgentRecorder, README, examples, and public docs still need migration to the main API after provider parity is complete.
 - Dependency removal proposals for MacPaw `OpenAI` and `SwiftAnthropic` still require explicit approval after parity evidence.
+
+## Provider Metadata, AgentRecorder, And README Example Checkpoint
+
+Completed the next merged Phase 2 implementation step: provider responses and streams now surface
+metadata through the main `LanguageModelSession`, and AgentRecorder scenarios use direct
+SwiftAgent providers instead of the old provider-session modules.
+
+Implementation:
+
+- Added `responseMetadata` to `LanguageModelSession.Response`, `ResponseStream.Snapshot`, and the
+  session state.
+- Added metadata merging so streamed provider metadata can arrive separately from content deltas
+  without replacing the latest content snapshot.
+- Parsed and surfaced response IDs, provider names, provider model IDs, and token usage for direct
+  Open Responses, OpenAI Chat/Responses, and Anthropic Messages responses.
+- Updated replay tests to assert provider metadata and usage on non-streaming and streaming paths.
+- Migrated AgentRecorder OpenAI and Anthropic scenarios to `import SwiftAgent`,
+  `OpenAILanguageModel` / `OpenResponsesLanguageModel` / `AnthropicLanguageModel`, and
+  `LanguageModelSession(model:tools:instructions:)`.
+- Reworked AgentRecorder recording helpers to build direct-provider `SwiftAgent.HTTPClient`
+  transports with recorder interceptors.
+- Updated `Sources/ExampleCode/ReadmeCode.swift` to build against `import SwiftAgent`, direct
+  providers, main `GenerationOptions`, response metadata, streaming snapshots, and
+  `@SessionSchema` transcript resolution examples.
+- Adapted README in place to the main `SwiftAgent` API while preserving existing sections,
+  including Session Schema, Groundings, Streaming, Proxy Servers, Simulated Session, Logging, and
+  Recording HTTP Fixtures.
+- Removed old provider-session and `SwiftAnthropic` dependencies from the `ExampleCode` target.
+- Kept README adaptation preserve-first after review feedback: the existing README sections were
+  adapted in place rather than replaced wholesale.
+
+Files changed:
+
+- `Package.swift`
+- `AgentRecorder/AgentRecorder/Scenarios/Anthropic/AnthropicConfiguration+Recording.swift`
+- `AgentRecorder/AgentRecorder/Scenarios/Anthropic/AnthropicRecordingModel.swift`
+- `AgentRecorder/AgentRecorder/Scenarios/Anthropic/AnthropicStreamingTextScenario.swift`
+- `AgentRecorder/AgentRecorder/Scenarios/Anthropic/AnthropicStreamingThinkingScenario.swift`
+- `AgentRecorder/AgentRecorder/Scenarios/Anthropic/AnthropicStreamingToolCallsNoArgsPingScenario.swift`
+- `AgentRecorder/AgentRecorder/Scenarios/Anthropic/AnthropicStreamingToolCallsWeatherScenario.swift`
+- `AgentRecorder/AgentRecorder/Scenarios/Anthropic/AnthropicStructuredOutputScenario.swift`
+- `AgentRecorder/AgentRecorder/Scenarios/Anthropic/AnthropicTextScenario.swift`
+- `AgentRecorder/AgentRecorder/Scenarios/OpenAI/OpenAIConfiguration+Recording.swift`
+- `AgentRecorder/AgentRecorder/Scenarios/OpenAI/OpenAIRecordingModel.swift`
+- `AgentRecorder/AgentRecorder/Scenarios/OpenAI/OpenAIStreamingStructuredOutputScenario.swift`
+- `AgentRecorder/AgentRecorder/Scenarios/OpenAI/OpenAIStreamingTextScenario.swift`
+- `AgentRecorder/AgentRecorder/Scenarios/OpenAI/OpenAIStreamingToolCallsMultipleScenario.swift`
+- `AgentRecorder/AgentRecorder/Scenarios/OpenAI/OpenAIStreamingToolCallsWeatherScenario.swift`
+- `AgentRecorder/AgentRecorder/Scenarios/OpenAI/OpenAIStructuredOutputScenario.swift`
+- `AgentRecorder/AgentRecorder/Scenarios/OpenAI/OpenAITextScenario.swift`
+- `AgentRecorder/AgentRecorder/Scenarios/OpenAI/OpenAIToolCallsWeatherScenario.swift`
+- `README.md`
+- `Sources/ExampleCode/ReadmeCode.swift`
+- `Sources/SwiftAgent/LanguageModel/AnthropicLanguageModel.swift`
+- `Sources/SwiftAgent/LanguageModel/LanguageModelSession.swift`
+- `Sources/SwiftAgent/LanguageModel/LanguageModelStreamEvent.swift`
+- `Sources/SwiftAgent/LanguageModel/OpenAILanguageModel.swift`
+- `Sources/SwiftAgent/LanguageModel/OpenResponsesLanguageModel.swift`
+- `Tests/SwiftAgentTests/Core/DirectProviderReplayTests.swift`
+- `docs/phase-2-completion-checklist.md`
+- `docs/phase-2-canonical-types-results.md`
+- `plans/phase-2-canonical-types-plan.md`
+
+Dependency decisions:
+
+- No new dependency additions in this checkpoint.
+- Continued using approved `PartialJSONDecoder` for direct provider structured streaming.
+- Continued using `SwiftAgent.HTTPClient` as the provider-facing transport and `URLSessionHTTPClient`
+  as the default implementation.
+- Did not add AsyncHTTPClient to the base `SwiftAgent` target.
+- Did not remove MacPaw `OpenAI`.
+- Did not remove `SwiftAnthropic`.
+- Did not remove dependencies from `External/AnyLanguageModel`.
+- Did not prune or delete `External/AnyLanguageModel`.
+
+Validation succeeded:
+
+```bash
+swift test --filter DirectProviderReplayTests
+swift build --target ExampleCode
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO build -quiet
+```
+
+Phase 2 status: still partial until required final validation is rerun and approval-gated
+dependency/product cleanup is either approved or explicitly deferred.

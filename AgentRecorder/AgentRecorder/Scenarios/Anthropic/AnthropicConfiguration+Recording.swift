@@ -1,15 +1,14 @@
 // By Dennis Müller
 
-import AnthropicSession
 import Foundation
 import SwiftAgent
 
-extension AnthropicConfiguration {
-  static func recording(
+enum AnthropicRecordingHTTPClient {
+  static func make(
     apiKey: String,
     apiVersion: String = "2023-06-01",
     recorder: HTTPReplayRecorder,
-  ) -> AnthropicConfiguration {
+  ) -> any HTTPClient {
     let encoder = JSONEncoder()
     encoder.keyEncodingStrategy = .convertToSnakeCase
     encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
@@ -32,7 +31,7 @@ extension AnthropicConfiguration {
     interceptors = interceptors.recording(to: recorder)
 
     let configuration = HTTPClientConfiguration(
-      baseURL: URL(string: "https://api.anthropic.com")!,
+      baseURL: URL(string: "https://api.anthropic.com/")!,
       defaultHeaders: defaultHeaders,
       timeout: 60,
       jsonEncoder: encoder,
@@ -41,6 +40,6 @@ extension AnthropicConfiguration {
     )
 
     let session = RecordingURLSession.make(timeout: configuration.timeout)
-    return AnthropicConfiguration(httpClient: URLSessionHTTPClient(configuration: configuration, session: session))
+    return URLSessionHTTPClient(configuration: configuration, session: session)
   }
 }
