@@ -27,11 +27,13 @@ actor ReplayHTTPClient<RequestBodyType: Encodable & Sendable>: HTTPClient {
   struct RecordedResponse: Sendable {
     var body: String
     var statusCode: Int
+    var headers: [String: String]
     var delay: Duration?
 
-    init(body: String, statusCode: Int = 200, delay: Duration? = nil) {
+    init(body: String, statusCode: Int = 200, headers: [String: String] = [:], delay: Duration? = nil) {
       self.body = body
       self.statusCode = statusCode
+      self.headers = headers
       self.delay = delay
     }
   }
@@ -63,14 +65,14 @@ actor ReplayHTTPClient<RequestBodyType: Encodable & Sendable>: HTTPClient {
     self.makeJSONDecoder = makeJSONDecoder
   }
 
-  nonisolated func send<ResponseBody>(
+  nonisolated func sendResponse<ResponseBody>(
     path: String,
     method: HTTPMethod,
     queryItems: [URLQueryItem]?,
     headers: [String: String]?,
     body: (some Encodable & Sendable)?,
     responseType: ResponseBody.Type,
-  ) async throws -> ResponseBody where ResponseBody: Decodable {
+  ) async throws -> HTTPClientDecodedResponse<ResponseBody> where ResponseBody: Decodable & Sendable {
     if let body = body as? RequestBodyType {
       await record(path: path, method: method, queryItems: queryItems, headers: headers, body: body)
     } else {
@@ -91,7 +93,13 @@ actor ReplayHTTPClient<RequestBodyType: Encodable & Sendable>: HTTPClient {
       throw HTTPError.unacceptableStatus(code: response.statusCode, data: data)
     }
 
-    return try makeJSONDecoder().decode(ResponseBody.self, from: data)
+    let decodedBody = try makeJSONDecoder().decode(ResponseBody.self, from: data)
+    return HTTPClientDecodedResponse(
+      requestID: UUID(),
+      statusCode: response.statusCode,
+      headers: response.headers,
+      body: decodedBody,
+    )
   }
 
   nonisolated func stream(
@@ -132,6 +140,44 @@ actor ReplayHTTPClient<RequestBodyType: Encodable & Sendable>: HTTPClient {
         task.cancel()
       }
     }
+  }
+
+  nonisolated func streamResponse(
+    path: String,
+    method: HTTPMethod,
+    headers: [String: String],
+    body: (some Encodable & Sendable)?,
+  ) async throws -> HTTPClientStreamResponse {
+    if let body = body as? RequestBodyType {
+      await record(path: path, method: method, queryItems: nil, headers: headers, body: body)
+    } else {
+      throw ReplayError.invalidBodyType
+    }
+
+    let response = try await takeNextRecordedResponse()
+    guard let data = response.body.data(using: .utf8) else {
+      throw ReplayError.invalidUTF8RecordedResponse
+    }
+    guard (200..<300).contains(response.statusCode) else {
+      throw HTTPError.unacceptableStatus(code: response.statusCode, data: data)
+    }
+
+    let events = AsyncThrowingStream<EventSource.Event, any Error> { continuation in
+      let task = Task {
+        for event in await parseEvents(from: response.body) {
+          continuation.yield(event)
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+
+    return HTTPClientStreamResponse(
+      requestID: UUID(),
+      statusCode: response.statusCode,
+      headers: response.headers,
+      events: events,
+    )
   }
 
   nonisolated func recordedRequests() async -> [Request] {

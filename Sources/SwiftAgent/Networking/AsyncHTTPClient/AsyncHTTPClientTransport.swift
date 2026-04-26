@@ -16,14 +16,14 @@ public final class AsyncHTTPClientTransport: HTTPClient {
     self.client = client
   }
 
-  public func send<ResponseBody: Decodable>(
+  public func sendResponse<ResponseBody: Decodable & Sendable>(
     path: String,
     method: HTTPMethod,
     queryItems: [URLQueryItem]?,
     headers: [String: String]?,
     body: (some Encodable & Sendable)?,
     responseType: ResponseBody.Type,
-  ) async throws -> ResponseBody {
+  ) async throws -> HTTPClientDecodedResponse<ResponseBody> {
     let bodyData = try body.map { try configuration.jsonEncoder.encode($0) }
     let request = try await makePreparedURLRequest(
       path: path,
@@ -52,10 +52,22 @@ public final class AsyncHTTPClientTransport: HTTPClient {
       await recordRequest(retryRequest, requestID: retryRequestID, isRetry: true)
       let (retryData, retryResponse) = try await execute(retryRequest)
       await recordResponse(retryData, response: retryResponse, requestID: retryRequestID, isRetry: true)
-      return try decode(responseType, data: retryData, response: retryResponse)
+      let body = try decode(responseType, data: retryData, response: retryResponse)
+      return HTTPClientDecodedResponse(
+        requestID: retryRequestID,
+        statusCode: retryResponse.statusCode,
+        headers: retryResponse.swiftAgentHeaderFields,
+        body: body,
+      )
     }
 
-    return try decode(responseType, data: data, response: response)
+    let decodedBody = try decode(responseType, data: data, response: response)
+    return HTTPClientDecodedResponse(
+      requestID: requestID,
+      statusCode: response.statusCode,
+      headers: response.swiftAgentHeaderFields,
+      body: decodedBody,
+    )
   }
 
   public func stream(
@@ -175,9 +187,132 @@ public final class AsyncHTTPClientTransport: HTTPClient {
       }
     }
   }
+
+  public func streamResponse(
+    path: String,
+    method: HTTPMethod,
+    headers: [String: String],
+    body: (some Encodable & Sendable)?,
+  ) async throws -> HTTPClientStreamResponse {
+    let bodyData = try body.map { try configuration.jsonEncoder.encode($0) }
+    let request = try await makePreparedURLRequest(
+      path: path,
+      method: method,
+      queryItems: nil,
+      headers: headers,
+      body: bodyData,
+      accept: "text/event-stream",
+    )
+
+    let requestID = UUID()
+    await recordRequest(request, requestID: requestID, isRetry: false)
+
+    var (response, bodyStream) = try await executeStreaming(request)
+    var activeRequestID = requestID
+    var isRetry = false
+
+    if response.statusCode == 401,
+       let onUnauthorized = configuration.interceptors.onUnauthorized,
+       await onUnauthorized(response, nil, request) {
+      var retryRequest = request
+      if let prepare = configuration.interceptors.prepareRequest {
+        try await prepare(&retryRequest)
+      }
+      activeRequestID = UUID()
+      isRetry = true
+      await recordRequest(retryRequest, requestID: activeRequestID, isRetry: true)
+      (response, bodyStream) = try await executeStreaming(retryRequest)
+    }
+
+    guard (200..<300).contains(response.statusCode) else {
+      let errorData = try await collectBody(bodyStream, limit: 4 * 1024)
+      await recordResponse(errorData, response: response, requestID: activeRequestID, isRetry: isRetry)
+      throw HTTPError.unacceptableStatus(code: response.statusCode, data: errorData)
+    }
+
+    let responseHeaders = response.swiftAgentHeaderFields
+    let events = makeEventStream(bodyStream: bodyStream, response: response, requestID: activeRequestID, isRetry: isRetry)
+
+    return HTTPClientStreamResponse(
+      requestID: activeRequestID,
+      statusCode: response.statusCode,
+      headers: responseHeaders,
+      events: events,
+    )
+  }
 }
 
 private extension AsyncHTTPClientTransport {
+  func makeEventStream(
+    bodyStream: HTTPClientResponse.Body,
+    response: HTTPURLResponse,
+    requestID: UUID,
+    isRetry: Bool,
+  ) -> AsyncThrowingStream<EventSource.Event, any Error> {
+    AsyncThrowingStream(bufferingPolicy: .unbounded) { continuation in
+      let task = Task {
+        let shouldRecordStreamBody = configuration.interceptors.onStreamResponse != nil
+        var collectedBytes = Data()
+        if shouldRecordStreamBody {
+          collectedBytes.reserveCapacity(32 * 1024)
+        }
+
+        let parser = EventSource.Parser()
+
+        func flushParsedEvents() async {
+          while let event = await parser.getNextEvent() {
+            continuation.yield(event)
+          }
+        }
+
+        do {
+          for try await buffer in bodyStream {
+            try Task.checkCancellation()
+            for byte in buffer.readableBytesView {
+              if shouldRecordStreamBody {
+                collectedBytes.append(byte)
+              }
+              await parser.consume(byte)
+              if byte == 0x0A || byte == 0x0D {
+                await flushParsedEvents()
+              }
+            }
+          }
+
+          await parser.finish()
+          await flushParsedEvents()
+
+          if shouldRecordStreamBody {
+            await recordStreamResponse(
+              collectedBytes,
+              response: response,
+              requestID: requestID,
+              isRetry: isRetry,
+            )
+          }
+
+          continuation.finish()
+        } catch {
+          await parser.finish()
+          await flushParsedEvents()
+          if shouldRecordStreamBody {
+            await recordStreamResponse(
+              collectedBytes,
+              response: response,
+              requestID: requestID,
+              isRetry: isRetry,
+            )
+          }
+          continuation.finish(throwing: error)
+        }
+      }
+
+      continuation.onTermination = { @Sendable _ in
+        task.cancel()
+      }
+    }
+  }
+
   func makePreparedURLRequest(
     path: String,
     method: HTTPMethod,
@@ -350,6 +485,14 @@ private extension AsyncHTTPClientTransport {
       body: String(decoding: data, as: UTF8.self),
       isRetry: isRetry,
     ))
+  }
+}
+
+private extension HTTPURLResponse {
+  var swiftAgentHeaderFields: [String: String] {
+    allHeaderFields.reduce(into: [String: String]()) { result, pair in
+      result[String(describing: pair.key)] = String(describing: pair.value)
+    }
   }
 }
 

@@ -16,7 +16,7 @@ import JSONSchema
 ///     model: "gpt-4"
 /// )
 /// ```
-public struct OpenAILanguageModel: LanguageModel {
+public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutputLanguageModel {
     /// The reason the model is unavailable.
     /// This model is always available.
     public typealias UnavailableReason = Never
@@ -510,7 +510,7 @@ public struct OpenAILanguageModel: LanguageModel {
                 stream: false
             )
 
-            let resp: ChatCompletions.Response = try await httpClient.send(
+            let httpResponse: HTTPClientDecodedResponse<ChatCompletions.Response> = try await httpClient.sendResponse(
                 path: "chat/completions",
                 method: .post,
                 queryItems: nil,
@@ -518,8 +518,11 @@ public struct OpenAILanguageModel: LanguageModel {
                 body: params,
                 responseType: ChatCompletions.Response.self
             )
+            let resp = httpResponse.body
 
-            lastMetadata = resp.responseMetadata(providerName: "OpenAI", defaultModelID: model)
+            lastMetadata = ResponseMetadata
+                .providerHTTPMetadata(requestID: httpResponse.requestID, headers: httpResponse.headers, providerName: "OpenAI")
+                .merging(resp.responseMetadata(providerName: "OpenAI", defaultModelID: model))
             lastTokenUsage = resp.usage?.tokenUsage
 
             guard let choice = resp.choices.first else {
@@ -625,7 +628,7 @@ public struct OpenAILanguageModel: LanguageModel {
                 stream: false
             )
 
-            let resp: Responses.Response = try await httpClient.send(
+            let httpResponse: HTTPClientDecodedResponse<Responses.Response> = try await httpClient.sendResponse(
                 path: "responses",
                 method: .post,
                 queryItems: nil,
@@ -633,8 +636,11 @@ public struct OpenAILanguageModel: LanguageModel {
                 body: params,
                 responseType: Responses.Response.self
             )
+            let resp = httpResponse.body
 
-            lastMetadata = resp.responseMetadata(providerName: "OpenAI", defaultModelID: model)
+            lastMetadata = ResponseMetadata
+                .providerHTTPMetadata(requestID: httpResponse.requestID, headers: httpResponse.headers, providerName: "OpenAI")
+                .merging(resp.responseMetadata(providerName: "OpenAI", defaultModelID: model))
             lastTokenUsage = resp.usage?.tokenUsage
 
             let toolCalls = extractToolCallsFromOutput(resp.output)
@@ -938,6 +944,191 @@ public struct OpenAILanguageModel: LanguageModel {
             }
 
             return LanguageModelSession.ResponseStream(stream: stream)
+        }
+    }
+
+    public func streamEvents<Content>(
+        within session: LanguageModelSession,
+        to prompt: Prompt,
+        generating type: Content.Type,
+        includeSchemaInPrompt: Bool,
+        options: GenerationOptions
+    ) -> AsyncThrowingStream<LanguageModelStreamEvent, any Error> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
+        let openAITools: [OpenAITool]? = {
+            guard !session.tools.isEmpty else { return nil }
+            return session.tools.map { convertToolToOpenAIFormat($0) }
+        }()
+
+        return AsyncThrowingStream { continuation in
+            let task = Task { @Sendable in
+                do {
+                    switch apiVariant {
+                    case .responses:
+                        var messages = session.transcript.toOpenAIMessages()
+                        while true {
+                            let params = try Responses.createRequestBody(
+                                model: model,
+                                messages: messages,
+                                tools: openAITools,
+                                generating: type,
+                                options: options,
+                                stream: true
+                            )
+                            let eventStream = try await httpClient.decodedEventStreamResponse(
+                                path: "responses",
+                                body: params,
+                                as: OpenAIResponsesServerEvent.self
+                            )
+                            continuation.yield(LanguageModelStreamEvent.responseMetadata(ResponseMetadata.providerHTTPMetadata(
+                                requestID: eventStream.requestID,
+                                headers: eventStream.headers,
+                                providerName: "OpenAI",
+                                modelID: model
+                            )))
+                            var streamingToolCalls: [String: StreamingOpenAIToolCall] = [:]
+                            var argumentBuffers: [String: String] = [:]
+
+                            for try await event in eventStream.events {
+                                switch event {
+                                case .outputTextDelta(let delta):
+                                    continuation.yield(.textDelta(id: "openai-response-text", delta: delta))
+
+                                case .outputItemAdded(let item):
+                                    switch item.type {
+                                    case "function_call":
+                                        if let name = item.name {
+                                            streamingToolCalls[item.id] = StreamingOpenAIToolCall(
+                                                id: item.id,
+                                                callId: item.callID ?? item.id,
+                                                name: name,
+                                                arguments: item.arguments ?? ""
+                                            )
+                                            argumentBuffers[item.id] = item.arguments ?? ""
+                                            continuation.yield(.toolInputStart(
+                                                id: item.id,
+                                                callId: item.callID ?? item.id,
+                                                toolName: name
+                                            ))
+                                            if let arguments = item.arguments, arguments.isEmpty == false {
+                                                continuation.yield(.toolInputDelta(id: item.id, delta: arguments))
+                                            }
+                                        }
+                                    case "reasoning":
+                                        continuation.yield(.reasoningStart(id: item.id))
+                                        for summary in item.summaryText {
+                                            continuation.yield(.reasoningDelta(id: item.id, delta: summary))
+                                        }
+                                        if let encryptedContent = item.encryptedContent {
+                                            continuation.yield(.reasoningEnd(id: item.id, encryptedReasoning: encryptedContent))
+                                        }
+                                    default:
+                                        break
+                                    }
+
+                                case .functionCallArgumentsDelta(let itemID, let delta):
+                                    argumentBuffers[itemID, default: ""] += delta
+                                    streamingToolCalls[itemID]?.arguments += delta
+                                    continuation.yield(.toolInputDelta(id: itemID, delta: delta))
+
+                                case .functionCallArgumentsDone(let itemID, let arguments):
+                                    streamingToolCalls[itemID]?.arguments = arguments
+                                    argumentBuffers[itemID] = arguments
+                                    continuation.yield(.toolInputEnd(id: itemID, arguments: try toGeneratedContent(arguments)))
+
+                                case .completed(let response):
+                                    if let usage = response?.usage?.tokenUsage {
+                                        continuation.yield(.usage(usage))
+                                    }
+                                    if let metadata = response?.responseMetadata(providerName: "OpenAI", defaultModelID: model) {
+                                        continuation.yield(.responseMetadata(metadata))
+                                    }
+
+                                case .ignored:
+                                    break
+                                }
+                            }
+
+                            let calls = try streamingToolCalls.values
+                                .sorted { $0.id < $1.id }
+                                .map { try $0.transcriptToolCall() }
+
+                            guard calls.isEmpty == false else {
+                                continuation.yield(.finished(.completed))
+                                continuation.finish()
+                                return
+                            }
+
+                            switch try await session.executeToolCalls(calls, recordTranscript: false) {
+                            case .stop:
+                                continuation.yield(.finished(.toolCalls))
+                                continuation.finish()
+                                return
+
+                            case .outputs(let results):
+                                for result in results {
+                                    continuation.yield(.toolResult(result.output))
+                                }
+
+                                for call in calls {
+                                    messages.append(OpenAIMessage(
+                                        role: .raw(rawContent: .object([
+                                            "type": .string("function_call"),
+                                            "id": .string(call.id),
+                                            "call_id": .string(call.callId),
+                                            "name": .string(call.toolName),
+                                            "arguments": .string(call.arguments.jsonString),
+                                        ])),
+                                        content: .text("")
+                                    ))
+                                }
+
+                                for result in results {
+                                    messages.append(OpenAIMessage(
+                                        role: .tool(id: result.call.callId),
+                                        content: .text(convertSegmentsToToolContentString(result.output.segments))
+                                    ))
+                                }
+                            }
+                        }
+
+                    case .chatCompletions:
+                        let params = try ChatCompletions.createRequestBody(
+                            model: model,
+                            messages: session.transcript.toOpenAIMessages(),
+                            tools: openAITools,
+                            generating: type,
+                            options: options,
+                            stream: true
+                        )
+                        let eventStream = try await httpClient.decodedEventStreamResponse(
+                            path: "chat/completions",
+                            body: params,
+                            as: OpenAIChatCompletionsChunk.self
+                        )
+                        continuation.yield(LanguageModelStreamEvent.responseMetadata(ResponseMetadata.providerHTTPMetadata(
+                            requestID: eventStream.requestID,
+                            headers: eventStream.headers,
+                            providerName: "OpenAI",
+                            modelID: model
+                        )))
+                        for try await chunk in eventStream.events {
+                            if let piece = chunk.choices.first?.delta.content, piece.isEmpty == false {
+                                continuation.yield(.textDelta(id: "openai-chat-text", delta: piece))
+                            }
+                            if chunk.choices.first?.finishReason != nil {
+                                continuation.yield(.finished(.completed))
+                                continuation.finish()
+                                return
+                            }
+                        }
+                        continuation.yield(.finished(.completed))
+                        continuation.finish()
+                    }
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 }

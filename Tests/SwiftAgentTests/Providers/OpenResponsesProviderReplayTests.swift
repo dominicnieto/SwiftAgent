@@ -96,7 +96,8 @@ struct OpenResponsesProviderReplayTests {
   }
 
   @Test func openResponsesProviderStreamsTextThroughMainSessionAndHTTPClient() async throws {
-    let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(body: """
+    let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(
+      body: """
     event: response.output_text.delta
     data: {"type":"response.output_text.delta","delta":"Hel"}
 
@@ -106,7 +107,13 @@ struct OpenResponsesProviderReplayTests {
     event: response.completed
     data: {"type":"response.completed","response":{"id":"resp_stream","model":"openai/gpt-test","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}}
 
-    """))
+    """,
+      headers: [
+        "x-request-id": "or_stream_req_header",
+        "x-ratelimit-limit-requests": "50",
+        "x-ratelimit-remaining-requests": "48",
+      ],
+    ))
     let model = OpenResponsesLanguageModel(
       baseURL: URL(string: "https://example.com/v1/")!,
       apiKey: "test-key",
@@ -123,7 +130,9 @@ struct OpenResponsesProviderReplayTests {
     #expect(snapshots.compactMap(\.content) == ["Hel", "Hello", "Hello"])
     #expect(session.transcript.lastResponseEntry()?.text == "Hello")
     #expect(session.responseMetadata?.id == "resp_stream")
+    #expect(session.responseMetadata?.providerRequestID == "or_stream_req_header")
     #expect(session.responseMetadata?.modelID == "openai/gpt-test")
+    #expect(session.responseMetadata?.rateLimits["requests"]?.remaining == 48)
     #expect(session.tokenUsage?.totalTokens == 5)
     let body = try await requestBodyObject(from: replay)
     #expect(body["stream"] == .bool(true))
@@ -198,11 +207,24 @@ struct OpenResponsesProviderReplayTests {
     let session = LanguageModelSession(model: model, tools: [WeatherTool()])
 
     var finalContent: String?
+    var sawPartialArgumentsBeforeOutput = false
+    var sawToolOutput = false
     for try await snapshot in session.streamResponse(to: "What is the weather?") {
       finalContent = snapshot.content ?? finalContent
+      for entry in snapshot.transcript.entries {
+        if case .toolOutput = entry {
+          sawToolOutput = true
+        }
+        if case let .toolCalls(toolCalls) = entry,
+           toolCalls.calls.contains(where: { $0.partialArguments?.contains(#""Spokane""#) == true }),
+           sawToolOutput == false {
+          sawPartialArgumentsBeforeOutput = true
+        }
+      }
     }
 
     #expect(finalContent == "Weather in Spokane: Sunny")
+    #expect(sawPartialArgumentsBeforeOutput)
     #expect(session.transcript.entries.contains { entry in
       if case .toolCalls = entry { return true }
       return false
@@ -277,6 +299,38 @@ struct OpenResponsesProviderReplayTests {
       if case .toolOutput = entry { return true }
       return false
     })
+  }
+
+  @Test func openResponsesResponseMetadataIncludesHTTPHeaders() async throws {
+    let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(
+      body: """
+      {
+        "id": "resp_headers",
+        "model": "openai/gpt-test",
+        "output": [],
+        "output_text": "Header metadata"
+      }
+      """,
+      headers: [
+        "x-request-id": "or_req_header",
+        "x-ratelimit-limit-requests": "50",
+        "x-ratelimit-remaining-requests": "49",
+      ],
+    ))
+    let model = OpenResponsesLanguageModel(
+      baseURL: URL(string: "https://example.com/v1/")!,
+      apiKey: "test-key",
+      model: "openai/gpt-test",
+      httpClient: replay,
+    )
+    let session = LanguageModelSession(model: model)
+
+    let response = try await session.respond(to: "Hello")
+
+    #expect(response.responseMetadata?.providerRequestID == "or_req_header")
+    #expect(response.responseMetadata?.requestID != nil)
+    #expect(response.responseMetadata?.rateLimits["requests"]?.limit == 50)
+    #expect(response.responseMetadata?.rateLimits["requests"]?.remaining == 49)
   }
 }
 

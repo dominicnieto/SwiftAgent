@@ -110,7 +110,8 @@ struct AnthropicProviderReplayTests {
   }
 
   @Test func anthropicProviderStreamsTextThroughMainSessionAndHTTPClient() async throws {
-    let replay = ReplayHTTPClient<[String: JSONValue]>(recordedResponse: .init(body: """
+    let replay = ReplayHTTPClient<[String: JSONValue]>(recordedResponse: .init(
+      body: """
     event: message_start
     data: {"type":"message_start","message":{"id":"msg_stream","type":"message","role":"assistant","content":[],"model":"claude-test","stop_reason":null,"usage":{"input_tokens":1,"output_tokens":0}}}
 
@@ -123,7 +124,13 @@ struct AnthropicProviderReplayTests {
     event: message_stop
     data: {"type":"message_stop"}
 
-    """))
+    """,
+      headers: [
+        "request-id": "anthropic_stream_req_header",
+        "x-ratelimit-limit-requests": "40",
+        "x-ratelimit-remaining-requests": "38",
+      ],
+    ))
     let model = AnthropicLanguageModel(
       apiKey: "test-key",
       model: "claude-test",
@@ -139,8 +146,10 @@ struct AnthropicProviderReplayTests {
     #expect(snapshots.compactMap(\.content) == ["Hel", "Hello", "Hello"])
     #expect(session.transcript.lastResponseEntry()?.text == "Hello")
     #expect(session.responseMetadata?.id == "msg_stream")
+    #expect(session.responseMetadata?.providerRequestID == "anthropic_stream_req_header")
     #expect(session.responseMetadata?.providerName == "Anthropic")
     #expect(session.responseMetadata?.modelID == "claude-test")
+    #expect(session.responseMetadata?.rateLimits["requests"]?.remaining == 38)
     let body = try await requestBodyDictionary(from: replay)
     #expect(body["stream"] == .bool(true))
   }
@@ -230,11 +239,24 @@ struct AnthropicProviderReplayTests {
     let session = LanguageModelSession(model: model, tools: [WeatherTool()])
 
     var finalContent: String?
+    var sawPartialArgumentsBeforeOutput = false
+    var sawToolOutput = false
     for try await snapshot in session.streamResponse(to: "What is the weather?") {
       finalContent = snapshot.content ?? finalContent
+      for entry in snapshot.transcript.entries {
+        if case .toolOutput = entry {
+          sawToolOutput = true
+        }
+        if case let .toolCalls(toolCalls) = entry,
+           toolCalls.calls.contains(where: { $0.partialArguments?.contains(#""Spokane""#) == true }),
+           sawToolOutput == false {
+          sawPartialArgumentsBeforeOutput = true
+        }
+      }
     }
 
     #expect(finalContent == "Weather in Spokane: Sunny")
+    #expect(sawPartialArgumentsBeforeOutput)
     #expect(session.tokenUsage?.totalTokens == 44)
     #expect(session.transcript.entries.contains { entry in
       if case let .reasoning(reasoning) = entry {
@@ -313,6 +335,44 @@ struct AnthropicProviderReplayTests {
       if case .toolOutput = entry { return true }
       return false
     })
+  }
+
+  @Test func anthropicResponseMetadataIncludesHTTPHeaders() async throws {
+    let replay = ReplayHTTPClient<[String: JSONValue]>(recordedResponse: .init(
+      body: """
+      {
+        "id": "msg_headers",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Header metadata"
+          }
+        ],
+        "model": "claude-test",
+        "stop_reason": "end_turn"
+      }
+      """,
+      headers: [
+        "request-id": "anthropic_req_header",
+        "x-ratelimit-limit-requests": "40",
+        "x-ratelimit-remaining-requests": "39",
+      ],
+    ))
+    let model = AnthropicLanguageModel(
+      apiKey: "test-key",
+      model: "claude-test",
+      httpClient: replay,
+    )
+    let session = LanguageModelSession(model: model)
+
+    let response = try await session.respond(to: "Hello")
+
+    #expect(response.responseMetadata?.providerRequestID == "anthropic_req_header")
+    #expect(response.responseMetadata?.requestID != nil)
+    #expect(response.responseMetadata?.rateLimits["requests"]?.limit == 40)
+    #expect(response.responseMetadata?.rateLimits["requests"]?.remaining == 39)
   }
 }
 

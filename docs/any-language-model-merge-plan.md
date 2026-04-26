@@ -182,6 +182,9 @@ Tasks:
 - Delete duplicate transcript/session/option types.
 - Update README and examples.
 - Add migration notes for users of old `OpenAISession` and `AnthropicSession`.
+- Evaluate splitting `OpenAILanguageModel` into separate Chat Completions and Responses provider types, such as
+  `OpenAIChatCompletionsLanguageModel` and `OpenAIResponsesLanguageModel`, so protocol conformances and inferred
+  capabilities can be exact per API mode instead of relying on runtime `apiVariant` capability checks.
 - Consolidate logging around SwiftAgent's existing `AgentLog`, `NetworkLog`, and replay recorder direction.
 - Add redaction hooks for credentials and sensitive tool outputs.
 - Run full supported-platform builds and tests.

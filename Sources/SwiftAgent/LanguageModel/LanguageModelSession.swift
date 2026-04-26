@@ -155,6 +155,16 @@ public final class LanguageModelSession: @unchecked Sendable {
   ) -> sending ResponseStream<Content> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
     appendPrompt(promptEntry)
 
+    if let eventStreamingModel = model as? any EventStreamingLanguageModel {
+      return streamEventResponse(
+        eventStreamingModel,
+        to: prompt,
+        generating: type,
+        includeSchemaInPrompt: includeSchemaInPrompt,
+        options: options,
+      )
+    }
+
     let upstream = model.streamResponse(
       within: self,
       to: prompt,
@@ -170,6 +180,21 @@ public final class LanguageModelSession: @unchecked Sendable {
 
         do {
           var lastSnapshot: ResponseStream<Content>.Snapshot?
+          var pendingSnapshot: ResponseStream<Content>.Snapshot?
+          var lastYield: ContinuousClock.Instant?
+          let clock = ContinuousClock()
+
+          func yieldSnapshot(_ snapshot: ResponseStream<Content>.Snapshot, force: Bool = false) {
+            let interval = options.minimumStreamingSnapshotInterval
+            let now = clock.now
+            if force || interval == nil || lastYield == nil || now - lastYield! >= interval! {
+              lastYield = now
+              pendingSnapshot = nil
+              continuation.yield(snapshot)
+            } else {
+              pendingSnapshot = snapshot
+            }
+          }
 
           for try await snapshot in upstream {
             self.recordProviderEntries(snapshot.transcriptEntries)
@@ -191,18 +216,20 @@ public final class LanguageModelSession: @unchecked Sendable {
             if derived.rawContent != nil || lastSnapshot == nil {
               lastSnapshot = derived
             }
-            continuation.yield(derived)
+            yieldSnapshot(derived)
           }
 
           if let rawContent = lastSnapshot?.rawContent {
             self.recordResponse(rawContent: rawContent, status: .completed)
-            continuation.yield(ResponseStream<Content>.Snapshot(
+            yieldSnapshot(ResponseStream<Content>.Snapshot(
               content: lastSnapshot?.content,
               rawContent: rawContent,
               transcript: self.transcript,
               tokenUsage: self.tokenUsage,
               responseMetadata: self.responseMetadata,
-            ))
+            ), force: true)
+          } else if let pendingSnapshot {
+            yieldSnapshot(pendingSnapshot, force: true)
           }
 
           continuation.finish()
@@ -878,6 +905,273 @@ extension LanguageModelSession.ResponseStream: AsyncSequence {
 }
 
 private extension LanguageModelSession {
+  func streamEventResponse<Content>(
+    _ eventStreamingModel: any EventStreamingLanguageModel,
+    to prompt: Prompt,
+    generating type: Content.Type,
+    includeSchemaInPrompt: Bool,
+    options: GenerationOptions,
+  ) -> sending ResponseStream<Content> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
+    let events = eventStreamingModel.streamEvents(
+      within: self,
+      to: prompt,
+      generating: type,
+      includeSchemaInPrompt: includeSchemaInPrompt,
+      options: options,
+    )
+
+    let relay = AsyncThrowingStream<ResponseStream<Content>.Snapshot, any Error> { continuation in
+      Task {
+        self.beginResponding()
+        defer { self.endResponding() }
+
+        let clock = ContinuousClock()
+        var lastYield: ContinuousClock.Instant?
+        var pendingSnapshot: ResponseStream<Content>.Snapshot?
+        var lastSnapshot: ResponseStream<Content>.Snapshot?
+        var accumulatedTextByID: [String: String] = [:]
+        var textOrder: [String] = []
+        var reasoningByID: [String: Transcript.Reasoning] = [:]
+        var toolCallsByID: [String: Transcript.ToolCall] = [:]
+        var toolCallOrder: [String] = []
+        var toolArgumentBuffers: [String: String] = [:]
+        var toolCallsEntryID: String?
+        var currentContent: Content.PartiallyGenerated?
+        var currentRawContent: GeneratedContent?
+        var didEmitFinishedSnapshot = false
+
+        func currentText() -> String {
+          textOrder.map { accumulatedTextByID[$0] ?? "" }.joined()
+        }
+
+        func toolCallsEntry() -> Transcript.Entry? {
+          let calls = toolCallOrder.compactMap { toolCallsByID[$0] }
+          guard calls.isEmpty == false else { return nil }
+          let id = toolCallsEntryID ?? "tool-calls-\(calls[0].id)"
+          toolCallsEntryID = id
+          return .toolCalls(.init(id: id, calls: calls))
+        }
+
+        func makeSnapshot(transcriptEntries: [Transcript.Entry] = []) -> ResponseStream<Content>.Snapshot {
+          ResponseStream<Content>.Snapshot(
+            content: currentContent,
+            rawContent: currentRawContent,
+            transcript: self.transcript,
+            tokenUsage: self.tokenUsage,
+            responseMetadata: self.responseMetadata,
+            transcriptEntries: transcriptEntries,
+          )
+        }
+
+        func yieldSnapshot(_ snapshot: ResponseStream<Content>.Snapshot, force: Bool = false) {
+          let interval = options.minimumStreamingSnapshotInterval
+          let now = clock.now
+          if force || interval == nil || lastYield == nil || now - lastYield! >= interval! {
+            lastYield = now
+            pendingSnapshot = nil
+            continuation.yield(snapshot)
+          } else {
+            pendingSnapshot = snapshot
+          }
+        }
+
+        func updateContentFromText() {
+          let text = currentText()
+          if type == String.self {
+            currentRawContent = GeneratedContent(text)
+            currentContent = (text as! Content).asPartiallyGenerated()
+          } else if let partial = partialStructuredGeneration(from: text, as: type) {
+            currentRawContent = partial.rawContent
+            currentContent = partial.content
+          }
+        }
+
+        func recordAndYield(
+          entries: [Transcript.Entry] = [],
+          usage: TokenUsage? = nil,
+          metadata: ResponseMetadata? = nil,
+          force: Bool = false,
+        ) {
+          self.recordProviderEntries(entries)
+          self.recordTokenUsage(usage)
+          self.recordResponseMetadata(metadata)
+
+          if let rawContent = currentRawContent {
+            self.recordResponse(rawContent: rawContent, status: .inProgress)
+          }
+
+          let isMetadataOnlyUpdate = entries.isEmpty && (usage != nil || metadata != nil) && force == false
+          let snapshot = if isMetadataOnlyUpdate {
+            ResponseStream<Content>.Snapshot(
+              transcript: self.transcript,
+              tokenUsage: self.tokenUsage,
+              responseMetadata: self.responseMetadata,
+              transcriptEntries: entries,
+            )
+          } else {
+            makeSnapshot(transcriptEntries: entries)
+          }
+          if snapshot.rawContent != nil || entries.isEmpty == false || usage != nil || metadata != nil || lastSnapshot == nil {
+            if isMetadataOnlyUpdate == false {
+              lastSnapshot = snapshot
+            }
+            yieldSnapshot(snapshot, force: force)
+          }
+        }
+
+        do {
+          for try await event in events {
+            switch event {
+            case .streamStarted(let warnings):
+              let metadata = ResponseMetadata(warnings: warnings)
+              recordAndYield(metadata: metadata)
+
+            case .textStart(let id):
+              if accumulatedTextByID[id] == nil {
+                accumulatedTextByID[id] = ""
+                textOrder.append(id)
+              }
+              recordAndYield()
+
+            case .textDelta(let id, let delta):
+              if accumulatedTextByID[id] == nil {
+                accumulatedTextByID[id] = ""
+                textOrder.append(id)
+              }
+              accumulatedTextByID[id, default: ""] += delta
+              updateContentFromText()
+              recordAndYield()
+
+            case .textEnd:
+              recordAndYield()
+
+            case .structuredStart:
+              recordAndYield()
+
+            case .structuredDelta(_, let delta):
+              currentRawContent = delta
+              if let content = try? Content(delta) {
+                currentContent = content.asPartiallyGenerated()
+              }
+              recordAndYield()
+
+            case .structuredEnd:
+              recordAndYield()
+
+            case .reasoningStart(let id):
+              let reasoning = Transcript.Reasoning(id: id, summary: [], encryptedReasoning: nil, status: .inProgress)
+              reasoningByID[id] = reasoning
+              recordAndYield(entries: [.reasoning(reasoning)])
+
+            case .reasoningDelta(let id, let delta):
+              var reasoning = reasoningByID[id] ??
+                Transcript.Reasoning(id: id, summary: [], encryptedReasoning: nil, status: .inProgress)
+              let existing = reasoning.summary.first ?? ""
+              reasoning.summary = [existing + delta]
+              reasoning.status = .inProgress
+              reasoningByID[id] = reasoning
+              recordAndYield(entries: [.reasoning(reasoning)])
+
+            case .reasoningEnd(let id, let encryptedReasoning):
+              var reasoning = reasoningByID[id] ??
+                Transcript.Reasoning(id: id, summary: [], encryptedReasoning: nil, status: .completed)
+              reasoning.encryptedReasoning = encryptedReasoning
+              reasoning.status = .completed
+              reasoningByID[id] = reasoning
+              recordAndYield(entries: [.reasoning(reasoning)])
+
+            case .toolInputStart(let id, let callId, let toolName):
+              if toolCallsByID[id] == nil {
+                toolCallOrder.append(id)
+              }
+              toolArgumentBuffers[id] = ""
+              toolCallsByID[id] = Transcript.ToolCall(
+                id: id,
+                callId: callId ?? id,
+                toolName: toolName,
+                arguments: GeneratedContent(properties: [:]),
+                partialArguments: "",
+                status: .inProgress,
+              )
+              if let entry = toolCallsEntry() {
+                recordAndYield(entries: [entry])
+              }
+
+            case .toolInputDelta(let id, let delta):
+              toolArgumentBuffers[id, default: ""] += delta
+              if var call = toolCallsByID[id] {
+                call.partialArguments = toolArgumentBuffers[id]
+                call.status = .inProgress
+                toolCallsByID[id] = call
+              }
+              if let entry = toolCallsEntry() {
+                recordAndYield(entries: [entry])
+              }
+
+            case .toolInputEnd(let id, let arguments):
+              let parsedArguments = try arguments ?? GeneratedContent(json: toolArgumentBuffers[id] ?? "{}")
+              if var call = toolCallsByID[id] {
+                call.arguments = parsedArguments
+                call.partialArguments = nil
+                call.status = .completed
+                toolCallsByID[id] = call
+              }
+              if let entry = toolCallsEntry() {
+                recordAndYield(entries: [entry], force: true)
+              }
+
+            case .toolCall(let call):
+              if toolCallsByID[call.id] == nil {
+                toolCallOrder.append(call.id)
+              }
+              toolCallsByID[call.id] = call
+              if let entry = toolCallsEntry() {
+                recordAndYield(entries: [entry], force: true)
+              }
+
+            case .toolResult(let output):
+              recordAndYield(entries: [.toolOutput(output)], force: true)
+
+            case .responseMetadata(let metadata):
+              recordAndYield(metadata: metadata)
+
+            case .usage(let usage):
+              recordAndYield(usage: usage)
+
+            case .finished:
+              if let rawContent = currentRawContent {
+                self.recordResponse(rawContent: rawContent, status: .completed)
+              }
+              didEmitFinishedSnapshot = true
+              yieldSnapshot(makeSnapshot(), force: true)
+
+            case .raw:
+              recordAndYield()
+
+            case .failed(let error):
+              throw error
+            }
+          }
+
+          if didEmitFinishedSnapshot {
+            // The provider already emitted an explicit finish event and the final snapshot was forced above.
+          } else if let rawContent = currentRawContent {
+            self.recordResponse(rawContent: rawContent, status: .completed)
+            yieldSnapshot(makeSnapshot(), force: true)
+          } else if let pendingSnapshot {
+            yieldSnapshot(pendingSnapshot, force: true)
+          }
+
+          continuation.finish()
+        } catch {
+          continuation.finish(throwing: error)
+        }
+      }
+    }
+
+    return ResponseStream(stream: relay)
+  }
+
   func beginResponding() {
     state.withLock { $0.responseDepth += 1 }
   }

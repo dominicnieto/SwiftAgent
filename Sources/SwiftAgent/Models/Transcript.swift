@@ -308,6 +308,8 @@ public extension Transcript {
     public var toolName: String
     /// JSON arguments for the tool call.
     public var arguments: GeneratedContent
+    /// Raw partial JSON arguments while a streaming provider is still emitting the tool input.
+    public var partialArguments: String?
     /// Optional status of the tool call as it progresses.
     public var status: Status?
 
@@ -316,12 +318,14 @@ public extension Transcript {
       callId: String,
       toolName: String,
       arguments: GeneratedContent,
+      partialArguments: String? = nil,
       status: Status?,
     ) {
       self.id = id
       self.callId = callId
       self.toolName = toolName
       self.arguments = arguments
+      self.partialArguments = partialArguments
       self.status = status
     }
 
@@ -336,6 +340,7 @@ public extension Transcript {
         callId: id,
         toolName: toolName,
         arguments: arguments,
+        partialArguments: nil,
         status: .completed,
       )
     }
@@ -585,6 +590,7 @@ public extension Transcript.ToolCall {
     case callId
     case toolName
     case arguments
+    case partialArguments
     case status
   }
 
@@ -595,6 +601,7 @@ public extension Transcript.ToolCall {
     callId = try container.decode(String.self, forKey: .callId)
     toolName = try container.decode(String.self, forKey: .toolName)
     let argumentsJSONString = try container.decode(String.self, forKey: .arguments)
+    partialArguments = try container.decodeIfPresent(String.self, forKey: .partialArguments)
 
     do {
       arguments = try GeneratedContent(json: argumentsJSONString)
@@ -613,6 +620,7 @@ public extension Transcript.ToolCall {
     try container.encode(callId, forKey: .callId)
     try container.encode(toolName, forKey: .toolName)
     try container.encode(arguments.stableJsonString, forKey: .arguments)
+    try container.encodeIfPresent(partialArguments, forKey: .partialArguments)
     try container.encodeIfPresent(status, forKey: .status)
   }
 }
@@ -827,6 +835,11 @@ private extension Transcript.ToolCall {
       value: transcriptPrettyJSONString(from: arguments),
       indentationLevel: indentationLevel + 1,
       name: "arguments",
+    ))
+    lines.append(contentsOf: transcriptPrettyOptionalField(
+      name: "partialArguments",
+      value: partialArguments,
+      indentationLevel: indentationLevel + 1,
     ))
     lines.append(contentsOf: transcriptPrettyOptionalField(
       name: "status",

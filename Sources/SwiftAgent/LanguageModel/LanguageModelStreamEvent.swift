@@ -125,9 +125,9 @@ public enum LanguageModelStreamEvent: Sendable, Equatable {
   case reasoningDelta(id: String, delta: String)
   case reasoningEnd(id: String, encryptedReasoning: String?)
 
-  case toolInputStart(id: String, toolName: String)
+  case toolInputStart(id: String, callId: String?, toolName: String)
   case toolInputDelta(id: String, delta: String)
-  case toolInputEnd(id: String)
+  case toolInputEnd(id: String, arguments: GeneratedContent?)
   case toolCall(Transcript.ToolCall)
   case toolResult(Transcript.ToolOutput)
 
