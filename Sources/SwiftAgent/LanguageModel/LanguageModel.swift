@@ -11,6 +11,9 @@ public protocol LanguageModel: Sendable {
   /// Current model availability.
   var availability: Availability<UnavailableReason> { get }
 
+  /// Normalized model/provider/runtime capabilities used for validation, tests, and UI affordances.
+  var capabilities: LanguageModelCapabilities { get }
+
   /// Prepares the model for an upcoming prompt prefix when the provider supports prewarming.
   func prewarm(for session: LanguageModelSession, promptPrefix: Prompt?)
 
@@ -48,6 +51,11 @@ public extension LanguageModel {
       return true
     }
     return false
+  }
+
+  /// Default capability inference from protocol conformance.
+  var capabilities: LanguageModelCapabilities {
+    .inferred(from: self)
   }
 
   /// Default no-op prewarm implementation.

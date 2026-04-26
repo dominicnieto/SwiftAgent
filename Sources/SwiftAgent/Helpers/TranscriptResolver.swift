@@ -83,6 +83,8 @@ public struct TranscriptResolver<SessionSchema: LanguageModelSessionSchema> {
               typeName: structure.typeName,
               content: content,
             )))
+          case let .image(image):
+            segments.append(.image(image))
           }
         }
 
@@ -158,6 +160,8 @@ public struct TranscriptResolver<SessionSchema: LanguageModelSessionSchema> {
           return GeneratedContent(text.content)
         case let .structure(structure):
           return structure.content
+        case .image:
+          return nil
         }
       }
     }

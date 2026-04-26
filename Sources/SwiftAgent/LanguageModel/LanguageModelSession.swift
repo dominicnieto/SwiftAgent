@@ -4,12 +4,22 @@ import Foundation
 public final class LanguageModelSession: @unchecked Sendable {
   private let model: any LanguageModel
   private let state: Locked<State>
+  private let toolExecutionDelegateStorage = Locked<(any ToolExecutionDelegate)?>(nil)
 
   /// Tools available to the model during this session.
   public let tools: [any Tool]
 
   /// Instructions applied to each turn.
   public let instructions: Instructions?
+
+  /// Policy used when providers emit tool calls for the session to execute.
+  public let toolExecutionPolicy: ToolExecutionPolicy
+
+  /// Delegate that can approve, stop, or provide output for tool calls.
+  public var toolExecutionDelegate: (any ToolExecutionDelegate)? {
+    get { toolExecutionDelegateStorage.withLock { $0 } }
+    set { toolExecutionDelegateStorage.withLock { $0 = newValue } }
+  }
 
   /// Whether this session is currently waiting on model output.
   public var isResponding: Bool {
@@ -31,10 +41,12 @@ public final class LanguageModelSession: @unchecked Sendable {
     model: any LanguageModel,
     tools: [any Tool] = [],
     instructions: Instructions? = nil,
+    toolExecutionPolicy: ToolExecutionPolicy = .automatic,
   ) {
     self.model = model
     self.tools = tools
     self.instructions = instructions
+    self.toolExecutionPolicy = toolExecutionPolicy
     state = Locked(State(transcript: Self.initialTranscript(instructions: instructions, tools: tools)))
   }
 
@@ -43,17 +55,24 @@ public final class LanguageModelSession: @unchecked Sendable {
     model: any LanguageModel,
     tools: [any Tool] = [],
     instructions: String,
+    toolExecutionPolicy: ToolExecutionPolicy = .automatic,
   ) {
-    self.init(model: model, tools: tools, instructions: Instructions(instructions))
+    self.init(
+      model: model,
+      tools: tools,
+      instructions: Instructions(instructions),
+      toolExecutionPolicy: toolExecutionPolicy,
+    )
   }
 
   /// Creates a session with instructions from an ``InstructionsBuilder``.
   public convenience init(
     model: any LanguageModel,
     tools: [any Tool] = [],
+    toolExecutionPolicy: ToolExecutionPolicy = .automatic,
     @InstructionsBuilder instructions: () throws -> Instructions,
   ) rethrows {
-    try self.init(model: model, tools: tools, instructions: instructions())
+    try self.init(model: model, tools: tools, instructions: instructions(), toolExecutionPolicy: toolExecutionPolicy)
   }
 
   /// Prepares the underlying model for an upcoming prompt prefix when supported.
@@ -297,6 +316,46 @@ public extension LanguageModelSession {
       }
     }
 
+    /// Context describing a provider refusal with transcript entries that explain it.
+    public struct Refusal: Sendable {
+      public let transcriptEntries: [Transcript.Entry]
+
+      public init(transcriptEntries: [Transcript.Entry]) {
+        self.transcriptEntries = transcriptEntries
+      }
+
+      /// A complete textual explanation extracted from refusal transcript entries.
+      public var explanation: Response<String> {
+        get async throws {
+          let text = transcriptEntries.compactMap { entry in
+            guard case .response(let response) = entry else {
+              return nil
+            }
+            return response.text
+          }.joined(separator: "\n")
+
+          let explanationText = text.isEmpty ? "No explanation available" : text
+          return Response(
+            content: explanationText,
+            rawContent: GeneratedContent(explanationText),
+            transcriptEntries: transcriptEntries,
+          )
+        }
+      }
+
+      /// A single-snapshot stream containing the refusal explanation.
+      public var explanationStream: ResponseStream<String> {
+        let text = transcriptEntries.compactMap { entry in
+          guard case .response(let response) = entry else {
+            return nil
+          }
+          return response.text
+        }.joined(separator: "\n")
+        let explanationText = text.isEmpty ? "No explanation available" : text
+        return ResponseStream(content: explanationText, rawContent: GeneratedContent(explanationText))
+      }
+    }
+
     case exceededContextWindowSize(Context)
     case assetsUnavailable(Context)
     case guardrailViolation(Context)
@@ -305,10 +364,108 @@ public extension LanguageModelSession {
     case decodingFailure(Context)
     case rateLimited(Context)
     case concurrentRequests(Context)
+    case refusal(Refusal, Context)
 
     public var errorDescription: String? { nil }
     public var recoverySuggestion: String? { nil }
     public var failureReason: String? { nil }
+  }
+
+  /// Error thrown when a session-owned tool call cannot be completed.
+  struct ToolCallError: Error, LocalizedError {
+    /// The tool name emitted by the model.
+    public let toolName: String
+
+    /// The underlying execution failure.
+    public let underlyingError: any Error
+
+    /// Creates a tool call error for a registered tool.
+    public init(tool: any Tool, underlyingError: any Error) {
+      toolName = tool.name
+      self.underlyingError = underlyingError
+    }
+
+    /// Creates a tool call error for a missing or unavailable tool.
+    public init(toolName: String, underlyingError: any Error) {
+      self.toolName = toolName
+      self.underlyingError = underlyingError
+    }
+
+    public var errorDescription: String? {
+      "Tool '\(toolName)' failed: \(underlyingError.localizedDescription)"
+    }
+  }
+
+  /// Output from a session-owned tool call.
+  struct ToolExecutionResult: Sendable, Equatable {
+    /// The model-emitted tool call.
+    public var call: Transcript.ToolCall
+
+    /// The output recorded for the call.
+    public var output: Transcript.ToolOutput
+
+    public init(call: Transcript.ToolCall, output: Transcript.ToolOutput) {
+      self.call = call
+      self.output = output
+    }
+  }
+
+  /// Result of asking the session to handle emitted tool calls.
+  enum ToolExecutionOutcome: Sendable, Equatable {
+    /// Execution stopped after recording tool calls.
+    case stop(calls: [Transcript.ToolCall])
+
+    /// Tool outputs were produced for the calls.
+    case outputs([ToolExecutionResult])
+  }
+}
+
+public extension LanguageModelSession {
+  /// Executes model-emitted tool calls through this session's tool policy.
+  ///
+  /// Providers should call this after emitting tool calls instead of executing tools directly.
+  /// The session records tool-call and tool-output transcript entries when requested.
+  func executeToolCalls(
+    _ calls: [Transcript.ToolCall],
+    recordTranscript: Bool = true,
+  ) async throws -> ToolExecutionOutcome {
+    guard calls.isEmpty == false else {
+      return .outputs([])
+    }
+
+    let delegate = toolExecutionDelegate
+    await delegate?.didGenerateToolCalls(calls, in: self)
+
+    var decisions: [ToolExecutionDecision] = []
+    decisions.reserveCapacity(calls.count)
+
+    for call in calls {
+      let decision = await delegate?.toolCallDecision(for: call, in: self) ?? .execute
+      if case .stop = decision {
+        if recordTranscript {
+          recordProviderEntries([.toolCalls(.init(calls: calls))])
+        }
+        return .stop(calls: calls)
+      }
+      decisions.append(decision)
+    }
+
+    if recordTranscript {
+      recordProviderEntries([.toolCalls(.init(calls: calls))])
+    }
+
+    let results: [ToolExecutionResult]
+    if toolExecutionPolicy.allowsParallelExecution {
+      results = try await executeToolCallsInParallel(calls, decisions: decisions, delegate: delegate)
+    } else {
+      results = try await executeToolCallsSerially(calls, decisions: decisions, delegate: delegate)
+    }
+
+    if recordTranscript {
+      recordProviderEntries(results.map { .toolOutput($0.output) })
+    }
+
+    return .outputs(results)
   }
 }
 
@@ -440,6 +597,134 @@ private extension LanguageModelSession {
       }
     }
   }
+
+  func executeToolCallsSerially(
+    _ calls: [Transcript.ToolCall],
+    decisions: [ToolExecutionDecision],
+    delegate: (any ToolExecutionDelegate)?,
+  ) async throws -> [ToolExecutionResult] {
+    var results: [ToolExecutionResult] = []
+    results.reserveCapacity(calls.count)
+
+    for (index, call) in calls.enumerated() {
+      let result = try await executeToolCall(call, decision: decisions[index], delegate: delegate)
+      results.append(result)
+    }
+
+    return results
+  }
+
+  func executeToolCallsInParallel(
+    _ calls: [Transcript.ToolCall],
+    decisions: [ToolExecutionDecision],
+    delegate: (any ToolExecutionDelegate)?,
+  ) async throws -> [ToolExecutionResult] {
+    var indexedResults: [(Int, ToolExecutionResult)] = []
+    indexedResults.reserveCapacity(calls.count)
+
+    try await withThrowingTaskGroup(of: (Int, ToolExecutionResult).self) { group in
+      for (index, call) in calls.enumerated() {
+        let decision = decisions[index]
+        group.addTask {
+          let result = try await self.executeToolCall(call, decision: decision, delegate: delegate)
+          return (index, result)
+        }
+      }
+
+      for try await indexedResult in group {
+        indexedResults.append(indexedResult)
+      }
+    }
+
+    return indexedResults
+      .sorted { $0.0 < $1.0 }
+      .map(\.1)
+  }
+
+  func executeToolCall(
+    _ call: Transcript.ToolCall,
+    decision: ToolExecutionDecision,
+    delegate: (any ToolExecutionDelegate)?,
+  ) async throws -> ToolExecutionResult {
+    switch decision {
+    case .stop:
+      return ToolExecutionResult(call: call, output: makeToolOutput(for: call, segment: .text(.init(content: ""))))
+
+    case .provideOutput(let segments):
+      let output = makeToolOutput(for: call, segment: segments.first ?? .text(.init(content: "")))
+      await delegate?.didExecuteToolCall(call, output: output, in: self)
+      return ToolExecutionResult(call: call, output: output)
+
+    case .execute:
+      guard let tool = tools.first(where: { $0.name == call.toolName }) else {
+        return try await handleMissingTool(call, delegate: delegate)
+      }
+
+      var attempt = 0
+      while true {
+        attempt += 1
+
+        do {
+          let segments = try await tool.makeOutputSegments(from: call.arguments)
+          let output = makeToolOutput(for: call, toolName: tool.name, segment: segments.first ?? .text(.init(content: "")))
+          await delegate?.didExecuteToolCall(call, output: output, in: self)
+          return ToolExecutionResult(call: call, output: output)
+        } catch is CancellationError {
+          throw CancellationError()
+        } catch {
+          await delegate?.didFailToolCall(call, error: error, in: self)
+
+          if attempt < toolExecutionPolicy.retryPolicy.maximumAttempts {
+            continue
+          }
+
+          switch toolExecutionPolicy.failureBehavior {
+          case .throwError:
+            throw ToolCallError(tool: tool, underlyingError: error)
+          case .recordErrorOutput:
+            let output = makeToolOutput(for: call, toolName: tool.name, segment: .text(.init(content: error.localizedDescription)))
+            await delegate?.didExecuteToolCall(call, output: output, in: self)
+            return ToolExecutionResult(call: call, output: output)
+          }
+        }
+      }
+    }
+  }
+
+  func handleMissingTool(
+    _ call: Transcript.ToolCall,
+    delegate: (any ToolExecutionDelegate)?,
+  ) async throws -> ToolExecutionResult {
+    let error = MissingToolError(toolName: call.toolName)
+
+    switch toolExecutionPolicy.missingToolBehavior {
+    case .recordErrorOutput:
+      let output = makeToolOutput(
+        for: call,
+        segment: .text(.init(content: "Tool not found: \(call.toolName)")),
+      )
+      await delegate?.didExecuteToolCall(call, output: output, in: self)
+      return ToolExecutionResult(call: call, output: output)
+
+    case .throwError:
+      await delegate?.didFailToolCall(call, error: error, in: self)
+      throw ToolCallError(toolName: call.toolName, underlyingError: error)
+    }
+  }
+
+  func makeToolOutput(
+    for call: Transcript.ToolCall,
+    toolName: String? = nil,
+    segment: Transcript.Segment,
+  ) -> Transcript.ToolOutput {
+    Transcript.ToolOutput(
+      id: call.id,
+      callId: call.callId,
+      toolName: toolName ?? call.toolName,
+      segment: segment,
+      status: .completed,
+    )
+  }
 }
 
 private struct State: Sendable {
@@ -461,4 +746,12 @@ private struct State: Sendable {
 
 private enum ResponseStreamError: Error {
   case noSnapshots
+}
+
+private struct MissingToolError: Error, LocalizedError {
+  var toolName: String
+
+  var errorDescription: String? {
+    "Tool not found: \(toolName)"
+  }
 }

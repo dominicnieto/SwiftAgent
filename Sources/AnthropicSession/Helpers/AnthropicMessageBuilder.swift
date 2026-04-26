@@ -82,6 +82,8 @@ enum AnthropicMessageBuilder {
               role: .assistant,
               content: .text(structuredSegment.content.generatedContent.stableJsonString),
             )
+          case .image:
+            break
           }
         }
 
@@ -100,6 +102,8 @@ enum AnthropicMessageBuilder {
           textSegment.content
         case let .structure(structuredSegment):
           structuredSegment.content.generatedContent.stableJsonString
+        case .image:
+          ""
         }
 
         append(

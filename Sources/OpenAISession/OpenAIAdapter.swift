@@ -572,6 +572,8 @@ public actor OpenAIAdapter: Adapter {
           textSegment.content
         case let .structure(structuredSegment):
           structuredSegment.content.generatedContent.stableJsonString
+        case .image:
+          ""
         }
 
         let item = Components.Schemas.FunctionCallOutputItemParam(
@@ -608,6 +610,8 @@ public actor OpenAIAdapter: Adapter {
                     annotations: [],
                   ),
                 )
+            case .image:
+              nil
             }
           },
           status: transcriptStatusToMessageStatus(response.status),

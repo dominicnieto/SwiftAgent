@@ -205,6 +205,11 @@ public extension SwiftAgent.Transcript {
       self.sources = sources
       self.prompt = prompt
     }
+
+    /// Prompt content represented as transcript segments for provider request builders.
+    public var segments: [Segment] {
+      [.text(.init(content: prompt))]
+    }
   }
 
   /// A lightweight summary of the model's private reasoning, when available.
@@ -316,6 +321,21 @@ public extension Transcript {
       self.arguments = arguments
       self.status = status
     }
+
+    /// Creates a completed tool call when the provider uses one identifier for both local and provider correlation.
+    public init(
+      id: String,
+      toolName: String,
+      arguments: GeneratedContent,
+    ) {
+      self.init(
+        id: id,
+        callId: id,
+        toolName: toolName,
+        arguments: arguments,
+        status: .completed,
+      )
+    }
   }
 
   /// Output produced by a tool in response to a call.
@@ -344,6 +364,26 @@ public extension Transcript {
       self.segment = segment
       self.status = status
     }
+
+    /// Creates a completed tool output using the first segment from a provider-produced segment list.
+    public init(
+      id: String,
+      toolName: String,
+      segments: [Segment],
+    ) {
+      self.init(
+        id: id,
+        callId: id,
+        toolName: toolName,
+        segment: segments.first ?? .text(.init(content: "")),
+        status: .completed,
+      )
+    }
+
+    /// Single-element segment list for provider code that handles multi-segment outputs.
+    public var segments: [Segment] {
+      [segment]
+    }
   }
 
   /// The model's response for a single turn.
@@ -365,13 +405,22 @@ public extension Transcript {
       self.status = status
     }
 
+    /// Creates a completed response from provider-produced segments.
+    public init(
+      assetIDs: [String] = [],
+      segments: [Segment],
+    ) {
+      _ = assetIDs
+      self.init(id: UUID().uuidString, segments: segments, status: .completed)
+    }
+
     /// All text segments in order.
     public var textSegments: [TextSegment] {
       segments.compactMap { segment in
         switch segment {
         case let .text(textSegment):
           textSegment
-        case .structure:
+        case .structure, .image:
           nil
         }
       }
@@ -383,7 +432,7 @@ public extension Transcript {
         switch segment {
         case let .structure(structuredSegment):
           structuredSegment
-        case .text:
+        case .text, .image:
           nil
         }
       }
@@ -403,6 +452,8 @@ public extension Transcript {
     case text(TextSegment)
     /// A unit of structured content.
     case structure(StructuredSegment)
+    /// A unit of image content.
+    case image(ImageSegment)
 
     /// Stable identifier for the underlying segment.
     public var id: String {
@@ -411,6 +462,8 @@ public extension Transcript {
         textSegment.id
       case let .structure(structuredSegment):
         structuredSegment.id
+      case let .image(imageSegment):
+        imageSegment.id
       }
     }
   }
@@ -447,6 +500,76 @@ public extension Transcript {
       self.id = id
       self.typeName = typeName
       self.content = content.generatedContent
+    }
+  }
+
+  /// A unit of image content used for multimodal prompts and responses.
+  struct ImageSegment: Sendable, Identifiable, Equatable, Codable {
+    /// Identifier for this segment.
+    public var id: String
+    /// The source of the image data.
+    public var source: Source
+
+    /// The origin of image content.
+    public enum Source: Sendable, Equatable, Codable {
+      /// Encoded image bytes and their MIME type.
+      case data(Data, mimeType: String)
+      /// A URL that references an image.
+      case url(URL)
+
+      private enum CodingKeys: String, CodingKey {
+        case kind
+        case data
+        case mimeType
+        case url
+      }
+
+      public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try container.decode(String.self, forKey: .kind)
+        switch kind {
+        case "data":
+          let data = try container.decode(Data.self, forKey: .data)
+          let mimeType = try container.decode(String.self, forKey: .mimeType)
+          self = .data(data, mimeType: mimeType)
+        case "url":
+          self = .url(try container.decode(URL.self, forKey: .url))
+        default:
+          throw DecodingError.dataCorruptedError(
+            forKey: .kind,
+            in: container,
+            debugDescription: "Unknown image source kind: \(kind)",
+          )
+        }
+      }
+
+      public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .data(data, mimeType):
+          try container.encode("data", forKey: .kind)
+          try container.encode(data, forKey: .data)
+          try container.encode(mimeType, forKey: .mimeType)
+        case let .url(url):
+          try container.encode("url", forKey: .kind)
+          try container.encode(url, forKey: .url)
+        }
+      }
+    }
+
+    public init(id: String = UUID().uuidString, source: Source) {
+      self.id = id
+      self.source = source
+    }
+
+    public init(id: String = UUID().uuidString, data: Data, mimeType: String) {
+      self.id = id
+      source = .data(data, mimeType: mimeType)
+    }
+
+    public init(id: String = UUID().uuidString, url: URL) {
+      self.id = id
+      source = .url(url)
     }
   }
 }
@@ -775,6 +898,8 @@ private extension Transcript.Segment {
       textSegment.prettyPrintedLines(indentedBy: indentationLevel)
     case let .structure(structuredSegment):
       structuredSegment.prettyPrintedLines(indentedBy: indentationLevel)
+    case let .image(imageSegment):
+      imageSegment.prettyPrintedLines(indentedBy: indentationLevel)
     }
   }
 }
@@ -804,6 +929,30 @@ private extension Transcript.StructuredSegment {
       indentationLevel: indentationLevel + 1,
       name: "content",
     ))
+    lines.append("\(currentIndentation)}")
+    return lines
+  }
+}
+
+private extension Transcript.ImageSegment {
+  func prettyPrintedLines(indentedBy indentationLevel: Int) -> [String] {
+    var lines: [String] = []
+    let currentIndentation = transcriptIndentation(for: indentationLevel)
+    lines.append("\(currentIndentation)ImageSegment(id: \(id)) {")
+    switch source {
+    case let .data(data, mimeType):
+      lines.append(contentsOf: transcriptPrettyField(
+        name: "source",
+        value: "data(\(mimeType), \(data.count) bytes)",
+        indentationLevel: indentationLevel + 1,
+      ))
+    case let .url(url):
+      lines.append(contentsOf: transcriptPrettyField(
+        name: "source",
+        value: url.absoluteString,
+        indentationLevel: indentationLevel + 1,
+      ))
+    }
     lines.append("\(currentIndentation)}")
     return lines
   }

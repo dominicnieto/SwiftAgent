@@ -130,7 +130,7 @@ public extension Transcript {
           switch segment {
           case let .text(textSegment):
             textSegment
-          case .structure:
+          case .structure, .image:
             nil
           }
         }
@@ -142,7 +142,7 @@ public extension Transcript {
           switch segment {
           case let .structure(structuredSegment):
             structuredSegment
-          case .text:
+          case .text, .image:
             nil
           }
         }
@@ -163,6 +163,8 @@ public extension Transcript {
 
       /// Structured payload resolved into schema types.
       case structure(StructuredSegment)
+      /// Image payload preserved from the source transcript.
+      case image(Transcript.ImageSegment)
 
       public var id: String {
         switch self {
@@ -170,6 +172,8 @@ public extension Transcript {
           textSegment.id
         case let .structure(structuredSegment):
           structuredSegment.id
+        case let .image(imageSegment):
+          imageSegment.id
         }
       }
     }

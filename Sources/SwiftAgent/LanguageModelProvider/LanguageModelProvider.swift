@@ -112,7 +112,7 @@ package extension LanguageModelProvider {
                 try Task.checkCancellation()
 
                 switch segment {
-                case .text:
+                case .text, .image:
                   // Not applicable for structured content
                   break
                 case let .structure(structuredSegment):

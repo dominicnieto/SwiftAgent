@@ -11,6 +11,7 @@ let package = Package(
   ],
   products: [
     .library(name: "SwiftAgent", targets: ["SwiftAgent"]),
+    .library(name: "SwiftAgentAsyncHTTPClient", targets: ["SwiftAgentAsyncHTTPClient"]),
     .library(name: "OpenAISession", targets: ["OpenAISession", "SimulatedSession", "SwiftAgent"]),
     .library(name: "AnthropicSession", targets: ["AnthropicSession", "SimulatedSession", "SwiftAgent"]),
     .library(name: "ExampleCode", targets: ["ExampleCode"]),
@@ -21,7 +22,9 @@ let package = Package(
     .package(url: "https://github.com/jamesrochabrun/SwiftAnthropic.git", from: "2.2.0"),
     .package(url: "https://github.com/mattt/EventSource", from: "1.2.0"),
     .package(url: "https://github.com/mattt/JSONSchema", from: "1.3.0"),
+    .package(url: "https://github.com/mattt/PartialJSONDecoder", from: "1.0.0"),
     .package(url: "https://github.com/pointfreeco/swift-macro-testing", from: "0.6.4"),
+    .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.24.0"),
   ],
   targets: [
     .macro(
@@ -40,6 +43,7 @@ let package = Package(
         "SwiftAgentMacros",
         "EventSource",
         .product(name: "JSONSchema", package: "JSONSchema"),
+        .product(name: "PartialJSONDecoder", package: "PartialJSONDecoder"),
       ],
     ),
     .target(
@@ -49,6 +53,14 @@ let package = Package(
         "OpenAI",
         "SwiftAgentMacros",
         "EventSource",
+      ],
+    ),
+    .target(
+      name: "SwiftAgentAsyncHTTPClient",
+      dependencies: [
+        "SwiftAgent",
+        "EventSource",
+        .product(name: "AsyncHTTPClient", package: "async-http-client"),
       ],
     ),
     .target(
