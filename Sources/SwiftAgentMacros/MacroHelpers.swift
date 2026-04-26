@@ -94,7 +94,7 @@ enum MacroError: CustomStringConvertible {
 
     case let .observedPropertyProvidesInitializer(node):
       messageID = MessageID(domain: Self.domain, id: "observed-property-initializer")
-      message = "Remove the initializer; @_LanguageModelProviderObserved manages storage automatically"
+      message = "Remove the initializer; the observation macro manages storage automatically"
       return Diagnostic(
         node: node,
         message: MacroDiagnosticMessage(message: message, diagnosticID: messageID, severity: .error),
@@ -102,7 +102,7 @@ enum MacroError: CustomStringConvertible {
 
     case let .missingObservedInitialValue(node):
       messageID = MessageID(domain: Self.domain, id: "missing-observed-initial-value")
-      message = "@_LanguageModelProviderObserved requires an 'initialValue:' argument"
+      message = "The observation macro requires an 'initialValue:' argument"
       return Diagnostic(
         node: node,
         message: MacroDiagnosticMessage(message: message, diagnosticID: messageID, severity: .error),

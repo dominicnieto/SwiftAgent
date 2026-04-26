@@ -1,11 +1,10 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 
 /// Names a schema SwiftAgent can generate directly as a typed value.
 ///
-/// Conforming types declare a `Schema` using FoundationModels' `@Generable` macro and expose a
+/// Conforming types declare a `Schema` using SwiftAgent's local `@Generable` macro and expose a
 /// stable `name` used to tag transcript segments. Add the type to a `@SessionSchema` type with
 /// `@StructuredOutput` to request the value, stream partial updates, and access decoded results.
 ///
@@ -25,7 +24,9 @@ import FoundationModels
 ///   @StructuredOutput(WeatherReport.self) var weatherReport
 /// }
 ///
-/// let session = OpenAISession(schema: SessionSchema(), instructions: "You are a helpful assistant.", apiKey: "sk-...")
+/// let schema = SessionSchema()
+/// let model = OpenAILanguageModel(apiKey: "sk-...", model: "gpt-5-nano", apiVariant: .responses)
+/// let session = LanguageModelSession(model: model, tools: schema.tools, instructions: "You are a helpful assistant.")
 /// let report = try await session.respond(to: "Weather in Lisbon?", generating: \.weatherReport).content
 /// ```
 public protocol StructuredOutput<Schema>: Sendable {

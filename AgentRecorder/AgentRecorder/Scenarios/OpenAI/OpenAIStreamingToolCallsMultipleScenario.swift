@@ -1,39 +1,35 @@
-// By Dennis Müller
+// By Dennis Muller
 
-import FoundationModels
-import OpenAISession
 import SwiftAgent
 
 enum OpenAIStreamingToolCallsMultipleScenario {
-  /// Matches: `Tests/SwiftAgentTests/OpenAISession/OpenAIStreamingMultipleToolCallsTests.swift`
   static let scenario = AgentRecorderScenario(
     id: "openai/streaming-tool-calls/multiple",
     provider: .openAI,
-    unitTestFile: "Tests/SwiftAgentTests/OpenAISession/OpenAIStreamingMultipleToolCallsTests.swift",
+    unitTestFile: "Tests/SwiftAgentTests/Providers/OpenAIProviderReplayTests.swift",
     expectedRecordedResponsesCount: 2,
     run: { recorder, secrets in
-      let configuration = try OpenAIConfiguration.recording(
-        apiKey: secrets.openAIAPIKey(),
-        recorder: recorder,
+      let apiKey = try secrets.openAIAPIKey()
+      let model = OpenAILanguageModel(
+        apiKey: apiKey,
+        model: "gpt-4o",
+        apiVariant: .responses,
+        httpClient: OpenAIRecordingHTTPClient.make(apiKey: apiKey, recorder: recorder),
       )
-
-      let session = OpenAISession(
-        schema: RecordingSchema(),
+      let session = LanguageModelSession(
+        model: model,
+        tools: [WeatherTool(), TimeTool()],
         instructions: """
         Do not answer with any text before tool calls.
         Call `get_weather` with { "location": "Tokyo" } and `get_time` with { "location": "Tokyo" } in parallel.
         After tool outputs, reply with exactly: Done.
         """,
-        configuration: configuration,
+        toolExecutionPolicy: .init(allowsParallelExecution: true),
       )
 
-      let stream = try session.streamResponse(
+      let stream = session.streamResponse(
         to: "Need weather and time.",
-        using: .gpt4o,
-        options: .init(
-          allowParallelToolCalls: true,
-          minimumStreamingSnapshotInterval: .zero,
-        ),
+        options: GenerationOptions(minimumStreamingSnapshotInterval: .zero),
       )
 
       for try await _ in stream {}
@@ -41,13 +37,7 @@ enum OpenAIStreamingToolCallsMultipleScenario {
   )
 }
 
-@SessionSchema
-private struct RecordingSchema {
-  @Tool var weather = WeatherTool()
-  @Tool var time = TimeTool()
-}
-
-private struct WeatherTool: FoundationModels.Tool {
+private struct WeatherTool: SwiftAgent.Tool {
   var name: String = "get_weather"
   var description: String = "Get current weather for a given location."
 
@@ -62,7 +52,7 @@ private struct WeatherTool: FoundationModels.Tool {
   }
 }
 
-private struct TimeTool: FoundationModels.Tool {
+private struct TimeTool: SwiftAgent.Tool {
   var name: String = "get_time"
   var description: String = "Get the current local time for a given location."
 

@@ -1,11 +1,10 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 import OSLog
 import SwiftAgent
 
-public struct SimulationConfiguration: Sendable, AdapterConfiguration {
+public struct SimulationConfiguration: Sendable {
   public var generationDelay: Duration
   public var tokenUsage: TokenUsage?
   public var defaultGenerations: [SimulatedGeneration]

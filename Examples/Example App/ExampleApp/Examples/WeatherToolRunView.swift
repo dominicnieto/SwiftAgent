@@ -1,8 +1,7 @@
 // By Dennis Müller
 
 import Foundation
-import struct FoundationModels.GeneratedContent
-import OpenAISession
+import SwiftAgent
 import SwiftUI
 
 struct WeatherToolRunView: View {

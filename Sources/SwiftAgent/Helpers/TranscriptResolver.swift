@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 import OSLog
 
 /// Resolves raw transcript entries into your app's domain types.
@@ -9,7 +8,7 @@ import OSLog
 /// This utility reads a ``Transcript`` and produces the `SessionSchema.Transcript`
 /// by resolving tool runs, structured outputs, and groundings using the
 /// automatically generated `tools` and `structuredOutputs` from your
-/// `@LanguageModelProvider` session.
+/// `@SessionSchema` type.
 ///
 /// - Note: You typically create this via `session.resolver()`; the macro wires
 ///   up everything needed. You rarely construct it manually.
@@ -41,6 +40,10 @@ public struct TranscriptResolver<SessionSchema: LanguageModelSessionSchema> {
 
     for (index, entry) in transcript.entries.enumerated() {
       switch entry {
+      case .instructions:
+        // Instructions are model-visible session context, but they do not map
+        // to app-facing prompt, tool run, or response values in the resolved transcript.
+        break
       case let .prompt(prompt):
         var resolvedSources: [SessionSchema.DecodedGrounding] = []
         var errorContext: TranscriptResolvingError.PromptResolution?
@@ -80,6 +83,8 @@ public struct TranscriptResolver<SessionSchema: LanguageModelSessionSchema> {
               typeName: structure.typeName,
               content: content,
             )))
+          case let .image(image):
+            segments.append(.image(image))
           }
         }
 
@@ -155,6 +160,8 @@ public struct TranscriptResolver<SessionSchema: LanguageModelSessionSchema> {
           return GeneratedContent(text.content)
         case let .structure(structure):
           return structure.content
+        case .image:
+          return nil
         }
       }
     }
@@ -220,7 +227,7 @@ public struct TranscriptResolver<SessionSchema: LanguageModelSessionSchema> {
 
   // MARK: Groundings
 
-  /// Resolves grounding data previously encoded via `LanguageModelProvider.encodeGrounding`.
+  /// Resolves grounding data previously encoded by the session schema.
   public func resolveGroundings(from data: Data) throws -> [SessionSchema.DecodedGrounding] {
     try JSONDecoder().decode([SessionSchema.DecodedGrounding].self, from: data)
   }

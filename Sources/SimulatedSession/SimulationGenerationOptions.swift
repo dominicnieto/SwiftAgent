@@ -3,10 +3,7 @@
 import Foundation
 import SwiftAgent
 
-public struct SimulationGenerationOptions: AdapterGenerationOptions {
-  public typealias Model = SimulationModel
-  public typealias GenerationOptionsError = SimulationGenerationOptionsError
-
+public struct SimulationGenerationOptions: CustomGenerationOptions {
   public enum SimulationGenerationOptionsError: Error, LocalizedError, Sendable {
     case noGenerationsAvailable
 
@@ -33,9 +30,24 @@ public struct SimulationGenerationOptions: AdapterGenerationOptions {
     self.init(simulatedGenerations: [])
   }
 
-  public static func automatic(for model: SimulationModel) -> SimulationGenerationOptions {
-    SimulationGenerationOptions()
+  public static func == (lhs: SimulationGenerationOptions, rhs: SimulationGenerationOptions) -> Bool {
+    lhs.minimumStreamingSnapshotInterval == rhs.minimumStreamingSnapshotInterval
+      && lhs.tokenUsageOverride == rhs.tokenUsageOverride
+      && lhs.simulatedGenerations.map(\.testDescription) == rhs.simulatedGenerations.map(\.testDescription)
   }
+}
 
-  public func validate(for model: SimulationModel) throws(SimulationGenerationOptionsError) {}
+private extension SimulatedGeneration {
+  var testDescription: String {
+    switch self {
+    case let .reasoning(summary):
+      "reasoning:\(summary)"
+    case let .toolRun(tool):
+      "tool:\(tool.tool.name)"
+    case let .textResponse(text):
+      "text:\(text)"
+    case let .structuredResponse(content):
+      "structured:\(content.stableJsonString)"
+    }
+  }
 }

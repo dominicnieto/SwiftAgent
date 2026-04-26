@@ -7,8 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		1B8A7868504D4066872C6E13 /* OpenAISession in Frameworks */ = {isa = PBXBuildFile; productRef = 2D8BD949038E4BA1913AE588 /* OpenAISession */; };
-		EEFE322A636F42B089EEAE6E /* AnthropicSession in Frameworks */ = {isa = PBXBuildFile; productRef = D415344D86CE4AD6A4113748 /* AnthropicSession */; };
+		8C1C2486A5E64D51A0BE5D8C /* SwiftAgent in Frameworks */ = {isa = PBXBuildFile; productRef = 8C1C2485A5E64D51A0BE5D8C /* SwiftAgent */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -40,8 +39,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1B8A7868504D4066872C6E13 /* OpenAISession in Frameworks */,
-				EEFE322A636F42B089EEAE6E /* AnthropicSession in Frameworks */,
+				8C1C2486A5E64D51A0BE5D8C /* SwiftAgent in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -92,8 +90,7 @@
 			);
 			name = AgentRecorder;
 			packageProductDependencies = (
-				2D8BD949038E4BA1913AE588 /* OpenAISession */,
-				D415344D86CE4AD6A4113748 /* AnthropicSession */,
+				8C1C2485A5E64D51A0BE5D8C /* SwiftAgent */,
 			);
 			productName = AgentRecorder;
 			productReference = 4EFB28332F18DBCA00D20896 /* AgentRecorder */;
@@ -314,13 +311,9 @@
 /* End XCConfigurationList section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		2D8BD949038E4BA1913AE588 /* OpenAISession */ = {
+		8C1C2485A5E64D51A0BE5D8C /* SwiftAgent */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = OpenAISession;
-		};
-		D415344D86CE4AD6A4113748 /* AnthropicSession */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = AnthropicSession;
+			productName = SwiftAgent;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

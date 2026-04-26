@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 
 /// An error that indicates a tool run produced a recoverable rejection.
 ///
@@ -26,7 +25,7 @@ public struct ToolRunRejection: Error, LocalizedError, Sendable {
   ///   - content: Any value that can be converted into ``GeneratedContent``.
   public init(reason: String? = nil, content: some ConvertibleToGeneratedContent) {
     let decodedReason = reason ?? Self.fallbackReason
-    let rejectionReport = RejectionReport(reason: decodedReason, details: content.generatedContent)
+    let rejectionReport = RejectionReport(error: true, reason: decodedReason, details: content.generatedContent)
     generatedContent = rejectionReport.generatedContent
     self.reason = decodedReason
   }
@@ -38,7 +37,7 @@ public struct ToolRunRejection: Error, LocalizedError, Sendable {
   ///   - generatedContent: The payload to forward to the model.
   public init(reason: String? = nil, generatedContent: GeneratedContent) {
     let decodedReason = reason ?? Self.fallbackReason
-    let rejectionReport = RejectionReport(reason: decodedReason, details: generatedContent)
+    let rejectionReport = RejectionReport(error: true, reason: decodedReason, details: generatedContent)
     self.generatedContent = rejectionReport.generatedContent
     self.reason = decodedReason
   }
@@ -50,7 +49,7 @@ public struct ToolRunRejection: Error, LocalizedError, Sendable {
   ///   - details: Optional machine-readable information that helps the agent recover.
   public init(reason: String, details: [String: String]? = nil) {
     let detailsContent = details.flatMap(Self.generateDetailsContent)
-    let rejectionReport = RejectionReport(reason: reason, details: detailsContent)
+    let rejectionReport = RejectionReport(error: true, reason: reason, details: detailsContent)
     generatedContent = rejectionReport.generatedContent
     self.reason = reason
   }

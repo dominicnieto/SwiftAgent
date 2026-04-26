@@ -1,16 +1,15 @@
 // By Dennis Müller
 
 import Foundation
-import OpenAISession
 import SwiftAgent
 
-extension OpenAIConfiguration {
-  static func recording(
+enum OpenAIRecordingHTTPClient {
+  static func make(
     apiKey: String,
     recorder: HTTPReplayRecorder,
-  ) -> OpenAIConfiguration {
+  ) -> any HTTPClient {
     let encoder = JSONEncoder()
-    encoder.outputFormatting = .sortedKeys
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
 
     let decoder = JSONDecoder()
 
@@ -25,7 +24,7 @@ extension OpenAIConfiguration {
     interceptors = interceptors.recording(to: recorder)
 
     let configuration = HTTPClientConfiguration(
-      baseURL: URL(string: "https://api.openai.com")!,
+      baseURL: URL(string: "https://api.openai.com/v1/")!,
       defaultHeaders: [:],
       timeout: 60,
       jsonEncoder: encoder,
@@ -34,6 +33,6 @@ extension OpenAIConfiguration {
     )
 
     let session = RecordingURLSession.make(timeout: configuration.timeout)
-    return OpenAIConfiguration(httpClient: URLSessionHTTPClient(configuration: configuration, session: session))
+    return URLSessionHTTPClient(configuration: configuration, session: session)
   }
 }

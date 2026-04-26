@@ -1,44 +1,39 @@
-// By Dennis Müller
+// By Dennis Muller
 
-import AnthropicSession
-import FoundationModels
 import SwiftAgent
 
 enum AnthropicStreamingToolCallsWeatherScenario {
-  /// Matches: `Tests/SwiftAgentTests/AnthropicSession/AnthropicStreamingToolCallsTests.swift`
   static let scenario = AgentRecorderScenario(
     id: "anthropic/streaming-tool-calls/weather",
     provider: .anthropic,
-    unitTestFile: "Tests/SwiftAgentTests/AnthropicSession/AnthropicStreamingToolCallsTests.swift",
+    unitTestFile: "Tests/SwiftAgentTests/Providers/AnthropicProviderReplayTests.swift",
     expectedRecordedResponsesCount: 2,
     run: { recorder, secrets in
-      let configuration = try AnthropicConfiguration.recording(
-        apiKey: secrets.anthropicAPIKey(),
-        recorder: recorder,
+      let apiKey = try secrets.anthropicAPIKey()
+      let model = AnthropicLanguageModel(
+        apiKey: apiKey,
+        model: AnthropicRecordingModel.model,
+        httpClient: AnthropicRecordingHTTPClient.make(apiKey: apiKey, recorder: recorder),
       )
-
-      let session = AnthropicSession(
-        tools: WeatherTool(),
+      let session = LanguageModelSession(
+        model: model,
+        tools: [WeatherTool()],
         instructions: """
         Do not write any text before the tool call.
         Call `get_weather` exactly once with:
         { "location": "Tokyo", "requestedDate": "2026-01-15", "timeOfDay": "afternoon" }
         After tool output, reply with exactly: Done.
         """,
-        configuration: configuration,
       )
 
-      let stream = try session.streamResponse(
-        to: "Weather update",
-        using: AnthropicRecordingModel.model,
-      )
+      let stream = session.streamResponse(to: "Weather update")
 
       for try await _ in stream {}
     },
   )
 }
 
-private struct WeatherTool: FoundationModels.Tool {
+private struct WeatherTool: SwiftAgent.Tool {
   var name: String = "get_weather"
   var description: String = "Get current weather for a given location."
 

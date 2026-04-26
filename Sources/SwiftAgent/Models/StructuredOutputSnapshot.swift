@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 
 /// Captures a single streamed update for a structured output while the agent responds.
 ///
@@ -27,7 +26,8 @@ import FoundationModels
 ///   }
 /// }
 ///
-/// let session = OpenAISession(instructions: "You are a helpful assistant.")
+/// let model = OpenAILanguageModel(apiKey: "sk-...", model: "gpt-5-nano", apiVariant: .responses)
+/// let session = LanguageModelSession(model: model, instructions: "You are a helpful assistant.")
 /// for try await snapshot in session.streamResponse(to: "Weather in Lisbon?", generating: WeatherReport.self) {
 ///   if let current = snapshot.currentContent {
 ///     WeatherView(content: current.content)

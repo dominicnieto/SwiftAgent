@@ -5,12 +5,12 @@
 
 **Native Swift SDK for building autonomous AI agents with Apple's FoundationModels design philosophy**
 
-SwiftAgent simplifies AI agent development by providing a clean, intuitive API that handles all the complexity of agent loops, tool execution, and adapter communication. Inspired by Apple's FoundationModels framework, it brings the same elegant, declarative approach to cross-platform AI agent development.
+SwiftAgent simplifies AI agent development by providing a clean, intuitive API that handles the complexity of agent loops, tool execution, and direct provider communication. Inspired by Apple's FoundationModels framework, it brings the same elegant, declarative approach to cross-platform AI agent development.
 
 ## SwiftAgent in Action
 
 ```swift
-import OpenAISession
+import SwiftAgent
 
 @SessionSchema
 struct CityExplorerSchema {
@@ -26,23 +26,28 @@ struct CityExplorerSchema {
 @MainActor
 func planCopenhagenWeekend() async throws {
   let schema = CityExplorerSchema()
-  let session = OpenAISession(
-    schema: schema,
+  let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
+  let session = LanguageModelSession(
+    model: model,
+    tools: [schema.cityFacts, schema.reservation],
     instructions: "Design cinematic weekends. Call tools for local intel and reservations.",
-    apiKey: "sk-..."
   )
 
   let response = try await session.respond(
-    to: "Coffee, design, and dinner plans for two days in Copenhagen.",
-    groundingWith: [
-      .travelDate(Date(timeIntervalSinceNow: 86_400)),
-      .mustVisitIdeas([
+    to: Prompt {
+      PromptTag("context") {
+        "Travel date: \(Date(timeIntervalSinceNow: 86_400))"
+        "Must-visit ideas:"
         "Coffee Collective, Nørrebro",
         "Designmuseum Denmark",
         "Kødbyens Fiskebar"
-      ])
-    ],
-    generating: \.itinerary
+      }
+
+      PromptTag("user-query") {
+        "Coffee, design, and dinner plans for two days in Copenhagen."
+      }
+    },
+    generating: ItinerarySummary.self,
   )
 
   print(response.content.headline)
@@ -92,12 +97,12 @@ func planCopenhagenWeekend() async throws {
 ## Features
 
 - **Zero-Setup Agent Loops** — Handle autonomous agent execution with just a few lines of code
-- **Native Tool Integration** — Use `@Generable` structs from FoundationModels as agent tools seamlessly
-- **Adapter Agnostic** — Abstract interface supports multiple AI adapters (OpenAI + Anthropic included, more coming)
+- **Native Tool Integration** — Use SwiftAgent `@Generable` structs as agent tools seamlessly
+- **Provider Agnostic** — The main session API supports multiple AI providers (OpenAI + Anthropic included, more coming)
 - **Apple-Native Design** — API inspired by FoundationModels for familiar, intuitive development
 - **Modern Swift** — Built with Swift 6, async/await, and latest concurrency features
 - **Rich Logging** — Comprehensive, human-readable logging for debugging and monitoring
-- **Flexible Configuration** — Fine-tune generation options, tools, and adapter settings
+- **Flexible Configuration** — Fine-tune generation options, tools, and provider-specific settings
 
 ## Quick Start
 
@@ -111,33 +116,26 @@ dependencies: [
   .package(url: "https://github.com/SwiftedMind/SwiftAgent.git", branch: "main")
 ]
 
-// OpenAI target
-.product(name: "OpenAISession", package: "SwiftAgent")
-
-// Anthropic target
-.product(name: "AnthropicSession", package: "SwiftAgent")
+.product(name: "SwiftAgent", package: "SwiftAgent")
 ```
 
-Then import the target you need:
+Then import SwiftAgent:
 
 ```swift
-// For OpenAI
-import OpenAISession
-
-// For Anthropic
-import AnthropicSession
+import SwiftAgent
 ```
 
 ### Basic Usage
 
-Create an `OpenAISession` with your default instructions and call `respond` whenever you need a single-turn answer. The session tracks conversation state for you, so you can start simple and layer on additional features later.
+Create a model and a `LanguageModelSession` with your default instructions, then call `respond` whenever you need a single-turn answer. The session tracks conversation state for you, so you can start simple and layer on additional features later.
 
 ```swift
-import OpenAISession
+import SwiftAgent
 
-let session = OpenAISession(
+let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
+let session = LanguageModelSession(
+  model: model,
   instructions: "You are a helpful assistant.",
-  apiKey: "sk-...",
 )
 
 // Create a response
@@ -150,11 +148,12 @@ print(response.content)
 Or use Anthropic:
 
 ```swift
-import AnthropicSession
+import SwiftAgent
 
-let session = AnthropicSession(
+let model = AnthropicLanguageModel(apiKey: "sk-ant-...", model: "claude-sonnet-4-5")
+let session = LanguageModelSession(
+  model: model,
   instructions: "You are a helpful assistant.",
-  apiKey: "sk-ant-...",
 )
 
 let response = try await session.respond(to: "What's the weather like in San Francisco?")
@@ -167,11 +166,10 @@ print(response.content)
 
 ### Building Tools
 
-Create tools using Apple's `@Generable` macro for type-safe, schema-free tool definitions. Tools expose argument and output types that SwiftAgent validates for you, so the model can call into Swift code and receive strongly typed results without manual JSON parsing.
+Create tools using SwiftAgent's `@Generable` macro for type-safe tool definitions. Tools expose argument and output types that SwiftAgent validates for you, so the model can call into Swift code and receive strongly typed results without manual JSON parsing.
 
 ```swift
-import FoundationModels
-import OpenAISession
+import SwiftAgent
 
 struct WeatherTool: Tool {
   let name = "get_weather"
@@ -202,10 +200,11 @@ struct WeatherTool: Tool {
   }
 }
 
-let session = OpenAISession(
-  tools: WeatherTool(),
+let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
+let session = LanguageModelSession(
+  model: model,
+  tools: [WeatherTool()],
   instructions: "You are a helpful assistant.",
-  apiKey: "sk-...",
 )
 
 let response = try await session.respond(to: "What's the weather like in San Francisco?")
@@ -214,7 +213,7 @@ print(response.content)
 ```
 
 > [!NOTE]
-> Unlike Apple's `LanguageModelSession` object, `OpenAISession` takes the `tools` parameter as variadic arguments. So instead of passing an array like `tools: [WeatherTool(), OtherTool()]`, you pass the tools as a list of arguments `tools: WeatherTool(), OtherTool()`.
+> `LanguageModelSession` takes tools as an array, for example `tools: [WeatherTool(), OtherTool()]`.
 
 #### Recoverable Tool Rejections
 
@@ -264,31 +263,27 @@ throw ToolRunRejection(
 
 ### Structured Responses
 
-You can force the response to be structured by defining a type conforming to `StructuredOutput` and passing it to the `session.respond` method:
+You can force the response to be structured by defining a `@Generable` type and passing it to the `session.respond` method:
 
 ```swift
-import FoundationModels
-import OpenAISession
+import SwiftAgent
 
-struct WeatherReport: StructuredOutput {
-  static let name: String = "weatherReport"
-
-  @Generable
-  struct Schema {
-    let temperature: Double
-    let condition: String
-    let humidity: Int
-  }
+@Generable
+struct WeatherReport {
+  let temperature: Double
+  let condition: String
+  let humidity: Int
 }
 
-let session = OpenAISession(
-  tools: WeatherTool(),
+let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
+let session = LanguageModelSession(
+  model: model,
+  tools: [WeatherTool()],
   instructions: "You are a helpful assistant.",
-  apiKey: "sk-...",
 )
 
 let response = try await session.respond(
-  to: "What's the weather like in San Francisco?",
+  to: Prompt("What's the weather like in San Francisco?"),
   generating: WeatherReport.self,
 )
 
@@ -302,18 +297,21 @@ The response body is now a fully typed `WeatherReport`. SwiftAgent validates the
 
 ### Access Transcripts
 
-Every `OpenAISession` maintains a running transcript that records prompts, reasoning steps, tool calls, and responses. Iterate over it to drive custom analytics, persistence, or UI updates:
+Every `LanguageModelSession` maintains a running transcript that records instructions, prompts, reasoning steps, tool calls, tool outputs, and responses. Iterate over it to drive custom analytics, persistence, or UI updates:
 
 ```swift
-import OpenAISession
+import SwiftAgent
 
-let session = OpenAISession(
+let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
+let session = LanguageModelSession(
+  model: model,
   instructions: "You are a helpful assistant.",
-  apiKey: "sk-...",
 )
 
 for entry in session.transcript {
   switch entry {
+  case let .instructions(instructions):
+    print("Instructions: ", instructions)
   case let .prompt(prompt):
     print("Prompt: ", prompt)
   case let .reasoning(reasoning):
@@ -329,34 +327,38 @@ for entry in session.transcript {
 ```
 
 > [!NOTE]
-> The `OpenAISession` object is `@Observable`, so you can observe its transcript for changes in real-time. This can be useful for UI applications.
+> `LanguageModelSession` is `@Observable`, so SwiftUI and other Observation-based UI can track `isResponding`, `transcript`, `tokenUsage`, and provider metadata directly. The session remains thread-safe by publishing Observation changes around its internal locked state instead of exposing mutable transcript storage.
 
 ### Access Token Usage
 
 Track each session's cumulative token consumption to budget response costs or surface usage in settings screens:
 
 ```swift
-import OpenAISession
+import SwiftAgent
 
-let session = OpenAISession(
+let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
+let session = LanguageModelSession(
+  model: model,
   instructions: "You are a helpful assistant.",
-  apiKey: "sk-...",
 )
 
-print(session.tokenUsage.inputTokens)
-print(session.tokenUsage.outputTokens)
-print(session.tokenUsage.reasoningTokens)
-print(session.tokenUsage.totalTokens)
+let response = try await session.respond(to: "What's the weather like in San Francisco?")
+
+print(response.tokenUsage?.inputTokens ?? 0)
+print(response.tokenUsage?.outputTokens ?? 0)
+print(response.tokenUsage?.reasoningTokens ?? 0)
+print(response.tokenUsage?.totalTokens ?? 0)
+print(session.tokenUsage?.totalTokens ?? 0)
 ```
 
-> Note: Each individual response also includes token usage information. See `AgentResponse` for more details.
+> Note: Each individual response also includes token usage information on `LanguageModelSession.Response`.
 
 ### Prompt Builder
 
-Build rich prompts inline with the `@PromptBuilder` DSL. Tags group related context, keep instructions readable, and mirror the structure FoundationModels expects when you want to mix prose with metadata.
+Build rich prompts inline with the `Prompt` builder DSL. Tags group related context, keep instructions readable, and mirror the structure providers expect when you want to mix prose with metadata.
 
 ```swift
-let response = try await session.respond(using: .gpt5) {
+let response = try await session.respond(to: Prompt {
   "You are a friendly assistant who double-checks calculations."
 
   PromptTag("user-question") {
@@ -366,33 +368,37 @@ let response = try await session.respond(using: .gpt5) {
   PromptTag("formatting") {
     "Answer in three concise bullet points."
   }
-}
+})
 
 print(response.content)
 ```
 
-Under the hood SwiftAgent converts the builder result into the exact wire format required by the adapter, so you can focus on intent instead of string concatenation.
+Under the hood SwiftAgent converts the builder result into the exact wire format required by the provider, so you can focus on intent instead of string concatenation.
 
 ### Custom Generation Options
 
 You can specify generation options for your responses:
 
 ```swift
-import OpenAISession
+import SwiftAgent
 
-let session = OpenAISession(
+let model = OpenAILanguageModel(apiKey: "sk-...", model: "gpt-5", apiVariant: .responses)
+let session = LanguageModelSession(
+  model: model,
   instructions: "You are a helpful assistant.",
-  apiKey: "sk-...",
 )
 
-let options = OpenAIGenerationOptions(
-  maxOutputTokens: 1000,
+var options = GenerationOptions(
   temperature: 0.7,
+  maximumResponseTokens: 1_000,
+)
+options[custom: OpenAILanguageModel.self] = .init(
+  reasoning: .init(effort: .low, summary: "auto"),
+  serviceTier: .auto,
 )
 
 let response = try await session.respond(
   to: "What's the weather like in San Francisco?",
-  using: .gpt5,
   options: options,
 )
 
@@ -404,21 +410,19 @@ These overrides apply only to the current turn, so you can increase creativity o
 Anthropic uses its own generation options:
 
 ```swift
-import AnthropicSession
+import SwiftAgent
 
-let session = AnthropicSession(
+let model = AnthropicLanguageModel(apiKey: "sk-ant-...", model: "claude-sonnet-4-5")
+let session = LanguageModelSession(
+  model: model,
   instructions: "You are a helpful assistant.",
-  apiKey: "sk-ant-...",
 )
 
-let options = AnthropicGenerationOptions(
-  maxOutputTokens: 1000,
-  thinking: .init(budgetTokens: 1024),
-)
+var options = GenerationOptions(maximumResponseTokens: 1_000)
+options[custom: AnthropicLanguageModel.self] = .init(thinking: .init(budgetTokens: 1_024))
 
 let response = try await session.respond(
   to: "What's the weather like in San Francisco?",
-  using: .claude37SonnetLatest,
   options: options,
 )
 
@@ -429,9 +433,20 @@ print(response.content)
 
 Raw transcripts expose every event as `GeneratedContent`, which is flexible but awkward when you want to build UI or assertions.
 
-Create a schema for your session using `@SessionSchema` to describe the tools, groundings, and structured outputs you expect. SwiftAgent then decodes each transcript entry into strongly typed cases that mirror your declarations.
+Create a schema using `@SessionSchema` to describe the tools, groundings, and structured outputs you expect. `LanguageModelSession` remains the runtime; the schema is the typed layer you use to resolve transcript entries into strongly typed cases that mirror your declarations.
 
 ```swift
+struct WeatherReportOutput: StructuredOutput {
+  static let name = "weatherReport"
+
+  @Generable
+  struct Schema {
+    let temperature: Double
+    let condition: String
+    let humidity: Int
+  }
+}
+
 @SessionSchema
 struct SessionSchema {
   @Tool var weatherTool = WeatherTool()
@@ -440,16 +455,16 @@ struct SessionSchema {
   @Grounding(Date.self) var currentDate
   @Grounding(VectorSearchResult.self) var searchResults
 
-  @StructuredOutput(WeatherReport.self) var weatherReport
-  @StructuredOutput(CalculatorOutput .self) var calculatorOutput
+  @StructuredOutput(WeatherReportOutput.self) var weatherReport
+  @StructuredOutput(CalculatorOutput.self) var calculatorOutput
 }
 
-// Pass the schema to your session object
 let sessionSchema = SessionSchema()
-let session = OpenAISession(
-  schema: sessionSchema,
+let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
+let session = LanguageModelSession(
+  model: model,
+  tools: [sessionSchema.weatherTool, sessionSchema.calculatorTool],
   instructions: "You are a helpful assistant.",
-  apiKey: "sk-...",
 )
 ```
 
@@ -464,8 +479,7 @@ Each macro refines a portion of the transcript:
 Decoded tool runs combine the model's argument payload and your tool's output in one place. That makes it easy to render progress UIs and surface recoverable errors without manually joining separate transcript entries.
 
 ```swift
-import FoundationModels
-import OpenAISession
+import SwiftAgent
 
 @SessionSchema
 struct SessionSchema {
@@ -473,10 +487,11 @@ struct SessionSchema {
 }
 
 let sessionSchema = SessionSchema()
-let session = OpenAISession(
-  schema: sessionSchema,
+let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
+let session = LanguageModelSession(
+  model: model,
+  tools: [sessionSchema.weatherTool],
   instructions: "You are a helpful assistant.",
-  apiKey: "sk-...",
 )
 
 // let response = try await session.respond(to: "What's the weather like in San Francisco?")
@@ -488,7 +503,7 @@ for entry in try sessionSchema.resolve(session.transcript) {
     switch toolRun {
     case let .weatherTool(weatherToolRun):
       if let arguments = weatherToolRun.finalArguments {
-        print(arguments.city, arguments.city)
+        print(arguments.city, arguments.unit)
       }
 
       if let output = weatherToolRun.output {
@@ -507,28 +522,28 @@ for entry in try sessionSchema.resolve(session.transcript) {
 When you request structured data, decoded responses slot those values directly into the schema you registered on the session. You can pull the result out of the live response or from the transcript later, depending on your workflow.
 
 ```swift
-import FoundationModels
-import OpenAISession
+import SwiftAgent
 
 @SessionSchema
 struct SessionSchema {
   @Tool var weatherTool = WeatherTool()
-  @StructuredOutput(WeatherReport.self) var weatherReport
+  @StructuredOutput(WeatherReportOutput.self) var weatherReport
 }
 
 let sessionSchema = SessionSchema()
-let session = OpenAISession(
-  schema: sessionSchema,
+let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
+let session = LanguageModelSession(
+  model: model,
+  tools: [sessionSchema.weatherTool],
   instructions: "You are a helpful assistant.",
-  apiKey: "sk-...",
 )
 
 let response = try await session.respond(
-  to: "What's the weather like in San Francisco?",
-  generating: \.weatherReport, // or schema.weatherReport, or WeatherReport.self
+  to: Prompt("What's the weather like in San Francisco?"),
+  generating: WeatherReportOutput.Schema.self,
 )
 
-print(response.content) // WeatherReport object
+print(response.content) // WeatherReportOutput.Schema object
 
 // Access the structured output in the resolved transcript
 for entry in try sessionSchema.resolve(session.transcript) {
@@ -553,40 +568,34 @@ for entry in try sessionSchema.resolve(session.transcript) {
 Groundings capture extra context you feed the model—like the current time or search snippets—and keep it synchronized with the prompt text. That makes it straightforward to inspect what the model saw and to recreate prompts later for debugging.
 
 ```swift
-import FoundationModels
-import OpenAISession
+import SwiftAgent
 
 @SessionSchema
 struct SessionSchema {
   @Tool var weatherTool = WeatherTool()
   @Grounding(Date.self) var currentDate
-  @StructuredOutput(WeatherReport.self) var weatherReport
+  @StructuredOutput(WeatherReportOutput.self) var weatherReport
 }
 
 let sessionSchema = SessionSchema()
-let session = OpenAISession(
-  schema: sessionSchema,
+let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
+let session = LanguageModelSession(
+  model: model,
+  tools: [sessionSchema.weatherTool],
   instructions: "You are a helpful assistant.",
-  apiKey: "sk-...",
 )
 
 let response = try await session.respond(
-  to: "What's the weather like in San Francisco?",
-  groundingWith: [.currentDate(Date())],
-) { input, sources in
-  PromptTag("context") {
-    for source in sources {
-      switch source {
-      case let .currentDate(date):
-        "The current date is \(date)."
-      }
+  to: Prompt {
+    PromptTag("context") {
+      "The current date is \(Date())."
     }
-  }
 
-  PromptTag("user-query") {
-    input
-  }
-}
+    PromptTag("user-query") {
+      "What's the weather like in San Francisco?"
+    }
+  },
+)
 
 print(response.content)
 
@@ -597,6 +606,7 @@ for entry in try sessionSchema.resolve(session.transcript) {
     print(prompt.input) // User input
 
     // Grounding sources stored alongside the input prompt
+    // If this prompt was produced by a schema-aware grounding API, sources decode here.
     for source in prompt.sources {
       switch source {
       case let .currentDate(date):
@@ -612,25 +622,27 @@ for entry in try sessionSchema.resolve(session.transcript) {
 
 ## Streaming Responses
 
-`streamResponse` emits snapshots while the agent thinks, calls tools, and crafts the final answer. FoundationModels generates `PartiallyGenerated` companions for every `@Generable` type, turning each property into an optional so tokens can land as soon as they are decoded. SwiftAgent surfaces those partial values directly, then swaps in the fully realized type once the model finalizes the turn.
+`streamResponse` emits snapshots while the agent thinks, calls tools, and crafts the final answer. SwiftAgent generates `PartiallyGenerated` companions for every `@Generable` type, turning each property into an optional so tokens can land as soon as they are decoded. SwiftAgent surfaces those partial values directly, then swaps in the fully realized type once the model finalizes the turn.
 
 ```swift
-import FoundationModels
-import OpenAISession
+import SwiftAgent
 
 @SessionSchema
 struct SessionSchema {
   @Tool var weatherTool = WeatherTool()
-  @StructuredOutput(WeatherReport.self) var weatherReport
+  @StructuredOutput(WeatherReportOutput.self) var weatherReport
 }
 
-let session = OpenAISession(
+let sessionSchema = SessionSchema()
+let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
+let session = LanguageModelSession(
+  model: model,
+  tools: [sessionSchema.weatherTool],
   instructions: "You are a helpful assistant.",
-  apiKey: "sk-...",
 )
 
 // Create a response
-let stream = try session.streamResponse(to: "What's the weather like in San Francisco?")
+let stream = session.streamResponse(to: "What's the weather like in San Francisco?")
 
 for try await snapshot in stream {
   // Once the agent is sending the final response, the snapshot's content will start to populate
@@ -650,26 +662,26 @@ Each snapshot contains the latest response fragment—if the model has started s
 Structured streaming works the same way: SwiftAgent first yields partially generated objects whose properties fill in as tokens arrive, then delivers the final schema once generation completes.
 
 ```swift
-import FoundationModels
-import OpenAISession
+import SwiftAgent
 
 @SessionSchema
 struct SessionSchema {
   @Tool var weatherTool = WeatherTool()
-  @StructuredOutput(WeatherReport.self) var weatherReport
+  @StructuredOutput(WeatherReportOutput.self) var weatherReport
 }
 
 let sessionSchema = SessionSchema()
-let session = OpenAISession(
-  schema: sessionSchema,
+let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
+let session = LanguageModelSession(
+  model: model,
+  tools: [sessionSchema.weatherTool],
   instructions: "You are a helpful assistant.",
-  apiKey: "sk-...",
 )
 
 // Create a response
-let stream = try session.streamResponse(
-  to: "What's the weather like in San Francisco?",
-  generating: \.weatherReport,
+let stream = session.streamResponse(
+  to: Prompt("What's the weather like in San Francisco?"),
+  generating: WeatherReportOutput.Schema.self,
 )
 
 for try await snapshot in stream {
@@ -763,10 +775,25 @@ Structured outputs follow the same pattern with `snapshot.currentContent`: you a
 Sending your OpenAI API key from the device is fine while sketching ideas, but it is not acceptable once you ship. Point the SDK at a proxy you control so the app never sees the provider credential:
 
 ```swift
-let configuration = OpenAIConfiguration.proxy(through: URL(string: "https://api.your-backend.com/proxy")!)
-let session = OpenAISession(
+let proxyToken = try await backend.issueTurnToken(for: userId)
+let httpClient = URLSessionHTTPClient(configuration: .init(
+  baseURL: URL(string: "https://api.your-backend.com/proxy/v1/")!,
+  jsonEncoder: JSONEncoder(),
+  jsonDecoder: JSONDecoder(),
+  interceptors: HTTPClientInterceptors(
+    prepareRequest: { request in
+      request.setValue("Bearer \(proxyToken)", forHTTPHeaderField: "Authorization")
+    }
+  )
+))
+let model = OpenResponsesLanguageModel(
+  apiKey: proxyToken,
+  model: "openai/gpt-5",
+  httpClient: httpClient
+)
+let session = LanguageModelSession(
+  model: model,
   instructions: "You are a helpful assistant.",
-  configuration: configuration
 )
 ```
 
@@ -784,21 +811,25 @@ Protect the proxy with short-lived tokens instead of static API keys. Before eac
 
 ```swift
 let turnToken = try await backend.issueTurnToken(for: userId)
-let response = try await session.withAuthorization(token: turnToken) {
-  try await session.respond(to: "Summarize yesterday's sales numbers.")
-}
+let model = OpenResponsesLanguageModel(
+  apiKey: turnToken,
+  model: "openai/gpt-5",
+  httpClient: proxyHTTPClient(for: turnToken)
+)
+let session = LanguageModelSession(model: model)
+let response = try await session.respond(to: "Summarize yesterday's sales numbers.")
 ```
 
-`withAuthorization` installs the token in a task-local context so that every internal request for the turn—draft reasoning, tool calls, and the final answer—inherits the same bearer token.
+Install the turn token in the request headers used by your proxy HTTP client so every internal request for the turn inherits the same authorization.
 
-For quick prototypes you can still use `OpenAIConfiguration.direct(apiKey:)`, but remove it before release.
+For quick prototypes you can still pass an API key directly to `OpenResponsesLanguageModel` or `OpenAILanguageModel`, but remove direct provider credentials before release.
 
 ## Simulated Session
 
 You can test and develop your agents without making API calls using the built-in simulation system. This is perfect for prototyping, testing, and developing UIs before integrating with live APIs.
 
 ```swift
-import OpenAISession
+import SwiftAgent
 import SimulatedSession
 
 // Create mockable tool wrappers
@@ -830,10 +861,11 @@ let configuration = SimulationConfiguration(defaultGenerations: [
   .response(text: "It's a beautiful sunny day in San Francisco with 22.5°C!"),
 ])
 
-let session = SimulatedSession(
-  schema: sessionSchema,
-  instructions: "You are a helpful assistant.",
-  configuration: configuration,
+let model = SimulationLanguageModel(configuration: configuration)
+let session = LanguageModelSession(
+  model: model,
+  tools: sessionSchema.tools,
+  instructions: "You are a helpful assistant."
 )
 
 let response = try await session.respond(to: "What's the weather like in San Francisco?")
@@ -896,7 +928,6 @@ OPENAI_API_KEY=sk-... ./.tmp/DerivedData/Build/Products/Debug/AgentRecorder --pr
 ### Option 2: Use the API directly
 
 ```swift
-import OpenAISession
 import SwiftAgent
 
 let recorder = HTTPReplayRecorder(
@@ -915,16 +946,21 @@ var interceptors = HTTPClientInterceptors(
 interceptors = interceptors.recording(to: recorder)
 
 let configuration = HTTPClientConfiguration(
-  baseURL: URL(string: "https://api.openai.com")!,
+  baseURL: URL(string: "https://api.openai.com/v1/")!,
   jsonEncoder: JSONEncoder(),
   jsonDecoder: JSONDecoder(),
   interceptors: interceptors
 )
 
 let httpClient = URLSessionHTTPClient(configuration: configuration)
-let session = OpenAISession(
+let model = OpenResponsesLanguageModel(
+  apiKey: apiKey,
+  model: "openai/gpt-5",
+  httpClient: httpClient
+)
+let session = LanguageModelSession(
+  model: model,
   instructions: "You are a helpful assistant.",
-  configuration: OpenAIConfiguration(httpClient: httpClient)
 )
 
 _ = try await session.respond(to: "Hello!")
@@ -945,9 +981,9 @@ Notes:
 
 SwiftAgent ships with a SwiftUI demo that showcases the SDK in action. Open the project at `Examples/Example App/ExampleApp` to explore an agent playground that:
 
-- Configures `OpenAISession` and `AnthropicSession` with the bundled `SessionSchema`, calculator tool, weather tool, and a structured weather report output.
+- Configures OpenAI and Anthropic language models with the bundled `SessionSchema`, calculator tool, weather tool, and a structured weather report output.
 - Streams responses while rendering prompts, reasoning summaries, tool runs, and final replies in a chat-style transcript UI.
-- Demonstrates tool-specific views (calculator and weather) with live argument updates, results, and SwiftUI previews backed by `SimulatedSession` scenarios.
+- Demonstrates tool-specific views (calculator and weather) with live argument updates, results, and SwiftUI previews backed by `SimulationLanguageModel` scenarios.
 
 Use the app to experiment with SwiftAgent locally or as a starting point for integrating the SDK into your own SwiftUI experience.
 

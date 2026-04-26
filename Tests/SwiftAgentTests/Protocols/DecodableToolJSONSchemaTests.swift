@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 @testable import SwiftAgent
 import Testing
 
@@ -61,7 +60,7 @@ struct DecodableToolJSONSchemaTests {
 
 // MARK: - Tool Fixtures
 
-private struct ForecastTool: FoundationModels.Tool {
+private struct ForecastTool: SwiftAgent.Tool {
   static let description: String = "Return forecast units for a city."
 
   var name: String = "forecast_weather"

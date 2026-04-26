@@ -1,35 +1,26 @@
-// By Dennis Müller
+// By Dennis Muller
 
-import AnthropicSession
-import FoundationModels
 import SwiftAgent
 
 enum AnthropicTextScenario {
-  /// Matches: `Tests/SwiftAgentTests/AnthropicSession/AnthropicTextTests.swift`
   static let scenario = AgentRecorderScenario(
     id: "anthropic/text",
     provider: .anthropic,
-    unitTestFile: "Tests/SwiftAgentTests/AnthropicSession/AnthropicTextTests.swift",
+    unitTestFile: "Tests/SwiftAgentTests/Providers/AnthropicProviderReplayTests.swift",
     expectedRecordedResponsesCount: 1,
     run: { recorder, secrets in
-      let configuration = try AnthropicConfiguration.recording(
-        apiKey: secrets.anthropicAPIKey(),
-        recorder: recorder,
+      let apiKey = try secrets.anthropicAPIKey()
+      let model = AnthropicLanguageModel(
+        apiKey: apiKey,
+        model: AnthropicRecordingModel.model,
+        httpClient: AnthropicRecordingHTTPClient.make(apiKey: apiKey, recorder: recorder),
       )
-
-      let session = AnthropicSession(
-        schema: RecordingSchema(),
+      let session = LanguageModelSession(
+        model: model,
         instructions: "Reply with exactly: Hello from Claude",
-        configuration: configuration,
       )
 
-      _ = try await session.respond(
-        to: "Hello?",
-        using: AnthropicRecordingModel.model,
-      )
+      _ = try await session.respond(to: "Hello?")
     },
   )
 }
-
-@SessionSchema
-private struct RecordingSchema {}

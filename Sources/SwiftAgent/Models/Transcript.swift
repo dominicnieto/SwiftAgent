@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 
 /// A conversation transcript built by the agent.
 ///
@@ -105,6 +104,8 @@ public extension SwiftAgent.Transcript {
   /// A single unit in a transcript. Entries are identified by a stable `id`
   /// to support updates during streaming.
   enum Entry: Sendable, Identifiable, Equatable, Codable {
+    /// Developer-provided instructions that define model behavior for the session.
+    case instructions(Instructions)
     /// The final rendered prompt that was sent to the model.
     case prompt(Prompt)
     /// A summarized reasoning trace, if provided by the model.
@@ -119,6 +120,8 @@ public extension SwiftAgent.Transcript {
     /// Stable identifier for this entry.
     public var id: String {
       switch self {
+      case let .instructions(instructions):
+        instructions.id
       case let .prompt(prompt):
         prompt.id
       case let .reasoning(reasoning):
@@ -133,6 +136,52 @@ public extension SwiftAgent.Transcript {
     }
   }
 
+  /// Developer-provided instructions and tool definitions available to the model.
+  struct Instructions: Sendable, Identifiable, Equatable, Codable {
+    /// Identifier for this instructions entry.
+    public var id: String
+    /// Ordered instruction content segments.
+    public var segments: [Segment]
+    /// Tool definitions injected into the instruction context.
+    public var toolDefinitions: [ToolDefinition]
+
+    public init(
+      id: String = UUID().uuidString,
+      segments: [Segment],
+      toolDefinitions: [ToolDefinition] = [],
+    ) {
+      self.id = id
+      self.segments = segments
+      self.toolDefinitions = toolDefinitions
+    }
+  }
+
+  /// A model-visible tool definition included with session instructions.
+  struct ToolDefinition: Sendable, Identifiable, Equatable, Codable {
+    /// Stable identifier derived from the tool name.
+    public var id: String { name }
+    /// Tool name exposed to the model.
+    public var name: String
+    /// Natural-language description of the tool.
+    public var description: String
+    /// Schema for tool arguments.
+    public var parameters: GenerationSchema
+
+    public init(name: String, description: String, parameters: GenerationSchema) {
+      self.name = name
+      self.description = description
+      self.parameters = parameters
+    }
+
+    public init(tool: any Tool) {
+      self.init(
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+      )
+    }
+  }
+
   /// The final rendered prompt that was sent to the model, alongside the
   /// original input and prompt sources used to construct it.
   struct Prompt: Sendable, Identifiable, Equatable, Codable {
@@ -144,17 +193,25 @@ public extension SwiftAgent.Transcript {
     public var sources: Data
     /// The full rendered prompt string sent to the model.
     package var prompt: String
+    private var storedSegments: [Segment]?
 
     package init(
       id: String = UUID().uuidString,
       input: String,
       sources: Data,
       prompt: String,
+      segments: [Segment]? = nil,
     ) {
       self.id = id
       self.input = input
       self.sources = sources
       self.prompt = prompt
+      storedSegments = segments
+    }
+
+    /// Prompt content represented as transcript segments for provider request builders.
+    public var segments: [Segment] {
+      storedSegments ?? [.text(.init(content: prompt))]
     }
   }
 
@@ -251,6 +308,8 @@ public extension Transcript {
     public var toolName: String
     /// JSON arguments for the tool call.
     public var arguments: GeneratedContent
+    /// Raw partial JSON arguments while a streaming provider is still emitting the tool input.
+    public var partialArguments: String?
     /// Optional status of the tool call as it progresses.
     public var status: Status?
 
@@ -259,13 +318,31 @@ public extension Transcript {
       callId: String,
       toolName: String,
       arguments: GeneratedContent,
+      partialArguments: String? = nil,
       status: Status?,
     ) {
       self.id = id
       self.callId = callId
       self.toolName = toolName
       self.arguments = arguments
+      self.partialArguments = partialArguments
       self.status = status
+    }
+
+    /// Creates a completed tool call when the provider uses one identifier for both local and provider correlation.
+    public init(
+      id: String,
+      toolName: String,
+      arguments: GeneratedContent,
+    ) {
+      self.init(
+        id: id,
+        callId: id,
+        toolName: toolName,
+        arguments: arguments,
+        partialArguments: nil,
+        status: .completed,
+      )
     }
   }
 
@@ -295,6 +372,26 @@ public extension Transcript {
       self.segment = segment
       self.status = status
     }
+
+    /// Creates a completed tool output using the first segment from a provider-produced segment list.
+    public init(
+      id: String,
+      toolName: String,
+      segments: [Segment],
+    ) {
+      self.init(
+        id: id,
+        callId: id,
+        toolName: toolName,
+        segment: segments.first ?? .text(.init(content: "")),
+        status: .completed,
+      )
+    }
+
+    /// Single-element segment list for provider code that handles multi-segment outputs.
+    public var segments: [Segment] {
+      [segment]
+    }
   }
 
   /// The model's response for a single turn.
@@ -316,13 +413,22 @@ public extension Transcript {
       self.status = status
     }
 
+    /// Creates a completed response from provider-produced segments.
+    public init(
+      assetIDs: [String] = [],
+      segments: [Segment],
+    ) {
+      _ = assetIDs
+      self.init(id: UUID().uuidString, segments: segments, status: .completed)
+    }
+
     /// All text segments in order.
     public var textSegments: [TextSegment] {
       segments.compactMap { segment in
         switch segment {
         case let .text(textSegment):
           textSegment
-        case .structure:
+        case .structure, .image:
           nil
         }
       }
@@ -334,7 +440,7 @@ public extension Transcript {
         switch segment {
         case let .structure(structuredSegment):
           structuredSegment
-        case .text:
+        case .text, .image:
           nil
         }
       }
@@ -354,6 +460,8 @@ public extension Transcript {
     case text(TextSegment)
     /// A unit of structured content.
     case structure(StructuredSegment)
+    /// A unit of image content.
+    case image(ImageSegment)
 
     /// Stable identifier for the underlying segment.
     public var id: String {
@@ -362,6 +470,8 @@ public extension Transcript {
         textSegment.id
       case let .structure(structuredSegment):
         structuredSegment.id
+      case let .image(imageSegment):
+        imageSegment.id
       }
     }
   }
@@ -400,6 +510,76 @@ public extension Transcript {
       self.content = content.generatedContent
     }
   }
+
+  /// A unit of image content used for multimodal prompts and responses.
+  struct ImageSegment: Sendable, Identifiable, Equatable, Codable {
+    /// Identifier for this segment.
+    public var id: String
+    /// The source of the image data.
+    public var source: Source
+
+    /// The origin of image content.
+    public enum Source: Sendable, Equatable, Codable {
+      /// Encoded image bytes and their MIME type.
+      case data(Data, mimeType: String)
+      /// A URL that references an image.
+      case url(URL)
+
+      private enum CodingKeys: String, CodingKey {
+        case kind
+        case data
+        case mimeType
+        case url
+      }
+
+      public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try container.decode(String.self, forKey: .kind)
+        switch kind {
+        case "data":
+          let data = try container.decode(Data.self, forKey: .data)
+          let mimeType = try container.decode(String.self, forKey: .mimeType)
+          self = .data(data, mimeType: mimeType)
+        case "url":
+          self = .url(try container.decode(URL.self, forKey: .url))
+        default:
+          throw DecodingError.dataCorruptedError(
+            forKey: .kind,
+            in: container,
+            debugDescription: "Unknown image source kind: \(kind)",
+          )
+        }
+      }
+
+      public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .data(data, mimeType):
+          try container.encode("data", forKey: .kind)
+          try container.encode(data, forKey: .data)
+          try container.encode(mimeType, forKey: .mimeType)
+        case let .url(url):
+          try container.encode("url", forKey: .kind)
+          try container.encode(url, forKey: .url)
+        }
+      }
+    }
+
+    public init(id: String = UUID().uuidString, source: Source) {
+      self.id = id
+      self.source = source
+    }
+
+    public init(id: String = UUID().uuidString, data: Data, mimeType: String) {
+      self.id = id
+      source = .data(data, mimeType: mimeType)
+    }
+
+    public init(id: String = UUID().uuidString, url: URL) {
+      self.id = id
+      source = .url(url)
+    }
+  }
 }
 
 // MARK: - Transcript Codable Support
@@ -410,6 +590,7 @@ public extension Transcript.ToolCall {
     case callId
     case toolName
     case arguments
+    case partialArguments
     case status
   }
 
@@ -420,6 +601,7 @@ public extension Transcript.ToolCall {
     callId = try container.decode(String.self, forKey: .callId)
     toolName = try container.decode(String.self, forKey: .toolName)
     let argumentsJSONString = try container.decode(String.self, forKey: .arguments)
+    partialArguments = try container.decodeIfPresent(String.self, forKey: .partialArguments)
 
     do {
       arguments = try GeneratedContent(json: argumentsJSONString)
@@ -438,6 +620,7 @@ public extension Transcript.ToolCall {
     try container.encode(callId, forKey: .callId)
     try container.encode(toolName, forKey: .toolName)
     try container.encode(arguments.stableJsonString, forKey: .arguments)
+    try container.encodeIfPresent(partialArguments, forKey: .partialArguments)
     try container.encodeIfPresent(status, forKey: .status)
   }
 }
@@ -512,6 +695,8 @@ private extension Transcript {
 private extension Transcript.Entry {
   func prettyPrintedLines(indentedBy indentationLevel: Int) -> [String] {
     switch self {
+    case let .instructions(instructions):
+      instructions.prettyPrintedLines(indentedBy: indentationLevel)
     case let .prompt(prompt):
       prompt.prettyPrintedLines(indentedBy: indentationLevel, headline: "Prompt")
     case let .reasoning(reasoning):
@@ -523,6 +708,52 @@ private extension Transcript.Entry {
     case let .response(response):
       response.prettyPrintedLines(indentedBy: indentationLevel)
     }
+  }
+}
+
+private extension Transcript.Instructions {
+  func prettyPrintedLines(indentedBy indentationLevel: Int) -> [String] {
+    var lines: [String] = []
+    let currentIndentation = transcriptIndentation(for: indentationLevel)
+    lines.append("\(currentIndentation)Instructions(id: \(id)) {")
+    lines.append(contentsOf: transcriptPrettyCollection(
+      name: "segments",
+      indentationLevel: indentationLevel + 1,
+      elements: segments,
+      renderElement: { segment, elementIndentationLevel in
+        segment.prettyPrintedLines(indentedBy: elementIndentationLevel)
+      },
+    ))
+    lines.append(contentsOf: transcriptPrettyCollection(
+      name: "toolDefinitions",
+      indentationLevel: indentationLevel + 1,
+      elements: toolDefinitions,
+      renderElement: { definition, elementIndentationLevel in
+        definition.prettyPrintedLines(indentedBy: elementIndentationLevel)
+      },
+    ))
+    lines.append("\(currentIndentation)}")
+    return lines
+  }
+}
+
+private extension Transcript.ToolDefinition {
+  func prettyPrintedLines(indentedBy indentationLevel: Int) -> [String] {
+    var lines: [String] = []
+    let currentIndentation = transcriptIndentation(for: indentationLevel)
+    lines.append("\(currentIndentation)ToolDefinition(id: \(id)) {")
+    lines.append(contentsOf: transcriptPrettyField(
+      name: "name",
+      value: name,
+      indentationLevel: indentationLevel + 1,
+    ))
+    lines.append(contentsOf: transcriptPrettyField(
+      name: "description",
+      value: description,
+      indentationLevel: indentationLevel + 1,
+    ))
+    lines.append("\(currentIndentation)}")
+    return lines
   }
 }
 
@@ -606,6 +837,11 @@ private extension Transcript.ToolCall {
       name: "arguments",
     ))
     lines.append(contentsOf: transcriptPrettyOptionalField(
+      name: "partialArguments",
+      value: partialArguments,
+      indentationLevel: indentationLevel + 1,
+    ))
+    lines.append(contentsOf: transcriptPrettyOptionalField(
       name: "status",
       value: status.map { String(describing: $0) },
       indentationLevel: indentationLevel + 1,
@@ -678,6 +914,8 @@ private extension Transcript.Segment {
       textSegment.prettyPrintedLines(indentedBy: indentationLevel)
     case let .structure(structuredSegment):
       structuredSegment.prettyPrintedLines(indentedBy: indentationLevel)
+    case let .image(imageSegment):
+      imageSegment.prettyPrintedLines(indentedBy: indentationLevel)
     }
   }
 }
@@ -707,6 +945,30 @@ private extension Transcript.StructuredSegment {
       indentationLevel: indentationLevel + 1,
       name: "content",
     ))
+    lines.append("\(currentIndentation)}")
+    return lines
+  }
+}
+
+private extension Transcript.ImageSegment {
+  func prettyPrintedLines(indentedBy indentationLevel: Int) -> [String] {
+    var lines: [String] = []
+    let currentIndentation = transcriptIndentation(for: indentationLevel)
+    lines.append("\(currentIndentation)ImageSegment(id: \(id)) {")
+    switch source {
+    case let .data(data, mimeType):
+      lines.append(contentsOf: transcriptPrettyField(
+        name: "source",
+        value: "data(\(mimeType), \(data.count) bytes)",
+        indentationLevel: indentationLevel + 1,
+      ))
+    case let .url(url):
+      lines.append(contentsOf: transcriptPrettyField(
+        name: "source",
+        value: url.absoluteString,
+        indentationLevel: indentationLevel + 1,
+      ))
+    }
     lines.append("\(currentIndentation)}")
     return lines
   }

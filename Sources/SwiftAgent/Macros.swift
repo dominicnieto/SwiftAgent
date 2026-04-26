@@ -22,7 +22,8 @@ import Observation
 /// }
 ///
 /// let schema = SessionSchema()
-/// let session = OpenAISession(schema: schema, instructions: "You are a helpful assistant.", apiKey: "sk-...")
+/// let model = OpenAILanguageModel(apiKey: "sk-...", model: "gpt-5-nano", apiVariant: .responses)
+/// let session = LanguageModelSession(model: model, tools: schema.tools, instructions: "You are a helpful assistant.")
 /// let response = try await session.respond(to: "Weather in Lisbon?", generating: \.weatherReport)
 /// ```
 @attached(member, names: arbitrary)

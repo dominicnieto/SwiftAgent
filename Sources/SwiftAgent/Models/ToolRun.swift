@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 
 /// Combines a tool call, its streaming arguments, and the resulting payload into one typed record.
 ///
@@ -41,7 +40,8 @@ import FoundationModels
 /// }
 ///
 /// let sessionSchema = SessionSchema()
-/// let session = OpenAISession(schema: sessionSchema, instructions: "You are a helpful assistant.", apiKey: "sk-...")
+/// let model = OpenAILanguageModel(apiKey: "sk-...", model: "gpt-5-nano", apiVariant: .responses)
+/// let session = LanguageModelSession(model: model, tools: sessionSchema.tools, instructions: "You are a helpful assistant.")
 /// let response = try await session.respond(to: "Weather in Lisbon today?")
 ///
 /// for entry in try sessionSchema.decode(session.transcript) {
@@ -53,7 +53,7 @@ import FoundationModels
 ///   }
 /// }
 /// ```
-public struct ToolRun<Tool: FoundationModels.Tool>: Identifiable where Tool.Arguments: Generable,
+public struct ToolRun<Tool: SwiftAgent.Tool>: Identifiable where Tool.Arguments: Generable,
   Tool.Output: Generable {
   /// The arguments type for this tool.
   public typealias Arguments = Tool.Arguments

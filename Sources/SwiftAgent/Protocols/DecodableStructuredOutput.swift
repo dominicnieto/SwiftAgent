@@ -1,7 +1,6 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 
 /// Describes how a schema-defined structured output is decoded from transcript snapshots.
 ///

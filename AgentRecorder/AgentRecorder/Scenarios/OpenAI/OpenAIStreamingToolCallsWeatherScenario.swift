@@ -1,43 +1,38 @@
-// By Dennis Müller
+// By Dennis Muller
 
-import FoundationModels
-import OpenAI
-import OpenAISession
 import SwiftAgent
 
 enum OpenAIStreamingToolCallsWeatherScenario {
-  /// Matches: `Tests/SwiftAgentTests/OpenAISession/OpenAIStreamingToolCallsTests.swift`
   static let scenario = AgentRecorderScenario(
     id: "openai/streaming-tool-calls/weather",
     provider: .openAI,
-    unitTestFile: "Tests/SwiftAgentTests/OpenAISession/OpenAIStreamingToolCallsTests.swift",
+    unitTestFile: "Tests/SwiftAgentTests/Providers/OpenAIProviderReplayTests.swift",
     expectedRecordedResponsesCount: 2,
     run: { recorder, secrets in
-      let configuration = try OpenAIConfiguration.recording(
-        apiKey: secrets.openAIAPIKey(),
-        recorder: recorder,
+      let apiKey = try secrets.openAIAPIKey()
+      let model = OpenAILanguageModel(
+        apiKey: apiKey,
+        model: OpenAIRecordingModel.model,
+        apiVariant: .responses,
+        httpClient: OpenAIRecordingHTTPClient.make(apiKey: apiKey, recorder: recorder),
       )
-
-      let session = OpenAISession(
-        schema: RecordingSchema(),
+      let session = LanguageModelSession(
+        model: model,
+        tools: [WeatherTool()],
         instructions: """
         Always call `get_weather` exactly once before answering.
         After tool output, reply with exactly: Current weather in New York City, USA: Sunny.
         """,
-        configuration: configuration,
       )
 
-      let prompt = "What is the weather in New York City, USA?"
-      let stream = try session.streamResponse(
-        to: prompt,
-        using: OpenAIRecordingModel.model,
-        options: .init(
-          include: [.reasoning_encryptedContent],
-          reasoning: .init(
-            effort: .low,
-            summary: .detailed,
-          ),
-        ),
+      var options = GenerationOptions()
+      options[custom: OpenAILanguageModel.self] = .init(
+        reasoning: .init(effort: .low, summary: "detailed"),
+      )
+
+      let stream = session.streamResponse(
+        to: "What is the weather in New York City, USA?",
+        options: options,
       )
 
       for try await _ in stream {}
@@ -45,12 +40,7 @@ enum OpenAIStreamingToolCallsWeatherScenario {
   )
 }
 
-@SessionSchema
-private struct RecordingSchema {
-  @Tool var weather = WeatherTool()
-}
-
-private struct WeatherTool: FoundationModels.Tool {
+private struct WeatherTool: SwiftAgent.Tool {
   var name: String = "get_weather"
   var description: String = "Get current temperature for a given location."
 

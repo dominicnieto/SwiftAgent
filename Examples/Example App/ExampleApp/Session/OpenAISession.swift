@@ -1,9 +1,8 @@
 // By Dennis Müller
 
 import Foundation
-import FoundationModels
 import Observation
-import OpenAISession
+import SwiftAgent
 
 @SessionSchema
 struct SessionSchema {

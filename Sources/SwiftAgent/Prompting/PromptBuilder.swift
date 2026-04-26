@@ -63,6 +63,14 @@ extension Prompt: PromptRepresentable {
   public var promptRepresentation: Prompt { self }
 }
 
+@available(iOS 26.0, macOS 26.0, *)
+@available(tvOS, unavailable)
+@available(watchOS, unavailable)
+extension Prompt: CustomStringConvertible {
+  /// The prompt rendered as model input text.
+  public var description: String { formatted() }
+}
+
 // MARK: - Result Builder
 
 /// Builds `Prompt` values from nested expressions.
