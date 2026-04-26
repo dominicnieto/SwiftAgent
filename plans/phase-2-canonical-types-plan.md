@@ -278,15 +278,28 @@ Provider replay tests should be preserved and expanded before removing SDK adapt
 ## Open Questions
 
 - Should `GeneratedContent` stable JSON behavior live directly on the main ALM-derived type, or in a SwiftAgent replay/test helper extension?
+  - Answer recorded after Phase 2: keep stable JSON behavior with the main SwiftAgent `GeneratedContent` support, not only in test helpers. Replay and transcript determinism are production concerns.
 - Should `Prompt` expose SwiftAgent source metadata publicly, package-internally, or through a transcript-only wrapper?
+  - Answer recorded after Phase 2: keep prompt source metadata on transcript/session prompt entries. The public `Prompt` surface stays focused on prompt construction/rendering.
 - Should `Instructions` become a top-level user value only, or should transcript instructions use a distinct nested representation with tool definitions?
+  - Answer recorded after Phase 2: keep `Instructions` as a public top-level user value, and use transcript instruction entries to carry rendered instructions plus tool definitions.
 - How should SwiftAgent `StructuredOutput` relate to `Generable`: should all structured outputs become `Generable`, or should `StructuredOutput.Schema` remain the generable payload?
+  - Answer recorded after Phase 2: keep `StructuredOutput.Schema: Generable`. Do not require every `StructuredOutput` registration type itself to be `Generable`.
 - Should `ToolExecutionDelegate` survive as a delegate protocol, or should it become one hook inside a broader `ToolExecutionPolicy` value?
+  - Answer recorded after Phase 2: keep `ToolExecutionDelegate` as an approval/override hook inside the broader session-owned `ToolExecutionPolicy`.
 - What is the exact public shape of response/snapshot types: keep `AgentResponse`/`AgentSnapshot`, adopt ALM `LanguageModelSession.Response`/`ResponseStream.Snapshot`, or typealias/converge names?
+  - Answer recorded after Phase 2: the main public model API uses `LanguageModelSession.Response` and `LanguageModelSession.ResponseStream.Snapshot`. Existing agent-layer response/snapshot types are not the provider/session boundary.
 - Resolved transport decision: AsyncHTTPClient support survives as an optional SwiftAgent transport adapter target/product, not as a base dependency and not as the provider-facing transport abstraction. Direct providers use `SwiftAgent.HTTPClient`; the optional adapter supplies a server-oriented implementation of that protocol.
+  - Answer recorded after Phase 2: implemented as an `AsyncHTTPClient` SwiftPM trait on `SwiftAgent`; default/base builds use `URLSessionHTTPClient` through `SwiftAgent.HTTPClient`.
 - How should provider model identifiers balance typed convenience enums with direct provider string model IDs and custom endpoints?
+  - Answer recorded after Phase 2: direct providers use string model IDs and custom endpoint flexibility. Typed convenience enums are not required for Phase 2; revisit as Phase 4 API polish unless a Phase 3 provider needs typed IDs to preserve behavior.
 - Which capability flags are required in the first implementation slice versus deferred to Phase 3 provider expansion?
+  - Answer recorded after Phase 2: OpenAI, Open Responses, Anthropic, and Simulation expose the capability flags needed by their implemented Phase 2 behavior. Additional provider-specific capability flags move with each Phase 3 provider.
 - Should `JSONSchema` remain visible through public API surfaces beyond the `JSONValue` typealias, or stay an implementation dependency where possible?
+  - Answer recorded after Phase 2: expose `SwiftAgent.JSONValue` as the public JSON value surface; otherwise keep `JSONSchema` primarily as an implementation dependency unless a future API explicitly needs it.
 - Should partial structured decoding use `PartialJSONDecoder`, ALM's current `GeneratedContent(json:)` fallback behavior, or a SwiftAgent-specific reducer?
+  - Answer recorded after Phase 2: use the approved `PartialJSONDecoder` path for partial structured streaming, while keeping transcript-first provider reducers responsible for event assembly.
 - How should `SystemLanguageModel` preserve optional Apple Foundation Models support without reintroducing Apple `FoundationModels` as a base conceptual dependency?
+  - Answer recorded after Phase 2: still open for Phase 3. It should be optional/platform-gated and must not make Apple `FoundationModels` a base conceptual dependency.
 - What minimum source compatibility, if any, should be preserved for current `OpenAISession`, `AnthropicSession`, and `SimulatedSession` examples during convergence?
+  - Answer recorded after Phase 2: no source compatibility was preserved for old `OpenAISession` or `AnthropicSession`; they were removed after direct-provider parity and approval. Simulation compatibility is preserved as a `SimulatedSession` product centered on `SimulationLanguageModel`, not the old session type.
