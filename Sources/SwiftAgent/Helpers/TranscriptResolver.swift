@@ -8,7 +8,7 @@ import OSLog
 /// This utility reads a ``Transcript`` and produces the `SessionSchema.Transcript`
 /// by resolving tool runs, structured outputs, and groundings using the
 /// automatically generated `tools` and `structuredOutputs` from your
-/// `@LanguageModelProvider` session.
+/// `@SessionSchema` type.
 ///
 /// - Note: You typically create this via `session.resolver()`; the macro wires
 ///   up everything needed. You rarely construct it manually.
@@ -227,7 +227,7 @@ public struct TranscriptResolver<SessionSchema: LanguageModelSessionSchema> {
 
   // MARK: Groundings
 
-  /// Resolves grounding data previously encoded via `LanguageModelProvider.encodeGrounding`.
+  /// Resolves grounding data previously encoded by the session schema.
   public func resolveGroundings(from data: Data) throws -> [SessionSchema.DecodedGrounding] {
     try JSONDecoder().decode([SessionSchema.DecodedGrounding].self, from: data)
   }

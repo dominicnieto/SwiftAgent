@@ -861,10 +861,11 @@ let configuration = SimulationConfiguration(defaultGenerations: [
   .response(text: "It's a beautiful sunny day in San Francisco with 22.5°C!"),
 ])
 
-let session = SimulatedSession(
-  schema: sessionSchema,
-  instructions: "You are a helpful assistant.",
-  configuration: configuration,
+let model = SimulationLanguageModel(configuration: configuration)
+let session = LanguageModelSession(
+  model: model,
+  tools: sessionSchema.tools,
+  instructions: "You are a helpful assistant."
 )
 
 let response = try await session.respond(to: "What's the weather like in San Francisco?")
@@ -982,7 +983,7 @@ SwiftAgent ships with a SwiftUI demo that showcases the SDK in action. Open the 
 
 - Configures OpenAI and Anthropic sessions with the bundled `SessionSchema`, calculator tool, weather tool, and a structured weather report output.
 - Streams responses while rendering prompts, reasoning summaries, tool runs, and final replies in a chat-style transcript UI.
-- Demonstrates tool-specific views (calculator and weather) with live argument updates, results, and SwiftUI previews backed by `SimulatedSession` scenarios.
+- Demonstrates tool-specific views (calculator and weather) with live argument updates, results, and SwiftUI previews backed by `SimulationLanguageModel` scenarios.
 
 Use the app to experiment with SwiftAgent locally or as a starting point for integrating the SDK into your own SwiftUI experience.
 

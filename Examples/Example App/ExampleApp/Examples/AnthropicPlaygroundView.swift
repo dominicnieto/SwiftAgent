@@ -1,6 +1,6 @@
 // By Dennis Müller
 
-import AnthropicSession
+import SwiftAgent
 import SwiftUI
 import UIKit
 
@@ -13,7 +13,7 @@ struct AnthropicPlaygroundView: View {
   @State private var transcript: Transcript.Resolved<SessionSchema> = .init()
   @State private var streamingTranscript: Transcript.Resolved<SessionSchema> = .init()
   @State private var sessionSchema = SessionSchema()
-  @State private var session: AnthropicSession<SessionSchema>?
+  @State private var session: LanguageModelSession?
 
   @State private var viewState: ViewState = .idle
   @State private var messageTask: Task<Void, Never>?
@@ -80,7 +80,7 @@ struct AnthropicPlaygroundView: View {
   }
 
   @ViewBuilder
-  private func content(session: AnthropicSession<SessionSchema>) -> some View {
+  private func content(session: LanguageModelSession) -> some View {
     ForEach(transcript + streamingTranscript) { entry in
       switch entry {
       case let .prompt(prompt):
@@ -96,14 +96,18 @@ struct AnthropicPlaygroundView: View {
   }
 
   private func setupAgent() {
-    session = AnthropicSession(
-      schema: sessionSchema,
+    let model = AnthropicLanguageModel(
+      apiKey: Secret.Anthropic.apiKey,
+      model: "claude-sonnet-4-5-20250929",
+    )
+    session = LanguageModelSession(
+      model: model,
+      tools: [sessionSchema.calculator, sessionSchema.weather],
       instructions: """
       You are a helpful assistant with access to several tools.
       Use the available tools when appropriate to help answer questions.
       Be concise but informative in your responses.
       """,
-      configuration: .direct(apiKey: Secret.Anthropic.apiKey),
     )
   }
 
@@ -117,16 +121,18 @@ struct AnthropicPlaygroundView: View {
     viewState = .loading
 
     do {
-      let options = AnthropicGenerationOptions(
-        maxOutputTokens: 10000,
-        thinking: .init(budgetTokens: 1024),
+      var options = GenerationOptions(
+        maximumResponseTokens: 10_000,
         minimumStreamingSnapshotInterval: .milliseconds(150),
+      )
+      options[custom: AnthropicLanguageModel.self] = .init(
+        thinking: .init(budgetTokens: 1_024),
       )
 
       let stream = try session.streamResponse(
         to: userInput,
+        schema: sessionSchema,
         groundingWith: [.currentDate(Date())],
-        using: .other("claude-sonnet-4-5-20250929"),
         options: options,
       ) { input, sources in
         PromptTag("context") {

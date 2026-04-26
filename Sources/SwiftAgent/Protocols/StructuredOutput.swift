@@ -24,7 +24,9 @@ import Foundation
 ///   @StructuredOutput(WeatherReport.self) var weatherReport
 /// }
 ///
-/// let session = OpenAISession(schema: SessionSchema(), instructions: "You are a helpful assistant.", apiKey: "sk-...")
+/// let schema = SessionSchema()
+/// let model = OpenAILanguageModel(apiKey: "sk-...", model: "gpt-5-nano", apiVariant: .responses)
+/// let session = LanguageModelSession(model: model, tools: schema.tools, instructions: "You are a helpful assistant.")
 /// let report = try await session.respond(to: "Weather in Lisbon?", generating: \.weatherReport).content
 /// ```
 public protocol StructuredOutput<Schema>: Sendable {

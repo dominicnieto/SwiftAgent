@@ -193,22 +193,25 @@ public extension SwiftAgent.Transcript {
     public var sources: Data
     /// The full rendered prompt string sent to the model.
     package var prompt: String
+    private var storedSegments: [Segment]?
 
     package init(
       id: String = UUID().uuidString,
       input: String,
       sources: Data,
       prompt: String,
+      segments: [Segment]? = nil,
     ) {
       self.id = id
       self.input = input
       self.sources = sources
       self.prompt = prompt
+      storedSegments = segments
     }
 
     /// Prompt content represented as transcript segments for provider request builders.
     public var segments: [Segment] {
-      [.text(.init(content: prompt))]
+      storedSegments ?? [.text(.init(content: prompt))]
     }
   }
 

@@ -1,6 +1,6 @@
 // By Dennis Müller
 
-import OpenAISession
+import SwiftAgent
 import SwiftUI
 import UIKit
 
@@ -13,7 +13,7 @@ struct AgentPlaygroundView: View {
   @State private var transcript: Transcript.Resolved<SessionSchema> = .init()
   @State private var streamingTranscript: Transcript.Resolved<SessionSchema> = .init()
   @State private var sessionSchema = SessionSchema()
-  @State private var session: OpenAISession<SessionSchema>?
+  @State private var session: LanguageModelSession?
 
   @State private var viewState: ViewState = .idle
   @State private var messageTask: Task<Void, Never>?
@@ -80,7 +80,7 @@ struct AgentPlaygroundView: View {
   }
 
   @ViewBuilder
-  private func content(session: OpenAISession<SessionSchema>) -> some View {
+  private func content(session: LanguageModelSession) -> some View {
     ForEach(transcript + streamingTranscript) { entry in
       switch entry {
       case let .prompt(prompt):
@@ -96,14 +96,19 @@ struct AgentPlaygroundView: View {
   }
 
   private func setupAgent() {
-    session = OpenAISession(
-      schema: sessionSchema,
+    let model = OpenAILanguageModel(
+      apiKey: Secret.OpenAI.apiKey,
+      model: "gpt-5-nano",
+      apiVariant: .responses,
+    )
+    session = LanguageModelSession(
+      model: model,
+      tools: [sessionSchema.calculator, sessionSchema.weather],
       instructions: """
       You are a helpful assistant with access to several tools.
       Use the available tools when appropriate to help answer questions.
       Be concise but informative in your responses.
       """,
-      configuration: .direct(apiKey: Secret.OpenAI.apiKey),
     )
   }
 
@@ -117,15 +122,15 @@ struct AgentPlaygroundView: View {
     viewState = .loading
 
     do {
-      let options = OpenAIGenerationOptions(
-        include: [.reasoning_encryptedContent],
-        reasoning: .init(effort: .minimal, summary: .auto),
+      var options = GenerationOptions(minimumStreamingSnapshotInterval: .milliseconds(150))
+      options[custom: OpenAILanguageModel.self] = .init(
+        reasoning: .init(effort: .minimal, summary: "auto"),
       )
 
       let stream = try session.streamResponse(
         to: userInput,
+        schema: sessionSchema,
         groundingWith: [.currentDate(Date())],
-        using: OpenAIModel.gpt5_nano,
         options: options,
       ) { input, sources in
         PromptTag("context") {

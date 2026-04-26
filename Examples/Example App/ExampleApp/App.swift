@@ -1,6 +1,6 @@
 // By Dennis Müller
 
-import OpenAISession
+import SwiftAgent
 import SwiftUI
 
 @main

@@ -93,10 +93,26 @@ public final class LanguageModelSession: @unchecked Sendable {
     includeSchemaInPrompt: Bool = true,
     options: GenerationOptions = GenerationOptions(),
   ) async throws -> Response<Content> where Content: Generable & Sendable {
+    try await respond(
+      to: prompt,
+      promptEntry: Self.promptEntry(for: prompt),
+      generating: type,
+      includeSchemaInPrompt: includeSchemaInPrompt,
+      options: options,
+    )
+  }
+
+  private func respond<Content>(
+    to prompt: Prompt,
+    promptEntry: Transcript.Prompt,
+    generating type: Content.Type = Content.self,
+    includeSchemaInPrompt: Bool = true,
+    options: GenerationOptions = GenerationOptions(),
+  ) async throws -> Response<Content> where Content: Generable & Sendable {
     beginResponding()
     defer { endResponding() }
 
-    appendPrompt(prompt)
+    appendPrompt(promptEntry)
 
     let response = try await model.respond(
       within: self,
@@ -121,7 +137,23 @@ public final class LanguageModelSession: @unchecked Sendable {
     includeSchemaInPrompt: Bool = true,
     options: GenerationOptions = GenerationOptions(),
   ) -> sending ResponseStream<Content> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
-    appendPrompt(prompt)
+    streamResponse(
+      to: prompt,
+      promptEntry: Self.promptEntry(for: prompt),
+      generating: type,
+      includeSchemaInPrompt: includeSchemaInPrompt,
+      options: options,
+    )
+  }
+
+  private func streamResponse<Content>(
+    to prompt: Prompt,
+    promptEntry: Transcript.Prompt,
+    generating type: Content.Type = Content.self,
+    includeSchemaInPrompt: Bool = true,
+    options: GenerationOptions = GenerationOptions(),
+  ) -> sending ResponseStream<Content> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
+    appendPrompt(promptEntry)
 
     let upstream = model.streamResponse(
       within: self,
@@ -201,6 +233,85 @@ public final class LanguageModelSession: @unchecked Sendable {
     try await respond(to: Prompt(prompt), options: options)
   }
 
+  /// Generates a complete structured response from a plain prompt.
+  @discardableResult
+  public func respond<Content>(
+    to prompt: String,
+    generating type: Content.Type = Content.self,
+    includeSchemaInPrompt: Bool = true,
+    options: GenerationOptions = GenerationOptions(),
+  ) async throws -> Response<Content> where Content: Generable & Sendable {
+    try await respond(
+      to: Prompt(prompt),
+      generating: type,
+      includeSchemaInPrompt: includeSchemaInPrompt,
+      options: options,
+    )
+  }
+
+  /// Generates a complete string response from a prompt with one image.
+  @discardableResult
+  public func respond(
+    to prompt: String,
+    image: Transcript.ImageSegment,
+    options: GenerationOptions = GenerationOptions(),
+  ) async throws -> Response<String> {
+    try await respond(to: prompt, images: [image], options: options)
+  }
+
+  /// Generates a complete string response from a prompt with images.
+  @discardableResult
+  public func respond(
+    to prompt: String,
+    images: [Transcript.ImageSegment],
+    options: GenerationOptions = GenerationOptions(),
+  ) async throws -> Response<String> {
+    try await respond(
+      to: prompt,
+      images: images,
+      generating: String.self,
+      includeSchemaInPrompt: true,
+      options: options,
+    )
+  }
+
+  /// Generates a complete structured response from a prompt with one image.
+  @discardableResult
+  public func respond<Content>(
+    to prompt: String,
+    image: Transcript.ImageSegment,
+    generating type: Content.Type = Content.self,
+    includeSchemaInPrompt: Bool = true,
+    options: GenerationOptions = GenerationOptions(),
+  ) async throws -> Response<Content> where Content: Generable & Sendable {
+    try await respond(
+      to: prompt,
+      images: [image],
+      generating: type,
+      includeSchemaInPrompt: includeSchemaInPrompt,
+      options: options,
+    )
+  }
+
+  /// Generates a complete structured response from a prompt with images.
+  @discardableResult
+  public func respond<Content>(
+    to prompt: String,
+    images: [Transcript.ImageSegment],
+    generating type: Content.Type = Content.self,
+    includeSchemaInPrompt: Bool = true,
+    options: GenerationOptions = GenerationOptions(),
+  ) async throws -> Response<Content> where Content: Generable & Sendable {
+    let renderedPrompt = Prompt(prompt)
+    return try await respond(
+      to: renderedPrompt,
+      promptEntry: Self.promptEntry(for: renderedPrompt, images: images),
+      generating: type,
+      includeSchemaInPrompt: includeSchemaInPrompt,
+      options: options,
+    )
+  }
+
   /// Streams a string response.
   public func streamResponse(
     to prompt: Prompt,
@@ -217,6 +328,80 @@ public final class LanguageModelSession: @unchecked Sendable {
     streamResponse(to: Prompt(prompt), options: options)
   }
 
+  /// Streams a structured response from a plain prompt.
+  public func streamResponse<Content>(
+    to prompt: String,
+    generating type: Content.Type = Content.self,
+    includeSchemaInPrompt: Bool = true,
+    options: GenerationOptions = GenerationOptions(),
+  ) -> sending ResponseStream<Content> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
+    streamResponse(
+      to: Prompt(prompt),
+      generating: type,
+      includeSchemaInPrompt: includeSchemaInPrompt,
+      options: options,
+    )
+  }
+
+  /// Streams a string response from a prompt with one image.
+  public func streamResponse(
+    to prompt: String,
+    image: Transcript.ImageSegment,
+    options: GenerationOptions = GenerationOptions(),
+  ) -> sending ResponseStream<String> {
+    streamResponse(to: prompt, images: [image], options: options)
+  }
+
+  /// Streams a string response from a prompt with images.
+  public func streamResponse(
+    to prompt: String,
+    images: [Transcript.ImageSegment],
+    options: GenerationOptions = GenerationOptions(),
+  ) -> sending ResponseStream<String> {
+    streamResponse(
+      to: prompt,
+      images: images,
+      generating: String.self,
+      includeSchemaInPrompt: true,
+      options: options,
+    )
+  }
+
+  /// Streams a structured response from a prompt with one image.
+  public func streamResponse<Content>(
+    to prompt: String,
+    image: Transcript.ImageSegment,
+    generating type: Content.Type = Content.self,
+    includeSchemaInPrompt: Bool = true,
+    options: GenerationOptions = GenerationOptions(),
+  ) -> sending ResponseStream<Content> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
+    streamResponse(
+      to: prompt,
+      images: [image],
+      generating: type,
+      includeSchemaInPrompt: includeSchemaInPrompt,
+      options: options,
+    )
+  }
+
+  /// Streams a structured response from a prompt with images.
+  public func streamResponse<Content>(
+    to prompt: String,
+    images: [Transcript.ImageSegment],
+    generating type: Content.Type = Content.self,
+    includeSchemaInPrompt: Bool = true,
+    options: GenerationOptions = GenerationOptions(),
+  ) -> sending ResponseStream<Content> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
+    let renderedPrompt = Prompt(prompt)
+    return streamResponse(
+      to: renderedPrompt,
+      promptEntry: Self.promptEntry(for: renderedPrompt, images: images),
+      generating: type,
+      includeSchemaInPrompt: includeSchemaInPrompt,
+      options: options,
+    )
+  }
+
   /// Builds a provider feedback attachment.
   public func logFeedbackAttachment(
     sentiment: LanguageModelFeedback.Sentiment?,
@@ -228,6 +413,145 @@ public final class LanguageModelSession: @unchecked Sendable {
       sentiment: sentiment,
       issues: issues,
       desiredOutput: desiredOutput,
+    )
+  }
+}
+
+public extension LanguageModelSession {
+  /// Generates a text response while storing typed grounding values next to the prompt transcript entry.
+  @discardableResult
+  func respond<SessionSchema>(
+    to input: String,
+    schema: SessionSchema,
+    groundingWith sources: [SessionSchema.DecodedGrounding],
+    options: GenerationOptions = GenerationOptions(),
+    @PromptBuilder embeddingInto prompt: @Sendable (_ input: String, _ sources: [SessionSchema.DecodedGrounding])
+      -> Prompt,
+  ) async throws -> Response<String> where SessionSchema: LanguageModelSessionSchema & GroundingSupportingSchema {
+    let renderedPrompt = prompt(input, sources)
+    return try await respond(
+      to: renderedPrompt,
+      promptEntry: try Self.promptEntry(input: input, sources: sources, schema: schema, prompt: renderedPrompt),
+      generating: String.self,
+      options: options,
+    )
+  }
+
+  /// Generates a structured response while storing typed grounding values next to the prompt transcript entry.
+  @discardableResult
+  func respond<SessionSchema, Content>(
+    to input: String,
+    generating type: Content.Type,
+    schema: SessionSchema,
+    groundingWith sources: [SessionSchema.DecodedGrounding],
+    includeSchemaInPrompt: Bool = true,
+    options: GenerationOptions = GenerationOptions(),
+    @PromptBuilder embeddingInto prompt: @Sendable (_ input: String, _ sources: [SessionSchema.DecodedGrounding])
+      -> Prompt,
+  ) async throws -> Response<Content>
+    where SessionSchema: LanguageModelSessionSchema & GroundingSupportingSchema,
+    Content: Generable & Sendable {
+    let renderedPrompt = prompt(input, sources)
+    return try await respond(
+      to: renderedPrompt,
+      promptEntry: try Self.promptEntry(input: input, sources: sources, schema: schema, prompt: renderedPrompt),
+      generating: type,
+      includeSchemaInPrompt: includeSchemaInPrompt,
+      options: options,
+    )
+  }
+
+  /// Generates a structured response registered on a session schema while storing typed groundings.
+  @discardableResult
+  func respond<SessionSchema, Output>(
+    to input: String,
+    generating type: KeyPath<SessionSchema.StructuredOutputs, Output.Type>,
+    schema: SessionSchema,
+    groundingWith sources: [SessionSchema.DecodedGrounding],
+    includeSchemaInPrompt: Bool = true,
+    options: GenerationOptions = GenerationOptions(),
+    @PromptBuilder embeddingInto prompt: @Sendable (_ input: String, _ sources: [SessionSchema.DecodedGrounding])
+      -> Prompt,
+  ) async throws -> Response<Output.Schema>
+    where SessionSchema: LanguageModelSessionSchema & GroundingSupportingSchema,
+    Output: StructuredOutput,
+    Output.Schema: Sendable {
+    try await respond(
+      to: input,
+      generating: Output.Schema.self,
+      schema: schema,
+      groundingWith: sources,
+      includeSchemaInPrompt: includeSchemaInPrompt,
+      options: options,
+      embeddingInto: prompt,
+    )
+  }
+
+  /// Streams a text response while storing typed grounding values next to the prompt transcript entry.
+  func streamResponse<SessionSchema>(
+    to input: String,
+    schema: SessionSchema,
+    groundingWith sources: [SessionSchema.DecodedGrounding],
+    options: GenerationOptions = GenerationOptions(),
+    @PromptBuilder embeddingInto prompt: @Sendable (_ input: String, _ sources: [SessionSchema.DecodedGrounding])
+      -> Prompt,
+  ) throws -> sending ResponseStream<String> where SessionSchema: LanguageModelSessionSchema & GroundingSupportingSchema {
+    let renderedPrompt = prompt(input, sources)
+    return try streamResponse(
+      to: renderedPrompt,
+      promptEntry: Self.promptEntry(input: input, sources: sources, schema: schema, prompt: renderedPrompt),
+      generating: String.self,
+      options: options,
+    )
+  }
+
+  /// Streams a structured response while storing typed grounding values next to the prompt transcript entry.
+  func streamResponse<SessionSchema, Content>(
+    to input: String,
+    generating type: Content.Type,
+    schema: SessionSchema,
+    groundingWith sources: [SessionSchema.DecodedGrounding],
+    includeSchemaInPrompt: Bool = true,
+    options: GenerationOptions = GenerationOptions(),
+    @PromptBuilder embeddingInto prompt: @Sendable (_ input: String, _ sources: [SessionSchema.DecodedGrounding])
+      -> Prompt,
+  ) throws -> sending ResponseStream<Content>
+    where SessionSchema: LanguageModelSessionSchema & GroundingSupportingSchema,
+    Content: Generable & Sendable,
+    Content.PartiallyGenerated: Sendable {
+    let renderedPrompt = prompt(input, sources)
+    return try streamResponse(
+      to: renderedPrompt,
+      promptEntry: Self.promptEntry(input: input, sources: sources, schema: schema, prompt: renderedPrompt),
+      generating: type,
+      includeSchemaInPrompt: includeSchemaInPrompt,
+      options: options,
+    )
+  }
+
+  /// Streams a structured response registered on a session schema while storing typed groundings.
+  func streamResponse<SessionSchema, Output>(
+    to input: String,
+    generating type: KeyPath<SessionSchema.StructuredOutputs, Output.Type>,
+    schema: SessionSchema,
+    groundingWith sources: [SessionSchema.DecodedGrounding],
+    includeSchemaInPrompt: Bool = true,
+    options: GenerationOptions = GenerationOptions(),
+    @PromptBuilder embeddingInto prompt: @Sendable (_ input: String, _ sources: [SessionSchema.DecodedGrounding])
+      -> Prompt,
+  ) throws -> sending ResponseStream<Output.Schema>
+    where SessionSchema: LanguageModelSessionSchema & GroundingSupportingSchema,
+    Output: StructuredOutput,
+    Output.Schema: Sendable,
+    Output.Schema.PartiallyGenerated: Sendable {
+    try streamResponse(
+      to: input,
+      generating: Output.Schema.self,
+      schema: schema,
+      groundingWith: sources,
+      includeSchemaInPrompt: includeSchemaInPrompt,
+      options: options,
+      embeddingInto: prompt,
     )
   }
 }
@@ -562,13 +886,51 @@ private extension LanguageModelSession {
     state.withLock { $0.responseDepth = max(0, $0.responseDepth - 1) }
   }
 
-  func appendPrompt(_ prompt: Prompt) {
-    let promptEntry = Transcript.Entry.prompt(.init(
+  static func promptEntry(for prompt: Prompt) -> Transcript.Prompt {
+    Transcript.Prompt(
       input: prompt.description,
       sources: Data(),
       prompt: prompt.description,
-    ))
-    state.withLock { $0.transcript.entries.append(promptEntry) }
+    )
+  }
+
+  static func promptEntry(for prompt: Prompt, images: [Transcript.ImageSegment]) -> Transcript.Prompt {
+    Transcript.Prompt(
+      input: prompt.description,
+      sources: Data(),
+      prompt: prompt.description,
+      segments: promptSegments(text: prompt.description, images: images),
+    )
+  }
+
+  static func promptEntry<SessionSchema>(
+    input: String,
+    sources: [SessionSchema.DecodedGrounding],
+    schema: SessionSchema,
+    prompt: Prompt,
+  ) throws -> Transcript.Prompt where SessionSchema: LanguageModelSessionSchema & GroundingSupportingSchema {
+    try Transcript.Prompt(
+      input: input,
+      sources: schema.encodeGrounding(sources),
+      prompt: prompt.description,
+    )
+  }
+
+  func appendPrompt(_ prompt: Transcript.Prompt) {
+    state.withLock { state in
+      state.responseEntryID = UUID().uuidString
+      state.responseSegmentID = UUID().uuidString
+      state.transcript.entries.append(.prompt(prompt))
+    }
+  }
+
+  static func promptSegments(text: String, images: [Transcript.ImageSegment]) -> [Transcript.Segment] {
+    var segments: [Transcript.Segment] = []
+    if text.isEmpty == false {
+      segments.append(.text(.init(content: text)))
+    }
+    segments.append(contentsOf: images.map(Transcript.Segment.image))
+    return segments
   }
 
   static func initialTranscript(instructions: Instructions?, tools: [any Tool]) -> Transcript {
@@ -598,16 +960,17 @@ private extension LanguageModelSession {
   }
 
   func recordResponse(rawContent: GeneratedContent, status: Transcript.Status) {
+    let responseIDs = state.withLock { ($0.responseEntryID, $0.responseSegmentID) }
     let segment: Transcript.Segment
 
     if case .string(let text) = rawContent.kind {
-      segment = .text(.init(id: State.responseSegmentID, content: text))
+      segment = .text(.init(id: responseIDs.1, content: text))
     } else {
-      segment = .structure(.init(id: State.responseSegmentID, content: rawContent))
+      segment = .structure(.init(id: responseIDs.1, content: rawContent))
     }
 
     let entry = Transcript.Entry.response(.init(
-      id: State.responseEntryID,
+      id: responseIDs.0,
       segments: [segment],
       status: status,
     ))
@@ -764,13 +1127,12 @@ private extension LanguageModelSession {
 }
 
 private struct State: Sendable {
-  static let responseEntryID = "language-model-session-response"
-  static let responseSegmentID = "language-model-session-response-segment"
-
   var transcript: Transcript
   var tokenUsage: TokenUsage?
   var responseMetadata: ResponseMetadata?
   var responseDepth = 0
+  var responseEntryID = UUID().uuidString
+  var responseSegmentID = UUID().uuidString
 
   init(transcript: Transcript) {
     self.transcript = transcript

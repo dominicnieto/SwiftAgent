@@ -1,13 +1,13 @@
+#if SWIFTAGENT_ASYNC_HTTP_CLIENT
 import AsyncHTTPClient
 import EventSource
 import Foundation
 import NIOCore
 import NIOFoundationCompat
 import NIOHTTP1
-import SwiftAgent
 
 /// SwiftAgent HTTP transport backed by swift-server AsyncHTTPClient.
-public final class AsyncHTTPClientTransport: SwiftAgent.HTTPClient {
+public final class AsyncHTTPClientTransport: HTTPClient {
   private let configuration: HTTPClientConfiguration
   private let client: AsyncHTTPClient.HTTPClient
 
@@ -18,7 +18,7 @@ public final class AsyncHTTPClientTransport: SwiftAgent.HTTPClient {
 
   public func send<ResponseBody: Decodable>(
     path: String,
-    method: SwiftAgent.HTTPMethod,
+    method: HTTPMethod,
     queryItems: [URLQueryItem]?,
     headers: [String: String]?,
     body: (some Encodable & Sendable)?,
@@ -60,7 +60,7 @@ public final class AsyncHTTPClientTransport: SwiftAgent.HTTPClient {
 
   public func stream(
     path: String,
-    method: SwiftAgent.HTTPMethod,
+    method: HTTPMethod,
     headers: [String: String],
     body: (some Encodable & Sendable)?,
   ) -> AsyncThrowingStream<EventSource.Event, any Error> {
@@ -180,7 +180,7 @@ public final class AsyncHTTPClientTransport: SwiftAgent.HTTPClient {
 private extension AsyncHTTPClientTransport {
   func makePreparedURLRequest(
     path: String,
-    method: SwiftAgent.HTTPMethod,
+    method: HTTPMethod,
     queryItems: [URLQueryItem]?,
     headers: [String: String],
     body: Data?,
@@ -352,3 +352,5 @@ private extension AsyncHTTPClientTransport {
     ))
   }
 }
+
+#endif

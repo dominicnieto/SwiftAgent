@@ -14,7 +14,7 @@ struct SimulationMultiTurnExhaustionTests {
 
   // MARK: - Properties
 
-  private let session: SimulatedSession<SessionSchema>
+  private let session: LanguageModelSession
 
   // MARK: - Initialization
 
@@ -27,19 +27,15 @@ struct SimulationMultiTurnExhaustionTests {
       generationDelay: .zero,
     )
 
-    session = SimulatedSession(
-      schema: SessionSchema(),
-      instructions: "",
-      configuration: configuration,
-    )
+    session = LanguageModelSession(model: SimulationLanguageModel(configuration: configuration))
   }
 
   @Test("Default generations are consumed across turns and eventually exhaust")
   func defaultGenerationsConsumeAcrossTurnsAndExhaust() async throws {
-    let first = try await session.respond(to: "Prompt 1", using: .default)
+    let first = try await session.respond(to: "Prompt 1")
     #expect(first.content == "First turn")
 
-    let transcriptAfterFirst = await session.transcript
+    let transcriptAfterFirst = session.transcript
     #expect(transcriptAfterFirst.count == 2)
     validatePromptResponsePair(
       transcriptAfterFirst,
@@ -48,10 +44,10 @@ struct SimulationMultiTurnExhaustionTests {
       startingAt: 0,
     )
 
-    let second = try await session.respond(to: "Prompt 2", using: .default)
+    let second = try await session.respond(to: "Prompt 2")
     #expect(second.content == "Second turn")
 
-    let transcriptAfterSecond = await session.transcript
+    let transcriptAfterSecond = session.transcript
     #expect(transcriptAfterSecond.count == 4)
     validatePromptResponsePair(
       transcriptAfterSecond,
@@ -61,7 +57,7 @@ struct SimulationMultiTurnExhaustionTests {
     )
 
     do {
-      _ = try await session.respond(to: "Prompt 3", using: .default)
+      _ = try await session.respond(to: "Prompt 3")
       Issue.record("Expected generation to exhaust default generations and throw")
     } catch {
       guard let configurationError = error as? SimulationConfigurationError else {

@@ -4,11 +4,10 @@
 ///
 /// ``AuthorizationContext`` is an internal actor that carries the current access token for
 /// a single logical unit of work, typically one agent turn. It is not meant to be used
-/// directly by applications. Instead, call ``LanguageModelProvider/withAuthorization(token:refresh:perform:)``
-/// which sets this context using a `@TaskLocal` value so that adapter configurations can
-/// read it and attach the token to outbound requests.
+/// directly by applications. Provider transports set this context using a `@TaskLocal`
+/// value so request builders can attach the token to outbound requests.
 ///
-/// Adapters like ``OpenAIConfiguration/proxy(through:)`` read this context on each request.
+/// Proxy transports read this context on each request.
 /// If a request returns `401 Unauthorized` and a `refreshToken` closure is available, the
 /// adapter may invoke it to obtain a new token and retry once.
 package actor AuthorizationContext {

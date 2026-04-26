@@ -14,7 +14,7 @@ struct SimulationTextTests {
 
   // MARK: - Properties
 
-  private let session: SimulatedSession<SessionSchema>
+  private let session: LanguageModelSession
 
   // MARK: - Initialization
 
@@ -23,11 +23,7 @@ struct SimulationTextTests {
       defaultGenerations: [.textResponse("Hello, World!")],
       generationDelay: .zero,
     )
-    session = SimulatedSession(
-      schema: SessionSchema(),
-      instructions: "",
-      configuration: configuration,
-    )
+    session = LanguageModelSession(model: SimulationLanguageModel(configuration: configuration))
   }
 
   @Test("Single response")
@@ -40,8 +36,8 @@ struct SimulationTextTests {
   // MARK: - Private Test Helper Methods
 
   private func processStreamResponse() async throws -> (Transcript, String?) {
-    let response = try await session.respond(to: "prompt", options: .init())
-    return (response.transcript, response.content)
+    let response = try await session.respond(to: "prompt")
+    return (session.transcript, response.content)
   }
 
   private func validateTranscript(generatedTranscript: Transcript) throws {

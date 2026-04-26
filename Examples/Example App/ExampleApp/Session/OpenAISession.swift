@@ -2,7 +2,7 @@
 
 import Foundation
 import Observation
-import OpenAISession
+import SwiftAgent
 
 @SessionSchema
 struct SessionSchema {

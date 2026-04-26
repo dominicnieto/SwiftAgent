@@ -11,15 +11,14 @@ let package = Package(
   ],
   products: [
     .library(name: "SwiftAgent", targets: ["SwiftAgent"]),
-    .library(name: "SwiftAgentAsyncHTTPClient", targets: ["SwiftAgentAsyncHTTPClient"]),
-    .library(name: "OpenAISession", targets: ["OpenAISession", "SimulatedSession", "SwiftAgent"]),
-    .library(name: "AnthropicSession", targets: ["AnthropicSession", "SimulatedSession", "SwiftAgent"]),
+    .library(name: "SimulatedSession", targets: ["SimulatedSession"]),
     .library(name: "ExampleCode", targets: ["ExampleCode"]),
+  ],
+  traits: [
+    .trait(name: "AsyncHTTPClient", description: "Enable the AsyncHTTPClient-backed SwiftAgent HTTP transport."),
   ],
   dependencies: [
     .package(url: "https://github.com/swiftlang/swift-syntax.git", "600.0.0"..<"603.0.0"),
-    .package(url: "https://github.com/MacPaw/OpenAI.git", branch: "main"),
-    .package(url: "https://github.com/jamesrochabrun/SwiftAnthropic.git", from: "2.2.0"),
     .package(url: "https://github.com/mattt/EventSource", from: "1.2.0"),
     .package(url: "https://github.com/mattt/JSONSchema", from: "1.3.0"),
     .package(url: "https://github.com/mattt/PartialJSONDecoder", from: "1.0.0"),
@@ -44,39 +43,20 @@ let package = Package(
         "EventSource",
         .product(name: "JSONSchema", package: "JSONSchema"),
         .product(name: "PartialJSONDecoder", package: "PartialJSONDecoder"),
+        .product(
+          name: "AsyncHTTPClient",
+          package: "async-http-client",
+          condition: .when(traits: ["AsyncHTTPClient"]),
+        ),
       ],
-    ),
-    .target(
-      name: "OpenAISession",
-      dependencies: [
-        "SwiftAgent",
-        "OpenAI",
-        "SwiftAgentMacros",
-        "EventSource",
-      ],
-    ),
-    .target(
-      name: "SwiftAgentAsyncHTTPClient",
-      dependencies: [
-        "SwiftAgent",
-        "EventSource",
-        .product(name: "AsyncHTTPClient", package: "async-http-client"),
-      ],
-    ),
-    .target(
-      name: "AnthropicSession",
-      dependencies: [
-        "SwiftAgent",
-        "SwiftAnthropic",
-        "SwiftAgentMacros",
-        "EventSource",
+      swiftSettings: [
+        .define("SWIFTAGENT_ASYNC_HTTP_CLIENT", .when(traits: ["AsyncHTTPClient"])),
       ],
     ),
     .target(
       name: "SimulatedSession",
       dependencies: [
         "SwiftAgent",
-        "OpenAI",
       ],
     ),
     .target(
@@ -88,11 +68,8 @@ let package = Package(
     .testTarget(
       name: "SwiftAgentTests",
       dependencies: [
-        "AnthropicSession",
-        "OpenAISession",
         "SwiftAgent",
         "SimulatedSession",
-        .product(name: "SwiftAnthropic", package: "SwiftAnthropic"),
       ],
     ),
     .testTarget(

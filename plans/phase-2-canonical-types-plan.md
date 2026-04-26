@@ -58,7 +58,7 @@ Additional source layout checked for planning context only:
 
 - Do not integrate optional heavy providers into the base product in this phase.
 - Do not add MLX, Llama, CoreML, or AsyncHTTPClient to the base SwiftAgent target unless separately approved.
-- Do not remove MacPaw `OpenAI` or `SwiftAnthropic` until direct-provider parity is proven and dependency removal is explicitly approved.
+- MacPaw `OpenAI` and `SwiftAnthropic` may be removed in Phase 2 because direct-provider parity was proven and dependency removal was explicitly approved on April 25, 2026.
 - Do not prune `External/AnyLanguageModel` until the corresponding moved code is verified and cleanup is approved.
 - Do not preserve old provider-specific sessions as parallel architectures.
 
@@ -102,7 +102,8 @@ Current implementation checkpoints have moved beyond this starting state:
 - `SwiftAgent` owns main `JSONValue`, `GenerationOptions`, `LanguageModel`, and `LanguageModelSession(model:tools:instructions:)` APIs.
 - Direct OpenAI, Open Responses, and Anthropic providers run through `SwiftAgent.HTTPClient`, session-owned tool execution, transcript-first streaming, token usage, and response metadata.
 - AgentRecorder scenarios and README example source use `import SwiftAgent` and `LanguageModelSession(model:tools:instructions:)`.
-- The old provider-session products still remain until dependency removal and product-surface cleanup are explicitly approved.
+- The old OpenAI/Anthropic provider-session products were removed after dependency-removal approval.
+- Simulation moved to `SimulationLanguageModel` on the main `LanguageModelSession`; the old `LanguageModelProvider`/`Adapter` architecture was removed.
 
 The already completed primitive work should remain credited as carry-forward work, but it must not be treated as completing the broader Phase 2 model-stack workstreams.
 
@@ -166,9 +167,9 @@ The already completed primitive work should remain credited as carry-forward wor
 - `PartialJSONDecoder` is approved for this phase when moving structured streaming or partial structured-output snapshots. It does not replace transcript-first streaming reducers, provider event parsing, tool-call streaming, token usage, or structured-output source tracking.
 - `swift-syntax` version and macro target shape will need reconciliation when `@Generable`/`@Guide` and `@SessionSchema` converge.
 - `EventSource` version reconciliation is likely during provider migration because both packages use SSE support with different resolved versions.
-- `async-http-client` should not enter the base SwiftAgent target. The approved Phase 2 transport decision is to keep `SwiftAgent.HTTPClient` as the provider-facing transport, keep `URLSessionHTTPClient` as the default implementation, and add AsyncHTTPClient support only as an optional adapter target/product that conforms to `SwiftAgent.HTTPClient`.
+- `async-http-client` should not enter the base SwiftAgent target. The approved Phase 2 transport decision is to keep `SwiftAgent.HTTPClient` as the provider-facing transport, keep `URLSessionHTTPClient` as the default implementation, and expose AsyncHTTPClient support through a SwiftPM trait that compiles an optional `SwiftAgent.HTTPClient` implementation only when requested.
 - `swift-transformers`, `mlx-swift-lm`, and `llama.swift` should not enter the base SwiftAgent product. If retained, they belong in optional provider targets/products in a later provider phase.
-- MacPaw `OpenAI` and `SwiftAnthropic` must remain until direct-provider replay parity is proven and separate dependency-removal approval is granted.
+- MacPaw `OpenAI` and `SwiftAnthropic` removal was approved and implemented after direct-provider replay parity.
 - Any dependency removal or replacement from either package must include current users, replacement path, affected targets/products, and build/test evidence before approval.
 
 ## Feature Workstreams
@@ -263,7 +264,7 @@ Provider replay tests should be preserved and expanded before removing SDK adapt
 - `JSONSchema` and `PartialJSONDecoder` additions are approved for the connected Phase 2 work when needed.
 - Dependency removals or replacements require separate explicit approval.
 - Moving, pruning, or renaming files under `External/AnyLanguageModel/` requires explicit approval.
-- Removing MacPaw `OpenAI`, `SwiftAnthropic`, ALM dependencies, or copied ALM package metadata requires explicit approval after parity evidence.
+- Removing dependencies from `External/AnyLanguageModel`, copied ALM package metadata, or optional-provider dependency paths still requires explicit approval. MacPaw `OpenAI` and `SwiftAnthropic` removal was approved and implemented after parity evidence.
 - Provider-specific session deprecation or deletion requires main session parity and replay evidence.
 
 ## Rollback And Cleanup Notes

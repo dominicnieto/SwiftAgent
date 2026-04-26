@@ -40,7 +40,8 @@ import Foundation
 /// }
 ///
 /// let sessionSchema = SessionSchema()
-/// let session = OpenAISession(schema: sessionSchema, instructions: "You are a helpful assistant.", apiKey: "sk-...")
+/// let model = OpenAILanguageModel(apiKey: "sk-...", model: "gpt-5-nano", apiVariant: .responses)
+/// let session = LanguageModelSession(model: model, tools: sessionSchema.tools, instructions: "You are a helpful assistant.")
 /// let response = try await session.respond(to: "Weather in Lisbon today?")
 ///
 /// for entry in try sessionSchema.decode(session.transcript) {

@@ -10,13 +10,13 @@ updated `plans/phase-2-canonical-types-plan.md` and treat those areas as one coh
 merge. Do not use this results file as justification for adding interim protocols, placeholder
 types, bridge sessions, or compatibility-only typealiases to preserve old phase boundaries.
 
-Phase 2 status: partial. Phase 2 is not complete. This result covers the earlier main core work:
+Phase 2 status: complete. This file begins with the earlier main core work:
 local core primitives, macro references, and the current provider/test/example call sites needed
 to consume those primitives. Later slices also resolved `@Generable` defaulted-property parity,
 migrated focused ALM core tests for main SwiftAgent primitives, and completed the Phase 2
 prompt ownership slice. Transcript/session/provider replacement, unified generation options,
-provider capabilities, and direct provider migration remain open workstreams in the merged Phase 2
-plan.
+provider capabilities, and direct provider migration were later completed in the merged Phase 2
+checkpoints below.
 
 SwiftAgent now owns ALM-derived local definitions for:
 
@@ -821,3 +821,135 @@ xcodebuild -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination 
 
 Phase 2 status: still partial until required final validation is rerun and approval-gated
 dependency/product cleanup is either approved or explicitly deferred.
+
+## Dependency Removal, Provider Test Split, And No-Bridge Completion Checkpoint
+
+Completed the merged Phase 2 implementation step that removes the old provider-session stack after
+explicit dependency-removal approval.
+
+Implementation:
+
+- Removed MacPaw `OpenAI` and `SwiftAnthropic` from `Package.swift` and refreshed package
+  resolution files.
+- Removed old `OpenAISession` and `AnthropicSession` source/test targets and package products.
+- Removed the old `LanguageModelProvider` / `Adapter` / `AdapterUpdate` architecture from
+  `SwiftAgent`.
+- Migrated simulation from `SimulatedSession`/`SimulationAdapter` to `SimulationLanguageModel`
+  running through the main `LanguageModelSession`.
+- Converted AsyncHTTPClient support from a separate product to the `AsyncHTTPClient` SwiftPM trait
+  on `SwiftAgent`; it is not part of default/base builds.
+- Added direct `LanguageModelSession` conveniences for `String + generating:`, image prompts, and
+  typed schema `groundingWith` APIs.
+- Fixed main session response transcript IDs so multi-turn responses append per turn while stream
+  snapshots still upsert within a turn.
+- Split current-provider replay coverage into separate OpenAI, Open Responses, and Anthropic test
+  files and audited ALM current-provider tests against replay-backed SwiftAgent coverage.
+- Migrated Example App and AgentRecorder project dependencies away from old provider-session
+  products.
+- Updated README simulation examples to use `SimulationLanguageModel`.
+
+Files changed in this checkpoint include:
+
+- `Package.swift`
+- `Package.resolved`
+- `SwiftAgent.xcworkspace/xcshareddata/swiftpm/Package.resolved`
+- `Sources/SwiftAgent/LanguageModel/LanguageModelSession.swift`
+- `Sources/SwiftAgent/Models/Transcript.swift`
+- `Sources/SwiftAgent/Protocols/DecodedResolvedTypes.swift`
+- `Sources/SwiftAgent/Networking/AsyncHTTPClient/AsyncHTTPClientTransport.swift`
+- `Sources/SimulatedSession/SimulationLanguageModel.swift`
+- `Sources/SimulatedSession/SimulationConfiguration.swift`
+- `Sources/SimulatedSession/SimulationGenerationOptions.swift`
+- `Sources/SimulatedSession/SimulatedSession.swift` (deleted)
+- `Sources/SimulatedSession/SimulationModel.swift` (deleted)
+- `Sources/SwiftAgent/LanguageModelProvider/` (deleted)
+- `Sources/SwiftAgent/Protocols/Adapter.swift` (deleted)
+- `Sources/SwiftAgent/Models/AdapterUpdate.swift` (deleted)
+- `Sources/OpenAISession/` (deleted)
+- `Sources/AnthropicSession/` (deleted)
+- `Tests/SwiftAgentTests/Core/OpenAIProviderReplayTests.swift`
+- `Tests/SwiftAgentTests/Core/OpenResponsesProviderReplayTests.swift`
+- `Tests/SwiftAgentTests/Core/AnthropicProviderReplayTests.swift`
+- `Tests/SwiftAgentTests/Core/ProviderReplayTestSupport.swift`
+- `Tests/SwiftAgentTests/Core/LanguageModelSessionGroundingTests.swift`
+- `Tests/SwiftAgentTests/Core/DirectProviderReplayTests.swift` (deleted)
+- `Tests/SwiftAgentTests/OpenAISession/` (deleted)
+- `Tests/SwiftAgentTests/AnthropicSession/` (deleted)
+- `Tests/SwiftAgentTests/SimulatedSession/`
+- `Examples/Example App/ExampleApp.xcodeproj/project.pbxproj`
+- `Examples/Example App/ExampleApp/`
+- `AgentRecorder/AgentRecorder.xcodeproj/project.pbxproj`
+- `README.md`
+- `docs/phase-2-completion-checklist.md`
+- `docs/phase-2-canonical-types-results.md`
+- `docs/dependency-migration-plan.md`
+- `plans/phase-2-canonical-types-plan.md`
+
+Dependency decisions:
+
+- MacPaw `OpenAI` removal was explicitly approved and implemented.
+- `SwiftAnthropic` removal was explicitly approved and implemented.
+- `JSONSchema` remains approved and used for the merged provider/schema path.
+- `PartialJSONDecoder` remains approved and used for partial structured streaming.
+- AsyncHTTPClient is available only through the `AsyncHTTPClient` SwiftPM trait; it was not added
+  to default/base SwiftAgent builds.
+- No dependencies were removed from `External/AnyLanguageModel`.
+- `External/AnyLanguageModel` was not pruned or deleted.
+- No MLX, Llama, or CoreML dependency was added to the base SwiftAgent target.
+
+Validation succeeded:
+
+```bash
+swift build --target SwiftAgent
+swift build --target SwiftAgent --traits AsyncHTTPClient
+swift test --filter ProviderReplayTests
+swift test --filter Simulation
+swift test
+swift build --target ExampleCode
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests build -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests test -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme ExampleApp -destination "platform=iOS Simulator,name=iPhone 17 Pro,OS=latest" build -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO build -quiet
+```
+
+Results:
+
+- `swift build --target SwiftAgent`: passed.
+- `swift build --target SwiftAgent --traits AsyncHTTPClient`: passed with existing SwiftSyntax
+  macro deprecation warnings.
+- `swift test --filter ProviderReplayTests`: passed, 18 Swift Testing tests across the three
+  provider suites.
+- `swift test --filter Simulation`: passed, 3 Swift Testing tests.
+- `swift test`: passed, 87 Swift Testing tests.
+- `swift build --target ExampleCode`: passed.
+- `xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests build -quiet`: passed
+  with destination-selection warnings.
+- `xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests test -quiet`:
+  passed with destination-selection warnings.
+- `xcodebuild -workspace SwiftAgent.xcworkspace -scheme ExampleApp -destination "platform=iOS Simulator,name=iPhone 17 Pro,OS=latest" build -quiet`:
+  passed.
+- `xcodebuild -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO build -quiet`:
+  passed.
+
+Attempted and blocked by local environment:
+
+```bash
+swiftformat --config ".swiftformat" <changed Swift files>
+```
+
+Result:
+
+```text
+swiftformat not found
+```
+
+Failed during implementation and fixed:
+
+- Provider replay test compile initially exposed missing `String + generating:` convenience on the
+  main session; added the direct convenience instead of changing tests around the gap.
+- Simulation migration exposed fixed response IDs replacing earlier turns; per-turn response IDs now
+  preserve multi-turn transcript history.
+- One validation batch was accidentally started with concurrent SwiftPM commands; later commands
+  waited on the `.build` lock and then passed.
+
+Phase 2 status: complete.
