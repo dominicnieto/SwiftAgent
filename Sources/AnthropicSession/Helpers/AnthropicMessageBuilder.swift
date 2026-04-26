@@ -60,6 +60,9 @@ enum AnthropicMessageBuilder {
 
     for entry in transcript.entries {
       switch entry {
+      case .instructions:
+        break
+
       case let .prompt(prompt):
         append(
           role: .user,

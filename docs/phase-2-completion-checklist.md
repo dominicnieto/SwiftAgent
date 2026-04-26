@@ -30,15 +30,16 @@ Reverified on April 25, 2026:
 - The previous completed primitive items are valid carry-forward work.
 - Those items should not be counted as completing the broader Phase 2 model-stack workstreams.
 - No completed item below was found to be false, but several old `Done` labels were narrowed to `Verified carry-forward` so they do not imply full session/provider/streaming completion.
-- `GenerationOptions`, `JSONValue`, `LanguageModel`, `LanguageModelSession`, transcript-first streaming, tool execution policy, OpenAI direct provider parity, Anthropic direct provider parity, and AgentRecorder/example migration remain not complete.
+- `JSONValue`, `GenerationOptions`, `LanguageModel`, and `LanguageModelSession` now have an initial canonical SwiftAgent implementation, but the broader connected workstream remains partial until direct providers, full transcript merging, tool execution policy, and AgentRecorder/examples/docs are migrated.
+- Transcript-first streaming, tool execution policy, OpenAI direct provider parity, Anthropic direct provider parity, and AgentRecorder/example migration remain not complete.
 
 Evidence checked:
 
 - `grep -RIn "FoundationModels" Sources Tests AgentRecorder Examples Package.swift` returned no results.
 - `Sources/SwiftAgent/Core/` contains the ALM-derived primitive files listed below.
-- No canonical SwiftAgent `GenerationOptions`, `JSONValue`, `LanguageModel`, or `LanguageModelSession(model:tools:instructions:)` implementation exists yet.
+- SwiftAgent now exposes initial canonical `JSONValue`, `GenerationOptions`, `LanguageModel`, and `LanguageModelSession(model:tools:instructions:)` implementations.
 - Current provider paths still reference `AdapterGenerationOptions`, `OpenAIGenerationOptions`, `AnthropicGenerationOptions`, and `SimulationGenerationOptions`.
-- `Package.swift` does not yet expose a `SwiftAgent` library product; public products are still provider-session shaped.
+- `Package.swift` now exposes a `SwiftAgent` library product, while the old provider-session products still remain.
 - `README.md` still documents old `OpenAISession` / `AnthropicSession` usage and includes Apple `FoundationModels` imports.
 
 ## Verified Carry-Forward Work
@@ -67,15 +68,15 @@ The earlier canonical-type work remains valid and is recorded in `docs/phase-2-c
 
 | Workstream | Status | Completion Meaning |
 | --- | --- | --- |
-| Canonical `GenerationOptions` / `JSONValue` / custom options | Not complete | Move ALM `GenerationOptions` with its real `LanguageModel` relationship. Add `JSONSchema` when moving `JSONValue` or provider request/custom option code. Do not introduce a smaller custom-options-only provider protocol. |
-| Canonical `LanguageModel` | Not complete | Move/design `LanguageModel` as the actual provider boundary used by direct providers and session APIs. |
-| Canonical `LanguageModelSession` | Not complete | Implement the real `LanguageModelSession(model:tools:instructions:)` engine with SwiftAgent transcript, token usage, replay/logging, schema, and tool policy behavior. |
-| Merged transcript | Not complete | Merge ALM additions into SwiftAgent's agent-grade transcript without losing reasoning, call IDs, statuses, source metadata, stable coding, or resolver behavior. |
+| Canonical `GenerationOptions` / `JSONValue` / custom options | Partial | Added dependency-backed `JSONValue` and canonical `GenerationOptions` with typed model custom options through the real `LanguageModel` relationship. Provider-specific custom option types and direct provider request usage still need migration. |
+| Canonical `LanguageModel` | Partial | Added initial canonical `LanguageModel` provider boundary used by the new canonical session. Direct OpenAI/Anthropic providers do not conform yet. |
+| Canonical `LanguageModelSession` | Partial | Added initial `LanguageModelSession(model:tools:instructions:)` with SwiftAgent transcript and token usage state plus transcript-derived stream snapshots. Full tool policy, replay/logging hooks, provider parity, and merged transcript additions remain. |
+| Merged transcript | Partial | Added instructions entries with tool definitions while preserving existing prompt/reasoning/tool/response entries and stable coding behavior. Image segments, prompt response format/options, structured-output source tracking, schema versioning, and focused diff helpers remain. |
 | Transcript-first streaming | Not complete | Providers emit rich events; session reduces them into transcript/token state; snapshots derive from that state. |
 | Tool execution policy | Not complete | Session owns tool execution, parallelism, retries, missing-tool behavior, failure behavior, and approval hooks. |
 | OpenAI direct provider parity | Not complete | `OpenAILanguageModel` and `OpenResponsesLanguageModel` pass text, structured output, tool, streaming, reasoning, token usage, metadata, and replay tests through the canonical session. |
 | Anthropic direct provider parity | Not complete | `AnthropicLanguageModel` passes text, structured output, tool, streaming thinking/reasoning, token usage, metadata, and replay tests through the canonical session. |
-| Public package/API surface | Not complete | `import SwiftAgent` exposes the canonical core API through a `SwiftAgent` library product. Provider-session products are removed or retained only as thin conveniences after parity decisions. |
+| Public package/API surface | Partial | `import SwiftAgent` now exposes the canonical core API through a `SwiftAgent` library product. Provider-session products still remain and are not yet thin conveniences over the canonical session. |
 | AgentRecorder/examples/docs | Not complete | Public examples, `README.md`, and recorder scenarios use the canonical merged API after provider parity exists. |
 | Dependency removal proposals | Not complete | MacPaw `OpenAI` and `SwiftAnthropic` removal require explicit approval after parity evidence. |
 

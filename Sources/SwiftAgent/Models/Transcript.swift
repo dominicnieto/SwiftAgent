@@ -104,6 +104,8 @@ public extension SwiftAgent.Transcript {
   /// A single unit in a transcript. Entries are identified by a stable `id`
   /// to support updates during streaming.
   enum Entry: Sendable, Identifiable, Equatable, Codable {
+    /// Developer-provided instructions that define model behavior for the session.
+    case instructions(Instructions)
     /// The final rendered prompt that was sent to the model.
     case prompt(Prompt)
     /// A summarized reasoning trace, if provided by the model.
@@ -118,6 +120,8 @@ public extension SwiftAgent.Transcript {
     /// Stable identifier for this entry.
     public var id: String {
       switch self {
+      case let .instructions(instructions):
+        instructions.id
       case let .prompt(prompt):
         prompt.id
       case let .reasoning(reasoning):
@@ -129,6 +133,52 @@ public extension SwiftAgent.Transcript {
       case let .response(response):
         response.id
       }
+    }
+  }
+
+  /// Developer-provided instructions and tool definitions available to the model.
+  struct Instructions: Sendable, Identifiable, Equatable, Codable {
+    /// Identifier for this instructions entry.
+    public var id: String
+    /// Ordered instruction content segments.
+    public var segments: [Segment]
+    /// Tool definitions injected into the instruction context.
+    public var toolDefinitions: [ToolDefinition]
+
+    public init(
+      id: String = UUID().uuidString,
+      segments: [Segment],
+      toolDefinitions: [ToolDefinition] = [],
+    ) {
+      self.id = id
+      self.segments = segments
+      self.toolDefinitions = toolDefinitions
+    }
+  }
+
+  /// A model-visible tool definition included with session instructions.
+  struct ToolDefinition: Sendable, Identifiable, Equatable, Codable {
+    /// Stable identifier derived from the tool name.
+    public var id: String { name }
+    /// Tool name exposed to the model.
+    public var name: String
+    /// Natural-language description of the tool.
+    public var description: String
+    /// Schema for tool arguments.
+    public var parameters: GenerationSchema
+
+    public init(name: String, description: String, parameters: GenerationSchema) {
+      self.name = name
+      self.description = description
+      self.parameters = parameters
+    }
+
+    public init(tool: any Tool) {
+      self.init(
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+      )
     }
   }
 
@@ -511,6 +561,8 @@ private extension Transcript {
 private extension Transcript.Entry {
   func prettyPrintedLines(indentedBy indentationLevel: Int) -> [String] {
     switch self {
+    case let .instructions(instructions):
+      instructions.prettyPrintedLines(indentedBy: indentationLevel)
     case let .prompt(prompt):
       prompt.prettyPrintedLines(indentedBy: indentationLevel, headline: "Prompt")
     case let .reasoning(reasoning):
@@ -522,6 +574,52 @@ private extension Transcript.Entry {
     case let .response(response):
       response.prettyPrintedLines(indentedBy: indentationLevel)
     }
+  }
+}
+
+private extension Transcript.Instructions {
+  func prettyPrintedLines(indentedBy indentationLevel: Int) -> [String] {
+    var lines: [String] = []
+    let currentIndentation = transcriptIndentation(for: indentationLevel)
+    lines.append("\(currentIndentation)Instructions(id: \(id)) {")
+    lines.append(contentsOf: transcriptPrettyCollection(
+      name: "segments",
+      indentationLevel: indentationLevel + 1,
+      elements: segments,
+      renderElement: { segment, elementIndentationLevel in
+        segment.prettyPrintedLines(indentedBy: elementIndentationLevel)
+      },
+    ))
+    lines.append(contentsOf: transcriptPrettyCollection(
+      name: "toolDefinitions",
+      indentationLevel: indentationLevel + 1,
+      elements: toolDefinitions,
+      renderElement: { definition, elementIndentationLevel in
+        definition.prettyPrintedLines(indentedBy: elementIndentationLevel)
+      },
+    ))
+    lines.append("\(currentIndentation)}")
+    return lines
+  }
+}
+
+private extension Transcript.ToolDefinition {
+  func prettyPrintedLines(indentedBy indentationLevel: Int) -> [String] {
+    var lines: [String] = []
+    let currentIndentation = transcriptIndentation(for: indentationLevel)
+    lines.append("\(currentIndentation)ToolDefinition(id: \(id)) {")
+    lines.append(contentsOf: transcriptPrettyField(
+      name: "name",
+      value: name,
+      indentationLevel: indentationLevel + 1,
+    ))
+    lines.append(contentsOf: transcriptPrettyField(
+      name: "description",
+      value: description,
+      indentationLevel: indentationLevel + 1,
+    ))
+    lines.append("\(currentIndentation)}")
+    return lines
   }
 }
 

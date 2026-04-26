@@ -83,6 +83,8 @@ public enum ReadmeCode {
 
     for entry in session.transcript {
       switch entry {
+      case let .instructions(instructions):
+        print("Instructions: ", instructions)
       case let .prompt(prompt):
         print("Prompt: ", prompt)
       case let .reasoning(reasoning):

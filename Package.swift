@@ -10,6 +10,7 @@ let package = Package(
     .macOS(.v26),
   ],
   products: [
+    .library(name: "SwiftAgent", targets: ["SwiftAgent"]),
     .library(name: "OpenAISession", targets: ["OpenAISession", "SimulatedSession", "SwiftAgent"]),
     .library(name: "AnthropicSession", targets: ["AnthropicSession", "SimulatedSession", "SwiftAgent"]),
     .library(name: "ExampleCode", targets: ["ExampleCode"]),
@@ -19,6 +20,7 @@ let package = Package(
     .package(url: "https://github.com/MacPaw/OpenAI.git", branch: "main"),
     .package(url: "https://github.com/jamesrochabrun/SwiftAnthropic.git", from: "2.2.0"),
     .package(url: "https://github.com/mattt/EventSource", from: "1.2.0"),
+    .package(url: "https://github.com/mattt/JSONSchema", from: "1.3.0"),
     .package(url: "https://github.com/pointfreeco/swift-macro-testing", from: "0.6.4"),
   ],
   targets: [
@@ -37,6 +39,7 @@ let package = Package(
       dependencies: [
         "SwiftAgentMacros",
         "EventSource",
+        .product(name: "JSONSchema", package: "JSONSchema"),
       ],
     ),
     .target(

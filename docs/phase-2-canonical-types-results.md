@@ -546,3 +546,92 @@ The same target compiled with signing disabled using the command recorded above.
 - Move or adapt more ALM core tests for `GeneratedContent`, `GenerationSchema`, `DynamicGenerationSchema`, and `GenerationGuide`.
 - Keep transcript/session/provider replacement work in the remaining merged Phase 2 workstreams;
   this slice only updated provider paths enough to consume local core primitives.
+
+## GenerationOptions, JSONValue, LanguageModel, Session Surface Slice
+
+Completed the next merged Phase 2 implementation step: initial canonical SwiftAgent options/model/session surface.
+
+Implementation:
+
+- Added a public `SwiftAgent` library product so `import SwiftAgent` exposes the canonical core target directly.
+- Added `JSONSchema` to the root package and SwiftAgent target, then exposed `SwiftAgent.JSONValue` as `JSONSchema.JSONValue`.
+- Added canonical `GenerationOptions` with shared sampling, temperature, maximum response token, minimum snapshot interval fields, and typed model-specific custom options keyed by `LanguageModel`.
+- Added the initial canonical `LanguageModel` protocol, `LanguageModelFeedback`, and `LanguageModelSession(model:tools:instructions:)`.
+- The new canonical session owns SwiftAgent transcript state, token usage accumulation, instructions/prompt/response transcript entries, and transcript-derived streaming snapshots.
+- Merged the first ALM transcript addition into SwiftAgent by adding instruction transcript entries with model-visible tool definitions.
+- Updated existing OpenAI, Anthropic, resolver, and example transcript switches to account for instruction entries without changing old SDK adapter behavior.
+- Added focused Swift Testing coverage for `JSONValue`, custom options, response transcript/token state, and transcript-derived streaming snapshots.
+
+Files changed:
+
+- `Package.swift`
+- `Package.resolved`
+- `SwiftAgent.xcworkspace/xcshareddata/swiftpm/Package.resolved`
+- `Sources/SwiftAgent/Core/GenerationOptions.swift`
+- `Sources/SwiftAgent/Core/JSONValue.swift`
+- `Sources/SwiftAgent/LanguageModel/LanguageModel.swift`
+- `Sources/SwiftAgent/LanguageModel/LanguageModelFeedback.swift`
+- `Sources/SwiftAgent/LanguageModel/LanguageModelSession.swift`
+- `Sources/SwiftAgent/LanguageModel/Locked.swift`
+- `Sources/SwiftAgent/Models/Transcript.swift`
+- `Sources/SwiftAgent/Helpers/TranscriptResolver.swift`
+- `Sources/OpenAISession/OpenAIAdapter.swift`
+- `Sources/AnthropicSession/Helpers/AnthropicMessageBuilder.swift`
+- `Sources/ExampleCode/ReadmeCode.swift`
+- `Tests/SwiftAgentTests/Core/GenerationOptionsTests.swift`
+- `Tests/SwiftAgentTests/Core/JSONValueTests.swift`
+- `docs/phase-2-completion-checklist.md`
+- `docs/phase-2-canonical-types-results.md`
+
+Dependency decisions:
+
+- Added approved `JSONSchema` to the root package because this slice moved `JSONValue` and canonical `GenerationOptions` custom-option payloads into SwiftAgent.
+- `JSONSchema` resolved to `1.3.1`.
+- Did not add `PartialJSONDecoder`; structured streaming and partial snapshot decoding were not moved in this slice.
+- Did not remove MacPaw `OpenAI`.
+- Did not remove `SwiftAnthropic`.
+- Did not remove dependencies from `External/AnyLanguageModel`.
+- Did not add MLX, Llama, CoreML, or AsyncHTTPClient to the base SwiftAgent target.
+- Did not prune or delete `External/AnyLanguageModel`.
+
+Validation succeeded:
+
+```bash
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests -only-testing:SwiftAgentTests/GenerationOptionsTests -only-testing:SwiftAgentTests/LanguageModelSessionTests test -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests -only-testing:SwiftAgentTests/GenerationOptionsTests -only-testing:SwiftAgentTests/LanguageModelSessionTests -only-testing:SwiftAgentTests/JSONValueTests test -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests build -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests test -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme ExampleApp -destination "platform=iOS Simulator,name=iPhone 17 Pro,OS=latest" build -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO build -quiet
+```
+
+Attempted and blocked by local environment:
+
+```bash
+swiftformat --config ".swiftformat" Sources/SwiftAgent/Core/GenerationOptions.swift Sources/SwiftAgent/Core/JSONValue.swift Sources/SwiftAgent/LanguageModel/LanguageModel.swift Sources/SwiftAgent/LanguageModel/LanguageModelFeedback.swift Sources/SwiftAgent/LanguageModel/LanguageModelSession.swift Sources/SwiftAgent/LanguageModel/Locked.swift Sources/SwiftAgent/Models/Transcript.swift Sources/SwiftAgent/Helpers/TranscriptResolver.swift Sources/OpenAISession/OpenAIAdapter.swift Sources/AnthropicSession/Helpers/AnthropicMessageBuilder.swift Sources/ExampleCode/ReadmeCode.swift Tests/SwiftAgentTests/Core/GenerationOptionsTests.swift Tests/SwiftAgentTests/Core/JSONValueTests.swift
+which swiftformat || true
+```
+
+Result:
+
+```text
+zsh:1: command not found: swiftformat
+swiftformat not found
+```
+
+Transient validation issue:
+
+```bash
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests -testPlan SwiftAgentTests test -quiet
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme ExampleApp -destination "platform=iOS Simulator,name=iPhone 17 Pro,OS=latest" build -quiet
+```
+
+Result: failed with Xcode build database locking because multiple `xcodebuild` commands were started concurrently. The commands were rerun sequentially and passed as recorded above.
+
+Follow-ups:
+
+- Migrate provider-specific OpenAI and Anthropic custom option types into the canonical `GenerationOptions` custom-options model.
+- Make direct OpenAI and Anthropic language models conform to the canonical `LanguageModel` boundary after transcript-first provider events and replay parity are ready.
+- Continue merging transcript additions, tool execution policy, replay/logging hooks, and AgentRecorder/example/docs migration.
+
+Phase 2 status: partial. This slice is durable canonical surface work, but Phase 2 is not complete because direct provider parity, full transcript merge, tool execution policy, and documentation/example migration remain open.

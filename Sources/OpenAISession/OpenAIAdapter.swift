@@ -535,6 +535,9 @@ public actor OpenAIAdapter: Adapter {
 
     for entry in transcript {
       switch entry {
+      case .instructions:
+        break
+
       case let .prompt(prompt):
         listItems.append(InputItem.inputMessage(EasyInputMessage(
           role: .user,

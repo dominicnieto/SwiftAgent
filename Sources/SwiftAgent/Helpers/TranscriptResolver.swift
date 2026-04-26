@@ -40,6 +40,10 @@ public struct TranscriptResolver<SessionSchema: LanguageModelSessionSchema> {
 
     for (index, entry) in transcript.entries.enumerated() {
       switch entry {
+      case .instructions:
+        // Instructions are model-visible session context, but they do not map
+        // to app-facing prompt, tool run, or response values in the resolved transcript.
+        break
       case let .prompt(prompt):
         var resolvedSources: [SessionSchema.DecodedGrounding] = []
         var errorContext: TranscriptResolvingError.PromptResolution?
