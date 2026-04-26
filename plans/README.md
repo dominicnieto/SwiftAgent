@@ -26,6 +26,9 @@ The original split between Phase 2 main types, Phase 3 transcript/streaming, Pha
 and Phase 5 Anthropic is superseded. Those areas are one model-stack architecture and should be
 planned together in `phase-2-canonical-types-plan.md`.
 
+Phase 3 starts from `phase-3-additional-providers-plan.md`, which is intentionally a skeleton
+for the planning agent to expand provider-by-provider.
+
 Phase output docs that are not execution plans should live in `docs/`. Phase-specific specs, inventories, and results docs may be separate files when that keeps the record clearer.
 
 Each phase plan should include:
