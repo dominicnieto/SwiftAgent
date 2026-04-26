@@ -17,6 +17,13 @@ Phase 2 now means the full core model stack merge:
 - direct Anthropic provider parity
 - AgentRecorder/examples/docs migration to the canonical API
 
+Phase 2 OpenAI and Anthropic parity must satisfy the agent-grade provider requirements in:
+
+- `docs/provider-capability-streaming-reference.md`
+- `docs/streaming-provider-gaps-spec.md`
+
+Those same documents remain Phase 3 guidance for additional providers such as Gemini, Ollama, MLX, CoreML, Llama, and SystemLanguageModel, but OpenAI and Anthropic cannot be marked Phase 2 complete without the relevant capability, rich streaming event, transcript-first reduction, metadata, warning/error, replay, and test coverage described there.
+
 ## Rule
 
 Build whole durable features across their natural boundaries.
@@ -69,13 +76,14 @@ The earlier canonical-type work remains valid and is recorded in `docs/phase-2-c
 | Workstream | Status | Completion Meaning |
 | --- | --- | --- |
 | Canonical `GenerationOptions` / `JSONValue` / custom options | Partial | Added dependency-backed `JSONValue` and canonical `GenerationOptions` with typed model custom options through the real `LanguageModel` relationship. Provider-specific custom option types and direct provider request usage still need migration. |
-| Canonical `LanguageModel` | Partial | Added initial canonical `LanguageModel` provider boundary used by the new canonical session. Direct OpenAI/Anthropic providers do not conform yet. |
-| Canonical `LanguageModelSession` | Partial | Added initial `LanguageModelSession(model:tools:instructions:)` with SwiftAgent transcript and token usage state plus transcript-derived stream snapshots. Full tool policy, replay/logging hooks, provider parity, and merged transcript additions remain. |
-| Merged transcript | Partial | Added instructions entries with tool definitions while preserving existing prompt/reasoning/tool/response entries and stable coding behavior. Image segments, prompt response format/options, structured-output source tracking, schema versioning, and focused diff helpers remain. |
-| Transcript-first streaming | Not complete | Providers emit rich events; session reduces them into transcript/token state; snapshots derive from that state. |
-| Tool execution policy | Not complete | Session owns tool execution, parallelism, retries, missing-tool behavior, failure behavior, and approval hooks. |
-| OpenAI direct provider parity | Not complete | `OpenAILanguageModel` and `OpenResponsesLanguageModel` pass text, structured output, tool, streaming, reasoning, token usage, metadata, and replay tests through the canonical session. |
-| Anthropic direct provider parity | Not complete | `AnthropicLanguageModel` passes text, structured output, tool, streaming thinking/reasoning, token usage, metadata, and replay tests through the canonical session. |
+| Canonical `LanguageModel` | Partial | Added canonical `LanguageModel` provider boundary used by `LanguageModelSession`; direct OpenAI, Open Responses, and Anthropic providers now conform. More provider metadata/capability validation still needs hardening before this workstream is complete. |
+| Canonical `LanguageModelSession` | Partial | Added `LanguageModelSession(model:tools:instructions:)` with SwiftAgent transcript and token usage state, transcript-derived stream snapshots, and session-owned tool execution policy. Response/snapshot metadata, warnings, logging integration, and old-session convergence remain. |
+| Merged transcript | Partial | Added instructions entries with tool definitions, image segments, and provider-facing prompt/tool-output conveniences while preserving existing prompt/reasoning/tool/response entries and stable coding behavior. Prompt response format/options, structured-output source tracking, schema versioning, and focused diff helpers remain. |
+| Transcript-first streaming | Partial | Direct OpenAI/Open Responses and Anthropic streams now emit transcript entries for text, streamed tool calls/tool outputs, Anthropic thinking/signature, and token usage through canonical session snapshots. Full normalized metadata/warning/error events and complete provider event coverage remain. |
+| Tool execution policy | Partial | Session owns generated tool-call handling, delegate approval/stop/provided-output hooks, serial/parallel execution, retry policy, missing-tool behavior, and failure behavior with focused tests. Streaming provider loops now execute tools through this policy. Broader approval UX/logging integration remains. |
+| OpenAI direct provider parity | Partial | `OpenAILanguageModel` and `OpenResponsesLanguageModel` use `SwiftAgent.HTTPClient`, canonical session tool policy, PartialJSONDecoder-backed structured streaming, images, capabilities, and replay tests for text/tool/streaming/token-usage paths. Full metadata/warnings/errors, complete reasoning event coverage, AgentRecorder migration, and old SDK dependency removal approval remain. |
+| Anthropic direct provider parity | Partial | `AnthropicLanguageModel` uses `SwiftAgent.HTTPClient`, canonical session tool policy, PartialJSONDecoder-backed structured streaming, images, capabilities, and replay tests for text/tool/streaming thinking/signature/token-usage paths. Full metadata/warnings/errors, beta fine-grained coverage, AgentRecorder migration, and old SDK dependency removal approval remain. |
+| Provider transport / replay / logging | Partial | Direct providers use `SwiftAgent.HTTPClient` as the provider transport; `URLSessionHTTPClient` is the default; AsyncHTTPClient support was added as an optional SwiftAgent `HTTPClient` adapter target/product. Copied ALM `HTTPSession`/URLSession helper transport is not left as the final provider path. Network logging/replay metadata surfacing still needs completion. |
 | Public package/API surface | Partial | `import SwiftAgent` now exposes the canonical core API through a `SwiftAgent` library product. Provider-session products still remain and are not yet thin conveniences over the canonical session. |
 | AgentRecorder/examples/docs | Not complete | Public examples, `README.md`, and recorder scenarios use the canonical merged API after provider parity exists. |
 | Dependency removal proposals | Not complete | MacPaw `OpenAI` and `SwiftAnthropic` removal require explicit approval after parity evidence. |
@@ -96,6 +104,16 @@ Do not rewrite ALM JSON/schema or partial structured decoding code just to avoid
 - Removing dependencies from `External/AnyLanguageModel`.
 - Adding MLX, Llama, CoreML, or AsyncHTTPClient to the base SwiftAgent target.
 - Pruning or deleting `External/AnyLanguageModel`.
+
+## Phase 2 Transport Decision
+
+- Mechanical copy from `External/AnyLanguageModel` is a reviewability tactic, not the final architecture.
+- Copied provider code must be absorbed into SwiftAgent's canonical session, transcript, tool policy, replay, and logging stack.
+- Direct providers should use `SwiftAgent.HTTPClient` as their provider transport.
+- `URLSessionHTTPClient` remains the default transport implementation.
+- AsyncHTTPClient support should be added as an optional SwiftAgent `HTTPClient` adapter target/product for server-oriented users.
+- AsyncHTTPClient must not be added to the base `SwiftAgent` target unless separately approved for that target.
+- ALM `HTTPSession`, copied `Transport.swift`, and copied URLSession-only provider helpers must not be left as the final direct-provider transport.
 
 ## Completion Rule
 

@@ -19,6 +19,8 @@ Build whole durable features across their natural boundaries. Do not introduce i
 - `docs/phase-1-copy-results.md`
 - `docs/phase-2-canonical-types-results.md`
 - `docs/phase-2-completion-checklist.md`
+- `docs/provider-capability-streaming-reference.md`
+- `docs/streaming-provider-gaps-spec.md`
 - `docs/merge-test-matrix.md`
 - `plans/README.md`
 - `plans/phase-1-copy-any-language-model-plan.md`
@@ -47,6 +49,7 @@ Additional source layout checked for planning context only:
 - Design and implement canonical `LanguageModelSession(model:tools:instructions:)`.
 - Merge transcript and streaming behavior into a transcript-first session engine.
 - Move direct ALM OpenAI and Anthropic provider implementations into SwiftAgent.
+- For OpenAI and Anthropic, satisfy the Phase 2 provider capability and streaming acceptance criteria in `docs/provider-capability-streaming-reference.md` and `docs/streaming-provider-gaps-spec.md`.
 - Fold provider-specific options into canonical `GenerationOptions` custom options.
 - Move AgentRecorder, examples, and docs to the merged API when provider parity is ready.
 - Define approval gates for dependency removals and optional providers.
@@ -139,7 +142,7 @@ The already completed primitive work should remain credited as carry-forward wor
 | structured output protocols/macros | Merged: ALM `Generable`/content/schema as primitives, SwiftAgent `StructuredOutput`/resolver semantics preserved | ALM supplies local schema/content generation. SwiftAgent supplies agent-facing output registrations, transcript resolving, grounding, and UX behavior. The merged model must track whether structured output came from provider-native support, prompt fallback, or constrained decoding. |
 | `@SessionSchema` | SwiftAgent, aligned with the merged session/transcript API | This macro is a SwiftAgent agent-layer feature. It already emits local core type constraints and should remain canonical while generated resolver code follows the final merged transcript/session model. |
 | `@Generable / @Guide` | AnyLanguageModel | These macros belong with ALM's local `Generable`, `GenerationGuide`, and schema model and should be folded into SwiftAgent's macro target/API. |
-| transport / HTTP client / replay | SwiftAgent | SwiftAgent's replay recorder, HTTP abstraction, network logging, and AgentRecorder workflow are core to provider parity and test review. ALM provider HTTP helpers should adapt to this direction rather than introduce a second long-term transport stack. |
+| transport / HTTP client / replay | SwiftAgent | SwiftAgent's replay recorder, HTTP abstraction, network logging, and AgentRecorder workflow are core to provider parity and test review. Direct providers should use `SwiftAgent.HTTPClient` as their provider transport. `URLSessionHTTPClient` remains the default implementation. ALM's optional `AsyncHTTPClient` capability should be absorbed as an optional SwiftAgent `HTTPClient` implementation in a separate target/product, not as the base transport and not through ALM's `HTTPSession` typealias. |
 | provider model identifiers | Merged, direct-provider-biased | Preserve ALM direct provider types and string/custom endpoint flexibility. Map SwiftAgent's current `OpenAIModel`, `AnthropicModel`, and `SimulationModel` defaults/convenience only where they remain useful. |
 | provider capabilities | New merged capability model | Neither current stack fully owns the desired model. Implement the accepted hybrid: capability `OptionSet` checks, protocol inference, model/provider/runtime separation, and rich per-run streaming events. |
 | Observation / session UI state | Merged | Preserve ALM's canonical `@Observable LanguageModelSession` shape with `isResponding` and transcript, plus SwiftAgent's observable transcript/token usage behavior for agent UIs. |
@@ -155,7 +158,7 @@ The already completed primitive work should remain credited as carry-forward wor
 - `PartialJSONDecoder` is approved for this phase when moving structured streaming or partial structured-output snapshots. It does not replace transcript-first streaming reducers, provider event parsing, tool-call streaming, token usage, or structured-output source tracking.
 - `swift-syntax` version and macro target shape will need reconciliation when `@Generable`/`@Guide` and `@SessionSchema` converge.
 - `EventSource` version reconciliation is likely during provider migration because both packages use SSE support with different resolved versions.
-- `async-http-client` should remain confined to the copied ALM package unless an approved optional transport path is retained. Long-term provider integration should prefer SwiftAgent `HTTPClient` and replay.
+- `async-http-client` should not enter the base SwiftAgent target. The approved Phase 2 transport decision is to keep `SwiftAgent.HTTPClient` as the provider-facing transport, keep `URLSessionHTTPClient` as the default implementation, and add AsyncHTTPClient support only as an optional adapter target/product that conforms to `SwiftAgent.HTTPClient`.
 - `swift-transformers`, `mlx-swift-lm`, and `llama.swift` should not enter the base SwiftAgent product. If retained, they belong in optional provider targets/products in a later provider phase.
 - MacPaw `OpenAI` and `SwiftAnthropic` must remain until direct-provider replay parity is proven and separate dependency-removal approval is granted.
 - Any dependency removal or replacement from either package must include current users, replacement path, affected targets/products, and build/test evidence before approval.
@@ -185,6 +188,15 @@ The already completed primitive work should remain credited as carry-forward wor
 - Add instructions, images, prompt response format/options, structured-output source tracking, schema versioning, and focused diff helpers.
 - Providers emit rich events; the session reduces those events into transcript/token state.
 - Public stream snapshots are derived from transcript/token state and include content, raw content, transcript, and token usage.
+- `docs/provider-capability-streaming-reference.md` and `docs/streaming-provider-gaps-spec.md` are Phase 2 acceptance sources for OpenAI and Anthropic transcript-first streaming. They become Phase 3 guidance for later providers.
+
+### Provider Capabilities And Metadata
+
+- Implement the hybrid capability model from `docs/provider-capability-streaming-reference.md` for OpenAI and Anthropic Phase 2 parity: model/provider/runtime separation, `ProviderCapabilities` `OptionSet` checks, protocol inference, and explicit capability reporting where provider/model behavior differs.
+- Use rich provider stream events for text, structured output, tool input deltas, completed tool calls/results, reasoning, metadata, token usage, raw chunks, warnings, finish status, and errors.
+- Capabilities validate unsupported requests before dispatch where possible; warnings are reserved for unsupported settings or degradation paths that still produce a valid response.
+- Provider metadata, request IDs, provider model IDs, rate-limit details, retry-after hints, and warnings remain execution metadata available to responses, snapshots, logs, and replay. They must not become model-visible transcript content.
+- Tests must assert that providers emit the events promised by their capabilities and fail or degrade explicitly for unsupported capabilities.
 
 ### Tool Execution
 
@@ -197,15 +209,19 @@ The already completed primitive work should remain credited as carry-forward wor
 - Move `OpenAILanguageModel` and `OpenResponsesLanguageModel` into SwiftAgent.
 - Preserve them as distinct providers unless a later design decision says otherwise.
 - Adapt request building to SwiftAgent transport/replay/logging.
+- Do not leave copied ALM `HTTPSession`, `Transport.swift`, or URLSession-only provider helpers as the final direct-provider transport. Mechanical copy is a reviewability tactic; copied provider code must be absorbed into SwiftAgent's `HTTPClient`, transcript, session, tool policy, replay, and logging architecture.
 - Emit transcript-first streaming updates for text, structured output, tool calls, reasoning, token usage, metadata, warnings, and rate-limit details where available.
+- Implement OpenAI capability reporting, warnings/errors, and rich stream event normalization according to `docs/provider-capability-streaming-reference.md` and the OpenAI/Open Responses sections of `docs/streaming-provider-gaps-spec.md`.
 - Port replay-backed OpenAI tests before considering the provider path migrated.
 
 ### Anthropic Direct Provider
 
 - Move `AnthropicLanguageModel` into SwiftAgent.
 - Adapt request building to SwiftAgent transport/replay/logging.
+- Do not leave copied ALM `HTTPSession`, `Transport.swift`, or URLSession-only provider helpers as the final direct-provider transport. Mechanical copy is a reviewability tactic; copied provider code must be absorbed into SwiftAgent's `HTTPClient`, transcript, session, tool policy, replay, and logging architecture.
 - Preserve thinking/reasoning validation and streaming behavior.
 - Emit transcript-first streaming updates for text, structured output, tool use JSON deltas, thinking/signature deltas, token usage, metadata, warnings, and rate-limit details where available.
+- Implement Anthropic capability reporting, warnings/errors, and rich stream event normalization according to `docs/provider-capability-streaming-reference.md` and the Anthropic Messages section of `docs/streaming-provider-gaps-spec.md`.
 - Port replay-backed Anthropic tests before considering the provider path migrated.
 
 ## Test And Build Plan For Implementation
@@ -258,6 +274,7 @@ Provider replay tests should be preserved and expanded before removing SDK adapt
 - How should SwiftAgent `StructuredOutput` relate to `Generable`: should all structured outputs become `Generable`, or should `StructuredOutput.Schema` remain the generable payload?
 - Should `ToolExecutionDelegate` survive as a delegate protocol, or should it become one hook inside a broader `ToolExecutionPolicy` value?
 - What is the exact public shape of response/snapshot types: keep `AgentResponse`/`AgentSnapshot`, adopt ALM `LanguageModelSession.Response`/`ResponseStream.Snapshot`, or typealias/converge names?
+- Resolved transport decision: AsyncHTTPClient support survives as an optional SwiftAgent transport adapter target/product, not as a base dependency and not as the provider-facing transport abstraction. Direct providers use `SwiftAgent.HTTPClient`; the optional adapter supplies a server-oriented implementation of that protocol.
 - How should provider model identifiers balance typed convenience enums with direct provider string model IDs and custom endpoints?
 - Which capability flags are required in the first implementation slice versus deferred to Phase 3 provider expansion?
 - Should `JSONSchema` remain visible through public API surfaces beyond the `JSONValue` typealias, or stay an implementation dependency where possible?

@@ -635,3 +635,104 @@ Follow-ups:
 - Continue merging transcript additions, tool execution policy, replay/logging hooks, and AgentRecorder/example/docs migration.
 
 Phase 2 status: partial. This slice is durable canonical surface work, but Phase 2 is not complete because direct provider parity, full transcript merge, tool execution policy, and documentation/example migration remain open.
+
+## Direct Provider, Transport, Streaming Tool Policy Checkpoint
+
+Completed the next merged Phase 2 checkpoint: direct OpenAI/Open Responses and Anthropic providers now run through the canonical SwiftAgent model/session/tool-policy/transport path for replay-backed text, tool, structured-streaming, and streamed tool-call scenarios.
+
+Implementation:
+
+- Mechanically copied ALM direct provider source files into SwiftAgent, then refactored them into SwiftAgent's canonical architecture.
+- Added direct `OpenAILanguageModel`, `OpenResponsesLanguageModel`, and `AnthropicLanguageModel` conformances to `LanguageModel`.
+- Added provider capability reporting for the direct providers.
+- Added `LanguageModelCapabilities`, rich stream event/metadata primitives, and `PartialJSONDecoder`-backed partial structured generation.
+- Added session-owned `ToolExecutionPolicy`, `ToolExecutionDelegate`, serial/parallel execution, missing-tool behavior, failure behavior, and retry policy.
+- Refactored direct providers to use `SwiftAgent.HTTPClient` with `URLSessionHTTPClient` as the default transport.
+- Added an optional `SwiftAgentAsyncHTTPClient` target/product implementing `SwiftAgent.HTTPClient` for server-oriented users without adding AsyncHTTPClient to the base SwiftAgent target.
+- Added transcript image segments and preserved image prompt conversion for direct OpenAI/Open Responses and Anthropic request builders.
+- Implemented transcript-first direct-provider streaming for text, OpenAI Responses streamed function-call arguments, Anthropic streamed tool input JSON deltas, Anthropic thinking/signature deltas, token usage, tool-call transcript entries, and tool-output transcript entries.
+- Added replay tests for direct provider text, streaming text, non-streaming tools, streaming tools, capability reporting, image transcript round trips, partial structured generation, and tool retry policy.
+- Updated the Phase 2 plan and checklist so `docs/provider-capability-streaming-reference.md` and `docs/streaming-provider-gaps-spec.md` are explicit Phase 2 acceptance sources for OpenAI and Anthropic.
+
+Files changed:
+
+- `Package.swift`
+- `Package.resolved`
+- `Sources/SwiftAgent/LanguageModel/AnthropicLanguageModel.swift`
+- `Sources/SwiftAgent/LanguageModel/LanguageModel.swift`
+- `Sources/SwiftAgent/LanguageModel/LanguageModelCapabilities.swift`
+- `Sources/SwiftAgent/LanguageModel/LanguageModelSession.swift`
+- `Sources/SwiftAgent/LanguageModel/LanguageModelStreamEvent.swift`
+- `Sources/SwiftAgent/LanguageModel/OpenAILanguageModel.swift`
+- `Sources/SwiftAgent/LanguageModel/OpenResponsesLanguageModel.swift`
+- `Sources/SwiftAgent/LanguageModel/PartialStructuredGeneration.swift`
+- `Sources/SwiftAgent/LanguageModel/ToolExecution.swift`
+- `Sources/SwiftAgent/Networking/HTTPClient+ProviderDecoding.swift`
+- `Sources/SwiftAgentAsyncHTTPClient/AsyncHTTPClientTransport.swift`
+- `Sources/SwiftAgent/Models/Transcript.swift`
+- `Sources/SwiftAgent/Models/Transcript+Resolved.swift`
+- `Sources/SwiftAgent/Helpers/TranscriptResolver.swift`
+- `Sources/SwiftAgent/LanguageModelProvider/LanguageModelProvider.swift`
+- `Sources/OpenAISession/OpenAIAdapter.swift`
+- `Sources/AnthropicSession/Helpers/AnthropicMessageBuilder.swift`
+- `Tests/SwiftAgentTests/Core/DirectProviderReplayTests.swift`
+- `Tests/SwiftAgentTests/Core/LanguageModelCapabilitiesTests.swift`
+- `Tests/SwiftAgentTests/Core/ToolExecutionPolicyTests.swift`
+- `docs/phase-2-completion-checklist.md`
+- `plans/phase-2-canonical-types-plan.md`
+- `docs/phase-2-canonical-types-results.md`
+
+Dependency decisions:
+
+- Added approved `PartialJSONDecoder` to the base SwiftAgent target because direct provider structured streaming now uses partial structured decoding.
+- Added `async-http-client` only for the optional `SwiftAgentAsyncHTTPClient` target/product. It was not added to the base SwiftAgent target.
+- Kept `SwiftAgent.HTTPClient` as the provider-facing transport and `URLSessionHTTPClient` as the default implementation.
+- Did not keep ALM `HTTPSession`, copied `Transport.swift`, or copied URLSession provider helpers as the final provider transport.
+- Did not remove MacPaw `OpenAI`.
+- Did not remove `SwiftAnthropic`.
+- Did not remove dependencies from `External/AnyLanguageModel`.
+- Did not add MLX, Llama, CoreML, or AsyncHTTPClient to the base SwiftAgent target.
+- Did not prune or delete `External/AnyLanguageModel`.
+
+Validation succeeded:
+
+```bash
+swift build --target SwiftAgent
+swift build --target SwiftAgentAsyncHTTPClient
+swift test --filter LanguageModelCapabilitiesTests
+swift test --filter ToolExecutionPolicyTests
+swift test --filter DirectProviderReplayTests
+xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests build -quiet
+```
+
+Failed during implementation and fixed:
+
+```bash
+swift test --filter DirectProviderReplayTests
+```
+
+Result before fixing the Open Responses streaming loop:
+
+```text
+openResponsesProviderStreamsToolCallsThroughCanonicalSessionPolicy failed because OpenResponsesLanguageModel still used the old content-only streaming loop.
+```
+
+Attempted and blocked by local environment:
+
+```bash
+swiftformat --config ".swiftformat" Sources/AnthropicSession/Helpers/AnthropicMessageBuilder.swift Sources/OpenAISession/OpenAIAdapter.swift Sources/SwiftAgent/Helpers/TranscriptResolver.swift Sources/SwiftAgent/LanguageModel/AnthropicLanguageModel.swift Sources/SwiftAgent/LanguageModel/LanguageModel.swift Sources/SwiftAgent/LanguageModel/LanguageModelCapabilities.swift Sources/SwiftAgent/LanguageModel/LanguageModelSession.swift Sources/SwiftAgent/LanguageModel/LanguageModelStreamEvent.swift Sources/SwiftAgent/LanguageModel/OpenAILanguageModel.swift Sources/SwiftAgent/LanguageModel/OpenResponsesLanguageModel.swift Sources/SwiftAgent/LanguageModel/PartialStructuredGeneration.swift Sources/SwiftAgent/LanguageModel/ToolExecution.swift Sources/SwiftAgent/LanguageModelProvider/LanguageModelProvider.swift Sources/SwiftAgent/Models/Transcript+Resolved.swift Sources/SwiftAgent/Models/Transcript.swift Sources/SwiftAgent/Networking/HTTPClient+ProviderDecoding.swift Sources/SwiftAgentAsyncHTTPClient/AsyncHTTPClientTransport.swift Tests/SwiftAgentTests/Core/DirectProviderReplayTests.swift Tests/SwiftAgentTests/Core/LanguageModelCapabilitiesTests.swift Tests/SwiftAgentTests/Core/ToolExecutionPolicyTests.swift
+```
+
+Result:
+
+```text
+zsh:1: command not found: swiftformat
+```
+
+Follow-ups:
+
+- Phase 2 remains partial.
+- Provider response metadata, warnings, rate-limit details, and normalized stream errors still need to be surfaced through response/snapshot/logging APIs.
+- Old `OpenAISession`, `AnthropicSession`, and `LanguageModelProvider` paths still need to become thin conveniences over the canonical session or be deprecated after parity evidence.
+- AgentRecorder, README, examples, and public docs still need migration to the canonical API after provider parity is complete.
+- Dependency removal proposals for MacPaw `OpenAI` and `SwiftAnthropic` still require explicit approval after parity evidence.
