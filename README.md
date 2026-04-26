@@ -5,7 +5,7 @@
 
 **Native Swift SDK for building autonomous AI agents with Apple's FoundationModels design philosophy**
 
-SwiftAgent simplifies AI agent development by providing a clean, intuitive API that handles all the complexity of agent loops, tool execution, and adapter communication. Inspired by Apple's FoundationModels framework, it brings the same elegant, declarative approach to cross-platform AI agent development.
+SwiftAgent simplifies AI agent development by providing a clean, intuitive API that handles the complexity of agent loops, tool execution, and direct provider communication. Inspired by Apple's FoundationModels framework, it brings the same elegant, declarative approach to cross-platform AI agent development.
 
 ## SwiftAgent in Action
 
@@ -102,7 +102,7 @@ func planCopenhagenWeekend() async throws {
 - **Apple-Native Design** — API inspired by FoundationModels for familiar, intuitive development
 - **Modern Swift** — Built with Swift 6, async/await, and latest concurrency features
 - **Rich Logging** — Comprehensive, human-readable logging for debugging and monitoring
-- **Flexible Configuration** — Fine-tune generation options, tools, and adapter settings
+- **Flexible Configuration** — Fine-tune generation options, tools, and provider-specific settings
 
 ## Quick Start
 
@@ -327,7 +327,7 @@ for entry in session.transcript {
 ```
 
 > [!NOTE]
-> `LanguageModelSession` exposes transcript, token usage, and provider metadata state for UI applications.
+> `LanguageModelSession` is `@Observable`, so SwiftUI and other Observation-based UI can track `isResponding`, `transcript`, `tokenUsage`, and provider metadata directly. The session remains thread-safe by publishing Observation changes around its internal locked state instead of exposing mutable transcript storage.
 
 ### Access Token Usage
 
@@ -981,7 +981,7 @@ Notes:
 
 SwiftAgent ships with a SwiftUI demo that showcases the SDK in action. Open the project at `Examples/Example App/ExampleApp` to explore an agent playground that:
 
-- Configures OpenAI and Anthropic sessions with the bundled `SessionSchema`, calculator tool, weather tool, and a structured weather report output.
+- Configures OpenAI and Anthropic language models with the bundled `SessionSchema`, calculator tool, weather tool, and a structured weather report output.
 - Streams responses while rendering prompts, reasoning summaries, tool runs, and final replies in a chat-style transcript UI.
 - Demonstrates tool-specific views (calculator and weather) with live argument updates, results, and SwiftUI previews backed by `SimulationLanguageModel` scenarios.
 

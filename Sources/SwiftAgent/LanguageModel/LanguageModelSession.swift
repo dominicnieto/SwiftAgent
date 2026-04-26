@@ -1,10 +1,12 @@
 import Foundation
+import Observation
 
 /// Main session that coordinates a language model, tools, instructions, transcript, and usage state.
+@Observable
 public final class LanguageModelSession: @unchecked Sendable {
-  private let model: any LanguageModel
-  private let state: Locked<State>
-  private let toolExecutionDelegateStorage = Locked<(any ToolExecutionDelegate)?>(nil)
+  @ObservationIgnored private let model: any LanguageModel
+  @ObservationIgnored private let state: Locked<State>
+  @ObservationIgnored private let toolExecutionDelegateStorage = Locked<(any ToolExecutionDelegate)?>(nil)
 
   /// Tools available to the model during this session.
   public let tools: [any Tool]
@@ -23,22 +25,26 @@ public final class LanguageModelSession: @unchecked Sendable {
 
   /// Whether this session is currently waiting on model output.
   public var isResponding: Bool {
-    state.withLock { $0.isResponding }
+    access(keyPath: \.isResponding)
+    return state.withLock { $0.isResponding }
   }
 
   /// The current transcript assembled by this session.
   public var transcript: Transcript {
-    state.withLock { $0.transcript }
+    access(keyPath: \.transcript)
+    return state.withLock { $0.transcript }
   }
 
   /// Cumulative token usage reported by the model during this session.
   public var tokenUsage: TokenUsage? {
-    state.withLock { $0.tokenUsage }
+    access(keyPath: \.tokenUsage)
+    return state.withLock { $0.tokenUsage }
   }
 
   /// Metadata reported for the latest provider response in this session.
   public var responseMetadata: ResponseMetadata? {
-    state.withLock { $0.responseMetadata }
+    access(keyPath: \.responseMetadata)
+    return state.withLock { $0.responseMetadata }
   }
 
   /// Creates a session with a model, tools, and instructions.
@@ -1173,11 +1179,15 @@ private extension LanguageModelSession {
   }
 
   func beginResponding() {
-    state.withLock { $0.responseDepth += 1 }
+    withMutation(keyPath: \.isResponding) {
+      state.withLock { $0.responseDepth += 1 }
+    }
   }
 
   func endResponding() {
-    state.withLock { $0.responseDepth = max(0, $0.responseDepth - 1) }
+    withMutation(keyPath: \.isResponding) {
+      state.withLock { $0.responseDepth = max(0, $0.responseDepth - 1) }
+    }
   }
 
   static func promptEntry(for prompt: Prompt) -> Transcript.Prompt {
@@ -1211,10 +1221,12 @@ private extension LanguageModelSession {
   }
 
   func appendPrompt(_ prompt: Transcript.Prompt) {
-    state.withLock { state in
-      state.responseEntryID = UUID().uuidString
-      state.responseSegmentID = UUID().uuidString
-      state.transcript.entries.append(.prompt(prompt))
+    withMutation(keyPath: \.transcript) {
+      state.withLock { state in
+        state.responseEntryID = UUID().uuidString
+        state.responseSegmentID = UUID().uuidString
+        state.transcript.entries.append(.prompt(prompt))
+      }
     }
   }
 
@@ -1246,9 +1258,11 @@ private extension LanguageModelSession {
   func recordProviderEntries(_ entries: [Transcript.Entry]) {
     guard entries.isEmpty == false else { return }
 
-    state.withLock { state in
-      for entry in entries {
-        state.transcript.upsert(entry)
+    withMutation(keyPath: \.transcript) {
+      state.withLock { state in
+        for entry in entries {
+          state.transcript.upsert(entry)
+        }
       }
     }
   }
@@ -1268,17 +1282,21 @@ private extension LanguageModelSession {
       segments: [segment],
       status: status,
     ))
-    state.withLock { $0.transcript.upsert(entry) }
+    withMutation(keyPath: \.transcript) {
+      state.withLock { $0.transcript.upsert(entry) }
+    }
   }
 
   func recordTokenUsage(_ usage: TokenUsage?) {
     guard let usage else { return }
 
-    state.withLock { state in
-      if state.tokenUsage == nil {
-        state.tokenUsage = usage
-      } else {
-        state.tokenUsage?.merge(usage)
+    withMutation(keyPath: \.tokenUsage) {
+      state.withLock { state in
+        if state.tokenUsage == nil {
+          state.tokenUsage = usage
+        } else {
+          state.tokenUsage?.merge(usage)
+        }
       }
     }
   }
@@ -1286,8 +1304,10 @@ private extension LanguageModelSession {
   func recordResponseMetadata(_ metadata: ResponseMetadata?) {
     guard let metadata else { return }
 
-    state.withLock { state in
-      state.responseMetadata = state.responseMetadata?.merging(metadata) ?? metadata
+    withMutation(keyPath: \.responseMetadata) {
+      state.withLock { state in
+        state.responseMetadata = state.responseMetadata?.merging(metadata) ?? metadata
+      }
     }
   }
 

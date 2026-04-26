@@ -6,7 +6,7 @@ enum AnthropicStructuredOutputScenario {
   static let scenario = AgentRecorderScenario(
     id: "anthropic/structured-output",
     provider: .anthropic,
-    unitTestFile: "Tests/SwiftAgentTests/Core/DirectProviderReplayTests.swift",
+    unitTestFile: "Tests/SwiftAgentTests/Providers/AnthropicProviderReplayTests.swift",
     expectedRecordedResponsesCount: 1,
     run: { recorder, secrets in
       let apiKey = try secrets.anthropicAPIKey()

@@ -823,6 +823,13 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
                                             continuation.yield(.init(responseMetadata: metadata))
                                         }
 
+                                    case .failed:
+                                        continuation.finish(throwing: LanguageModelStreamError(
+                                            code: "stream_failed",
+                                            message: "OpenAI Responses stream failed"
+                                        ))
+                                        return
+
                                     case .ignored:
                                         break
                                     }
@@ -1042,6 +1049,11 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
                                     if let metadata = response?.responseMetadata(providerName: "OpenAI", defaultModelID: model) {
                                         continuation.yield(.responseMetadata(metadata))
                                     }
+
+                                case .failed:
+                                    continuation.yield(.failed(.init(code: "stream_failed", message: "OpenAI Responses stream failed")))
+                                    continuation.finish()
+                                    return
 
                                 case .ignored:
                                     break
@@ -1862,6 +1874,7 @@ private enum OpenAIResponsesServerEvent: Decodable, Sendable {
     case functionCallArgumentsDelta(itemID: String, delta: String)
     case functionCallArgumentsDone(itemID: String, arguments: String)
     case completed(OpenAIResponseCompleted?)
+    case failed
     case ignored
 
     init(from decoder: any Decoder) throws {
@@ -1884,6 +1897,8 @@ private enum OpenAIResponsesServerEvent: Decodable, Sendable {
             )
         case "response.completed":
             self = .completed(try? container.decode(OpenAIResponseCompleted.self, forKey: .response))
+        case "response.failed":
+            self = .failed
         default:
             self = .ignored
         }

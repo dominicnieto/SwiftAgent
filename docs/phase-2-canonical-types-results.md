@@ -658,24 +658,27 @@ Files changed:
 
 - `Package.swift`
 - `Package.resolved`
-- `Sources/SwiftAgent/LanguageModel/AnthropicLanguageModel.swift`
+- `Sources/SwiftAgent/Providers/AnthropicLanguageModel.swift`
 - `Sources/SwiftAgent/LanguageModel/LanguageModel.swift`
 - `Sources/SwiftAgent/LanguageModel/LanguageModelCapabilities.swift`
 - `Sources/SwiftAgent/LanguageModel/LanguageModelSession.swift`
 - `Sources/SwiftAgent/LanguageModel/LanguageModelStreamEvent.swift`
-- `Sources/SwiftAgent/LanguageModel/OpenAILanguageModel.swift`
-- `Sources/SwiftAgent/LanguageModel/OpenResponsesLanguageModel.swift`
+- `Sources/SwiftAgent/Providers/OpenAILanguageModel.swift`
+- `Sources/SwiftAgent/Providers/OpenResponsesLanguageModel.swift`
 - `Sources/SwiftAgent/LanguageModel/PartialStructuredGeneration.swift`
 - `Sources/SwiftAgent/LanguageModel/ToolExecution.swift`
 - `Sources/SwiftAgent/Networking/HTTPClient+ProviderDecoding.swift`
-- `Sources/SwiftAgentAsyncHTTPClient/AsyncHTTPClientTransport.swift`
+- `Sources/SwiftAgent/Networking/AsyncHTTPClient/AsyncHTTPClientTransport.swift`
 - `Sources/SwiftAgent/Models/Transcript.swift`
 - `Sources/SwiftAgent/Models/Transcript+Resolved.swift`
 - `Sources/SwiftAgent/Helpers/TranscriptResolver.swift`
 - `Sources/SwiftAgent/LanguageModelProvider/LanguageModelProvider.swift`
 - `Sources/OpenAISession/OpenAIAdapter.swift`
 - `Sources/AnthropicSession/Helpers/AnthropicMessageBuilder.swift`
-- `Tests/SwiftAgentTests/Core/DirectProviderReplayTests.swift`
+- `Tests/SwiftAgentTests/Providers/OpenAIProviderReplayTests.swift`
+- `Tests/SwiftAgentTests/Providers/OpenResponsesProviderReplayTests.swift`
+- `Tests/SwiftAgentTests/Providers/AnthropicProviderReplayTests.swift`
+- `Tests/SwiftAgentTests/Providers/ProviderReplayTestSupport.swift`
 - `Tests/SwiftAgentTests/Core/LanguageModelCapabilitiesTests.swift`
 - `Tests/SwiftAgentTests/Core/ToolExecutionPolicyTests.swift`
 - `docs/phase-2-completion-checklist.md`
@@ -701,14 +704,14 @@ swift build --target SwiftAgent
 swift build --target SwiftAgentAsyncHTTPClient
 swift test --filter LanguageModelCapabilitiesTests
 swift test --filter ToolExecutionPolicyTests
-swift test --filter DirectProviderReplayTests
+swift test --filter ProviderReplayTests
 xcodebuild -workspace SwiftAgent.xcworkspace -scheme SwiftAgentTests build -quiet
 ```
 
 Failed during implementation and fixed:
 
 ```bash
-swift test --filter DirectProviderReplayTests
+swift test --filter ProviderReplayTests
 ```
 
 Result before fixing the Open Responses streaming loop:
@@ -720,7 +723,7 @@ openResponsesProviderStreamsToolCallsThroughMainSessionPolicy failed because Ope
 Attempted and blocked by local environment:
 
 ```bash
-swiftformat --config ".swiftformat" Sources/AnthropicSession/Helpers/AnthropicMessageBuilder.swift Sources/OpenAISession/OpenAIAdapter.swift Sources/SwiftAgent/Helpers/TranscriptResolver.swift Sources/SwiftAgent/LanguageModel/AnthropicLanguageModel.swift Sources/SwiftAgent/LanguageModel/LanguageModel.swift Sources/SwiftAgent/LanguageModel/LanguageModelCapabilities.swift Sources/SwiftAgent/LanguageModel/LanguageModelSession.swift Sources/SwiftAgent/LanguageModel/LanguageModelStreamEvent.swift Sources/SwiftAgent/LanguageModel/OpenAILanguageModel.swift Sources/SwiftAgent/LanguageModel/OpenResponsesLanguageModel.swift Sources/SwiftAgent/LanguageModel/PartialStructuredGeneration.swift Sources/SwiftAgent/LanguageModel/ToolExecution.swift Sources/SwiftAgent/LanguageModelProvider/LanguageModelProvider.swift Sources/SwiftAgent/Models/Transcript+Resolved.swift Sources/SwiftAgent/Models/Transcript.swift Sources/SwiftAgent/Networking/HTTPClient+ProviderDecoding.swift Sources/SwiftAgentAsyncHTTPClient/AsyncHTTPClientTransport.swift Tests/SwiftAgentTests/Core/DirectProviderReplayTests.swift Tests/SwiftAgentTests/Core/LanguageModelCapabilitiesTests.swift Tests/SwiftAgentTests/Core/ToolExecutionPolicyTests.swift
+swiftformat --config ".swiftformat" Sources/SwiftAgent/Providers/AnthropicLanguageModel.swift Sources/SwiftAgent/Providers/OpenAILanguageModel.swift Sources/SwiftAgent/Providers/OpenResponsesLanguageModel.swift Sources/SwiftAgent/Helpers/TranscriptResolver.swift Sources/SwiftAgent/LanguageModel/LanguageModel.swift Sources/SwiftAgent/LanguageModel/LanguageModelCapabilities.swift Sources/SwiftAgent/LanguageModel/LanguageModelSession.swift Sources/SwiftAgent/LanguageModel/LanguageModelStreamEvent.swift Sources/SwiftAgent/LanguageModel/PartialStructuredGeneration.swift Sources/SwiftAgent/LanguageModel/ToolExecution.swift Sources/SwiftAgent/Models/Transcript+Resolved.swift Sources/SwiftAgent/Models/Transcript.swift Sources/SwiftAgent/Networking/HTTPClient+ProviderDecoding.swift Sources/SwiftAgent/Networking/AsyncHTTPClient/AsyncHTTPClientTransport.swift Tests/SwiftAgentTests/Providers/OpenAIProviderReplayTests.swift Tests/SwiftAgentTests/Providers/OpenResponsesProviderReplayTests.swift Tests/SwiftAgentTests/Providers/AnthropicProviderReplayTests.swift Tests/SwiftAgentTests/Core/LanguageModelCapabilitiesTests.swift Tests/SwiftAgentTests/Core/ToolExecutionPolicyTests.swift
 ```
 
 Result:
@@ -789,12 +792,14 @@ Files changed:
 - `AgentRecorder/AgentRecorder/Scenarios/OpenAI/OpenAIToolCallsWeatherScenario.swift`
 - `README.md`
 - `Sources/ExampleCode/ReadmeCode.swift`
-- `Sources/SwiftAgent/LanguageModel/AnthropicLanguageModel.swift`
+- `Sources/SwiftAgent/Providers/AnthropicLanguageModel.swift`
 - `Sources/SwiftAgent/LanguageModel/LanguageModelSession.swift`
 - `Sources/SwiftAgent/LanguageModel/LanguageModelStreamEvent.swift`
-- `Sources/SwiftAgent/LanguageModel/OpenAILanguageModel.swift`
-- `Sources/SwiftAgent/LanguageModel/OpenResponsesLanguageModel.swift`
-- `Tests/SwiftAgentTests/Core/DirectProviderReplayTests.swift`
+- `Sources/SwiftAgent/Providers/OpenAILanguageModel.swift`
+- `Sources/SwiftAgent/Providers/OpenResponsesLanguageModel.swift`
+- `Tests/SwiftAgentTests/Providers/OpenAIProviderReplayTests.swift`
+- `Tests/SwiftAgentTests/Providers/OpenResponsesProviderReplayTests.swift`
+- `Tests/SwiftAgentTests/Providers/AnthropicProviderReplayTests.swift`
 - `docs/phase-2-completion-checklist.md`
 - `docs/phase-2-canonical-types-results.md`
 - `plans/phase-2-canonical-types-plan.md`
@@ -814,7 +819,7 @@ Dependency decisions:
 Validation succeeded:
 
 ```bash
-swift test --filter DirectProviderReplayTests
+swift test --filter ProviderReplayTests
 swift build --target ExampleCode
 xcodebuild -workspace SwiftAgent.xcworkspace -scheme AgentRecorder -destination "platform=macOS" CODE_SIGNING_ALLOWED=NO build -quiet
 ```
@@ -867,10 +872,10 @@ Files changed in this checkpoint include:
 - `Sources/SwiftAgent/Models/AdapterUpdate.swift` (deleted)
 - `Sources/OpenAISession/` (deleted)
 - `Sources/AnthropicSession/` (deleted)
-- `Tests/SwiftAgentTests/Core/OpenAIProviderReplayTests.swift`
-- `Tests/SwiftAgentTests/Core/OpenResponsesProviderReplayTests.swift`
-- `Tests/SwiftAgentTests/Core/AnthropicProviderReplayTests.swift`
-- `Tests/SwiftAgentTests/Core/ProviderReplayTestSupport.swift`
+- `Tests/SwiftAgentTests/Providers/OpenAIProviderReplayTests.swift`
+- `Tests/SwiftAgentTests/Providers/OpenResponsesProviderReplayTests.swift`
+- `Tests/SwiftAgentTests/Providers/AnthropicProviderReplayTests.swift`
+- `Tests/SwiftAgentTests/Providers/ProviderReplayTestSupport.swift`
 - `Tests/SwiftAgentTests/Core/LanguageModelSessionGroundingTests.swift`
 - `Tests/SwiftAgentTests/Core/DirectProviderReplayTests.swift` (deleted)
 - `Tests/SwiftAgentTests/OpenAISession/` (deleted)

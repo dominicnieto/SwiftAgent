@@ -338,6 +338,123 @@ struct OpenAIProviderReplayTests {
     #expect(response.responseMetadata?.rateLimits["requests"]?.remaining == 99)
     #expect(response.responseMetadata?.rateLimits["requests"]?.retryAfter == 2)
   }
+
+  @Test func openAIRefusalThrowsSessionGenerationError() async throws {
+    let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(body: """
+    {
+      "id": "chatcmpl_refusal",
+      "model": "gpt-test",
+      "choices": [
+        {
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "refusal": "I cannot help with that.",
+            "tool_calls": null
+          },
+          "finish_reason": "stop"
+        }
+      ]
+    }
+    """))
+    let model = OpenAILanguageModel(
+      apiKey: "test-key",
+      model: "gpt-test",
+      apiVariant: .chatCompletions,
+      httpClient: replay,
+    )
+    let session = LanguageModelSession(model: model)
+
+    do {
+      _ = try await session.respond(to: "Refuse")
+      Issue.record("Expected OpenAI refusal to throw")
+    } catch let error as LanguageModelSession.GenerationError {
+      guard case let .refusal(refusal, _) = error else {
+        Issue.record("Expected refusal error, got \(error)")
+        return
+      }
+      let explanation = try await refusal.explanation
+      #expect(explanation.content == "I cannot help with that.")
+    }
+  }
+
+  @Test func openAIHTTPErrorStatusIsSurfaced() async throws {
+    let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(
+      body: #"{"error":{"message":"bad request","type":"invalid_request_error"}}"#,
+      statusCode: 400,
+    ))
+    let model = OpenAILanguageModel(
+      apiKey: "test-key",
+      model: "gpt-test",
+      apiVariant: .chatCompletions,
+      httpClient: replay,
+    )
+    let session = LanguageModelSession(model: model)
+
+    do {
+      _ = try await session.respond(to: "Hello")
+      Issue.record("Expected HTTP 400 to throw")
+    } catch let error as HTTPError {
+      guard case let .unacceptableStatus(code, _) = error else {
+        Issue.record("Expected unacceptable status, got \(error)")
+        return
+      }
+      #expect(code == 400)
+    }
+  }
+
+  @Test func openAIResponsesStreamFailureEventThrows() async throws {
+    let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(body: """
+    event: response.failed
+    data: {"type":"response.failed","response":{"id":"resp_failed","model":"gpt-test"}}
+
+    """))
+    let model = OpenAILanguageModel(
+      apiKey: "test-key",
+      model: "gpt-test",
+      apiVariant: .responses,
+      httpClient: replay,
+    )
+    let session = LanguageModelSession(model: model)
+
+    do {
+      for try await _ in session.streamResponse(to: "Hello") {}
+      Issue.record("Expected stream failure to throw")
+    } catch let error as LanguageModelStreamError {
+      #expect(error.code == "stream_failed")
+    }
+  }
+
+  @Test func openAIResponsesMalformedStreamedToolArgumentsThrow() async throws {
+    let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(body: #"""
+    event: response.output_item.added
+    data: {"type":"response.output_item.added","item":{"id":"fc_weather","type":"function_call","status":"in_progress","arguments":"","call_id":"call_weather","name":"get_weather"},"output_index":0}
+
+    event: response.function_call_arguments.delta
+    data: {"type":"response.function_call_arguments.delta","delta":"{\"city\": tru","item_id":"fc_weather","output_index":0}
+
+    event: response.function_call_arguments.done
+    data: {"type":"response.function_call_arguments.done","arguments":"{\"city\": tru","item_id":"fc_weather","output_index":0}
+
+    event: response.completed
+    data: {"type":"response.completed","response":{"id":"resp_tool","model":"gpt-test"}}
+
+    """#))
+    let model = OpenAILanguageModel(
+      apiKey: "test-key",
+      model: "gpt-test",
+      apiVariant: .responses,
+      httpClient: replay,
+    )
+    let session = LanguageModelSession(model: model, tools: [WeatherTool()])
+
+    do {
+      for try await _ in session.streamResponse(to: "What is the weather?") {}
+      Issue.record("Expected malformed streamed tool arguments to throw")
+    } catch {
+      #expect(error is GeneratedContentError)
+    }
+  }
 }
 
 private func requestBodyObject(

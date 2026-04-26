@@ -6,7 +6,7 @@ enum OpenAIToolCallsWeatherScenario {
   static let scenario = AgentRecorderScenario(
     id: "openai/tool-calls/weather",
     provider: .openAI,
-    unitTestFile: "Tests/SwiftAgentTests/Core/DirectProviderReplayTests.swift",
+    unitTestFile: "Tests/SwiftAgentTests/Providers/OpenAIProviderReplayTests.swift",
     expectedRecordedResponsesCount: 2,
     run: { recorder, secrets in
       let apiKey = try secrets.openAIAPIKey()

@@ -6,7 +6,7 @@ enum OpenAIStructuredOutputScenario {
   static let scenario = AgentRecorderScenario(
     id: "openai/structured-output",
     provider: .openAI,
-    unitTestFile: "Tests/SwiftAgentTests/Core/DirectProviderReplayTests.swift",
+    unitTestFile: "Tests/SwiftAgentTests/Providers/OpenAIProviderReplayTests.swift",
     expectedRecordedResponsesCount: 1,
     run: { recorder, secrets in
       let apiKey = try secrets.openAIAPIKey()

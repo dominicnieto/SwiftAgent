@@ -6,7 +6,7 @@ enum AnthropicStreamingThinkingScenario {
   static let scenario = AgentRecorderScenario(
     id: "anthropic/streaming-thinking",
     provider: .anthropic,
-    unitTestFile: "Tests/SwiftAgentTests/Core/DirectProviderReplayTests.swift",
+    unitTestFile: "Tests/SwiftAgentTests/Providers/AnthropicProviderReplayTests.swift",
     expectedRecordedResponsesCount: 2,
     run: { recorder, secrets in
       let apiKey = try secrets.anthropicAPIKey()
