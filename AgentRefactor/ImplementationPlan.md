@@ -24,6 +24,7 @@ Deliverables:
 - Provider behavior matrix.
 - Current feature matrix from README.
 - Failing/passing tests captured before refactor.
+- Phase completion report: `AgentRefactor/results-phase0.md`, including what was completed and notes for Phase 1.
 
 Tasks:
 
@@ -63,6 +64,7 @@ Deliverables:
 - New neutral request/response/event types.
 - New `LanguageModel` protocol shape.
 - Compatibility removed or isolated from current provider/session shape.
+- Phase completion report: `AgentRefactor/results-phase1.md`, including what was completed and notes for Phase 2.
 
 Tasks:
 
@@ -90,6 +92,7 @@ Deliverables:
 - Shared internal state engine.
 - Provider continuation state store.
 - Model event reducer.
+- Phase completion report: `AgentRefactor/results-phase2.md`, including what was completed and notes for Phase 3.
 
 Tasks:
 
@@ -114,12 +117,19 @@ Exit criteria:
 
 ## Phase 3: Migrate One Provider End to End
 
-Recommended first provider: OpenAI Responses or OpenResponses.
+Deliverables:
+
+- One provider migrated end to end through the new engine.
+- Provider replay coverage for reasoning/tool continuation.
+- Phase completion report: `AgentRefactor/results-phase3.md`, including what was completed and notes for Phase 4.
+
+Recommended first provider: OpenResponsesLanguageModel.
 
 Reason:
 
 - It is the provider that exposed the missing continuation abstraction.
 - It validates reasoning plus function-call continuation.
+- It isolates the Responses-compatible provider before migrating `OpenAILanguageModel`, which owns both Chat Completions and Responses variants and should be migrated as one unit later.
 
 Tasks:
 
@@ -145,6 +155,7 @@ Deliverables:
 
 - `LanguageModelSession` as stateful direct conversation API.
 - No automatic tool execution.
+- Phase completion report: `AgentRefactor/results-phase4.md`, including what was completed and notes for Phase 5.
 
 Tasks:
 
@@ -159,8 +170,8 @@ Tasks:
    - `transcript`
    - `tokenUsage`
    - `responseMetadata`
-4. Decide whether `LanguageModelSession` accepts tool definitions for manual tool-call inspection.
-5. Remove or deprecate automatic tool execution from `LanguageModelSession`.
+4. Support tool definitions in `LanguageModelSession` only for manual tool-call inspection.
+5. Remove automatic tool execution from `LanguageModelSession`.
 6. Update tests:
    - text response
    - structured response
@@ -182,6 +193,7 @@ Deliverables:
 
 - Central non-streaming and streaming tool loop.
 - Agent result/event API.
+- Phase completion report: `AgentRefactor/results-phase5.md`, including what was completed and notes for Phase 6.
 
 Tasks:
 
@@ -227,21 +239,23 @@ Exit criteria:
 Deliverables:
 
 - All existing providers implement the new `LanguageModel`.
+- Phase completion report: `AgentRefactor/results-phase6.md`, including what was completed and notes for Phase 7.
 
 Tasks:
 
-1. Migrate OpenAI Chat Completions.
-2. Migrate the second Responses-compatible provider.
-3. Migrate Anthropic.
-4. Migrate SimulatedSession provider or replace it with a new mock `LanguageModel`.
-5. For each provider, add replay/unit coverage for:
+1. Migrate `OpenAILanguageModel`, including both API variants:
+   - Chat Completions.
+   - Responses.
+2. Migrate Anthropic.
+3. Migrate `SimulatedSession` as a deterministic simulation provider.
+4. For each provider, add replay/unit coverage for:
    - request serialization
    - response parsing
    - stream parsing
    - tool call parsing
    - continuation payload
    - reasoning payload if supported
-6. Remove old provider methods that take `within session: LanguageModelSession`.
+5. Remove old provider methods that take `within session: LanguageModelSession`.
 
 Exit criteria:
 
@@ -254,6 +268,7 @@ Exit criteria:
 Deliverables:
 
 - Runtime-neutral schema naming and docs.
+- Phase completion report: `AgentRefactor/results-phase7.md`, including what was completed and notes for Phase 8.
 
 Tasks:
 
@@ -274,29 +289,36 @@ Exit criteria:
 
 Deliverables:
 
-- README aligned with the new conceptual model.
+- README aligned with the new conceptual model through additive updates to existing sections.
+- Example app updated to expose both direct conversation and agent execution paths.
+- Phase completion report: `AgentRefactor/results-phase8.md`, including what was completed and notes for Phase 9.
 
 Tasks:
 
-1. Introduce the three public concepts:
+1. Preserve existing README sections unless they are strictly obsolete; prefer updating and adding examples over removing documentation.
+2. Introduce the three public concepts:
    - `LanguageModel`
    - `LanguageModelSession`
    - `AgentSession`
-2. Move simple chat examples to `LanguageModelSession`.
-3. Move tool execution examples to `AgentSession`.
-4. Explain direct provider/model calls.
-5. Explain transcript resolution applies to both session types.
-6. Explain provider capabilities and unsupported features.
-7. Document streaming:
+3. Move simple chat examples to `LanguageModelSession`.
+4. Move tool execution examples to `AgentSession`.
+5. Explain direct provider/model calls.
+6. Explain transcript resolution applies to both session types.
+7. Explain provider capabilities and unsupported features.
+8. Document streaming:
    - direct conversation streaming
    - agent streaming
-8. Document migration notes for internal app usage.
+9. Document migration notes for internal app usage.
+10. Update the example app OpenAI and Anthropic tabs with a navigation-bar menu for selecting:
+   - `LanguageModelSession`, to validate direct model calls and manual tool-call inspection behavior.
+   - `AgentSession`, to validate automatic tool execution and agent streaming behavior.
 
 Exit criteria:
 
 - README no longer describes `LanguageModelSession` as the agent loop owner.
 - Tool execution examples use `AgentSession`.
 - Schema docs mention both `LanguageModelSession` and `AgentSession`.
+- Example app can exercise both LMS and AS paths for OpenAI and Anthropic.
 
 ## Phase 9: Cleanup and Hardening
 
@@ -304,6 +326,8 @@ Deliverables:
 
 - Removed old architecture paths.
 - Stable test coverage.
+- AgentRecorder scenarios updated or verified against the new provider/session architecture.
+- Phase completion report: `AgentRefactor/results-phase9.md`, including what was completed and final refactor notes.
 
 Tasks:
 
@@ -314,12 +338,19 @@ Tasks:
 5. Build all supported schemes.
 6. Add regression tests for OpenAI Responses reasoning continuation.
 7. Add architecture tests or compile-time checks that providers cannot access `AgentSession` or execute tools.
+8. Update AgentRecorder scenarios that depend on old provider/session APIs.
+9. Verify AgentRecorder can record the key direct and agent flows:
+   - direct text/structured responses
+   - direct streaming
+   - agent streaming tool calls
+   - Responses reasoning/tool continuation
 
 Exit criteria:
 
 - Full test suite passes.
 - Example app builds.
 - AgentRecorder builds or signing-only failure is documented.
+- AgentRecorder scenarios are current for the refactored provider/session split.
 - No provider owns an agent/tool loop.
 
 ## Current Feature Mapping
