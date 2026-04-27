@@ -73,11 +73,26 @@ Tasks:
 3. Add `ModelStreamEvent`.
 4. Add `ModelTurnCompletion`.
 5. Add `ProviderContinuation`.
-6. Add `ToolCallPartial` if existing stream event types are insufficient.
-7. Add `ResponseFormat` if current structured output options need a clearer home.
-8. Define `LanguageModel.respond(to:)`.
-9. Define `LanguageModel.streamResponse(to:)`.
-10. Move provider availability/capabilities onto the new protocol.
+6. Add provider-neutral `ToolChoice`:
+   - automatic
+   - none
+   - required
+   - named tool
+7. Add `ToolDefinition` support for local SwiftAgent tools and provider-defined server-side tools.
+8. Add `ToolCallPartial` and tool-input lifecycle types if existing stream event types are insufficient.
+9. Add `ResponseFormat` if current structured output options need a clearer home.
+10. Define `LanguageModel.respond(to:)`.
+11. Define `LanguageModel.streamResponse(to:)`.
+12. Move provider availability/capabilities onto the new protocol.
+13. Expand `ModelStreamEvent` with a rich lifecycle taxonomy, using Vercel/Swift AI SDK as a reference:
+   - text start/delta/end
+   - reasoning start/delta/end
+   - tool input start/delta/end
+   - complete tool calls
+   - provider-executed tool results
+   - source/file events
+   - warnings
+   - usage/metadata/finish/raw/error
 
 Exit criteria:
 
@@ -199,14 +214,16 @@ Tasks:
 
 1. Add `AgentConfiguration`.
 2. Add `AgentResult`.
-3. Add `AgentEvent`.
-4. Add `AgentSession`.
-5. Implement `AgentSession` as `@unchecked Sendable` with locked mutable state, following the `LanguageModelSession` pattern.
-6. Start with minimal `AgentConfiguration`:
+3. Add `AgentStepResult` for first-class per-iteration history, following the `steps` concept in Vercel/Swift AI SDK.
+4. Add `AgentEvent`.
+5. Add `AgentSession`.
+6. Implement `AgentSession` as `@unchecked Sendable` with locked mutable state, following the `LanguageModelSession` pattern.
+7. Start with minimal `AgentConfiguration`:
    - `maxIterations`
    - `toolExecutionPolicy`
    - `stopOnToolError`
-7. Make `AgentSession` observable with durable state only:
+8. Implement max-iteration protection through an internal stop-policy evaluator so richer stop conditions can be added later without rewriting the loop.
+9. Make `AgentSession` observable with durable state only:
    - `isRunning`
    - `transcript`
    - `tokenUsage`
@@ -215,21 +232,31 @@ Tasks:
    - `currentToolCalls`
    - `currentToolOutputs`
    - `latestError`
-8. Move tool execution loop into `AgentSession`.
-9. Use `ConversationEngine` for every model turn.
-10. Use `ProviderContinuation` for every continuation turn.
-11. Support typed final output with `@Generable`.
-12. Support streaming text, reasoning, partial tool calls, tool outputs, and final output.
-13. Preserve existing tool execution policy behavior.
-14. Preserve `ToolRunRejection` behavior.
-15. Add max-iteration protection.
-16. Add cancellation behavior.
-17. Keep multi-agent orchestration out of scope, but ensure `AgentSession.run` and `AgentSession.stream` are clean enough for a future orchestrator to call.
+10. Move tool execution loop into `AgentSession`.
+11. Use `ConversationEngine` for every model turn.
+12. Use `ProviderContinuation` for every continuation turn.
+13. Support typed final output with `@Generable`.
+14. Support streaming text, reasoning, partial tool calls, tool outputs, and final output.
+15. Emit rich tool lifecycle events:
+   - tool input started/delta/completed
+   - approval requested
+   - execution started
+   - preliminary/output delta
+   - execution completed
+   - execution failed
+16. Support request-building with an active-tool filter so each run/step can expose a subset of registered tools. Public API for this can wait if needed, but the engine/request builder should not assume all registered tools are always sent.
+17. Preserve existing tool execution policy behavior.
+18. Preserve `ToolRunRejection` behavior.
+19. Add max-iteration protection.
+20. Add cancellation behavior.
+21. Keep multi-agent orchestration out of scope, but ensure `AgentSession.run` and `AgentSession.stream` are clean enough for a future orchestrator to call.
 
 Exit criteria:
 
 - Non-streaming tool loop works through `AgentSession`.
 - Streaming tool loop works through `AgentSession`.
+- `AgentResult` exposes per-step results.
+- Agent streams expose tool lifecycle events needed for future approvals.
 - Tool rejections are recoverable.
 - Token usage aggregates across iterations.
 - `@SessionSchema` resolves `AgentSession.transcript`.
@@ -366,10 +393,14 @@ Exit criteria:
 | Response metadata | `ConversationEngine`, exposed by both sessions |
 | Reasoning summaries | Provider parser + `ConversationEngine` transcript reduction |
 | Tool schema serialization | `LanguageModel` |
+| Tool choice | `ModelRequest` + provider serialization; used by both sessions |
+| Provider-defined tools | Provider serialization/parsing + `ConversationEngine` transcript reduction |
 | Tool execution | `AgentSession` only |
 | Tool execution policy | `AgentSession` |
+| Tool filtering | Request builder/agent loop, with public API deferred if needed |
 | Streaming text | Provider stream parser + `ConversationEngine` |
 | Streaming tool calls | Provider stream parser + `AgentSession` loop |
+| Tool lifecycle events | Provider stream parser + `AgentSession` event stream |
 | Tool rejections | Tool engine + `AgentSession` |
 | `@SessionSchema` | Transcript/schema layer, both sessions |
 | Simulated sessions | Migrated deterministic `SimulatedSession` provider plus focused engine test fakes where useful |

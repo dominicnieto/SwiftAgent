@@ -81,6 +81,7 @@ Owns:
 - Response parsing.
 - Stream event parsing.
 - Tool schema serialization.
+- Provider-defined tool serialization.
 - Tool call parsing.
 - Tool output serialization.
 - Provider-native continuation state preservation.
@@ -88,7 +89,7 @@ Owns:
 
 Does not own:
 
-- Tool execution.
+- Local SwiftAgent tool execution.
 - Agent loop.
 - Max iterations.
 - Memory.
@@ -152,6 +153,9 @@ Owns:
 - Agent result metadata.
 - Agent event stream.
 - Stop/cancel/error behavior.
+- Per-step result history.
+- Local tool lifecycle events.
+- Active-tool filtering when building each model turn.
 
 Future integration considerations:
 
@@ -168,6 +172,7 @@ Does not own:
 - Provider wire formats.
 - Provider request serialization.
 - Provider stream parsing.
+- Provider-defined server-side tool execution.
 
 ## Data Flow
 

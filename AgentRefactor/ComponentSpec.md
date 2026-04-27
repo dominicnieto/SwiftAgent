@@ -47,12 +47,44 @@ public struct ModelRequest: Sendable {
   public var messages: [ModelMessage]
   public var instructions: Instructions?
   public var tools: [ToolDefinition]
+  public var toolChoice: ToolChoice?
   public var responseFormat: ResponseFormat?
   public var generationOptions: GenerationOptions
   public var continuation: ProviderContinuation?
   public var attachments: [ModelAttachment]
 }
 ```
+
+```swift
+public enum ToolChoice: Sendable, Equatable {
+  case automatic
+  case none
+  case required
+  case named(String)
+}
+```
+
+`ToolChoice` should be provider-neutral and usable by both:
+
+- `LanguageModelSession`, when the caller wants manual tool-call inspection.
+- `AgentSession`, when the agent loop should allow, require, suppress, or force a specific tool call.
+
+```swift
+public struct ToolDefinition: Sendable {
+  public var name: String
+  public var description: String?
+  public var schema: GenerationSchema
+  public var kind: ToolDefinitionKind
+  public var providerMetadata: JSONValue?
+}
+
+public enum ToolDefinitionKind: Sendable, Equatable {
+  case local
+  case providerDefined
+}
+```
+
+Local tools are executed by `AgentSession` through SwiftAgent's tool execution runtime. Provider-defined tools are executed server-side by the model provider when the provider supports them. Providers may serialize, parse, and emit provider-defined tool calls/results, but they must not execute local SwiftAgent tools.
 
 ```swift
 public struct ModelResponse: Sendable {
@@ -71,12 +103,22 @@ public struct ModelResponse: Sendable {
 ```swift
 public enum ModelStreamEvent: Sendable, Equatable {
   case started(ResponseMetadata?)
+  case warnings([ModelWarning])
+  case textStarted(id: String, metadata: ResponseMetadata?)
   case textDelta(id: String, delta: String)
+  case textCompleted(id: String, metadata: ResponseMetadata?)
   case structuredDelta(id: String, delta: GeneratedContent)
+  case reasoningStarted(id: String, metadata: ResponseMetadata?)
   case reasoningDelta(id: String, delta: String)
   case reasoningCompleted(Transcript.Reasoning)
+  case toolInputStarted(ToolInputStart)
+  case toolInputDelta(id: String, delta: String)
+  case toolInputCompleted(id: String)
   case toolCallPartial(ToolCallPartial)
   case toolCallsCompleted([Transcript.ToolCall], continuation: ProviderContinuation?)
+  case providerToolResult(Transcript.ToolOutput)
+  case source(ModelSource)
+  case file(ModelFile)
   case usage(TokenUsage)
   case metadata(ResponseMetadata)
   case completed(ModelTurnCompletion)
@@ -84,6 +126,8 @@ public enum ModelStreamEvent: Sendable, Equatable {
   case raw(JSONValue)
 }
 ```
+
+This stream taxonomy is intentionally richer than simple text snapshots. It follows the production-tested shape used by Vercel/Swift AI SDK stream parts: explicit start/delta/end events for text, reasoning, and tool input; complete tool calls/results; warnings; source/file events; finish; raw; and error events. SwiftAgent should adapt names to its own types, but keep the same lifecycle coverage so chat UI, approvals, diagnostics, and provider-defined tools can be layered on later.
 
 ```swift
 public struct ModelTurnCompletion: Sendable, Equatable {
@@ -121,6 +165,7 @@ Every provider must implement:
 
 - Plain request serialization.
 - Tool definition serialization.
+- Provider-defined tool serialization.
 - Tool call parsing.
 - Tool output continuation serialization.
 - Streaming parser into `ModelStreamEvent`.
@@ -135,6 +180,8 @@ Providers must not:
 - Own max iteration loops.
 - Mutate a public session transcript directly.
 - Reconstruct continuation context from public transcript when provider-native state exists.
+
+Providers may emit provider-executed tool calls/results when a provider-defined server-side tool runs. Those events must be marked distinctly from local SwiftAgent tools so `AgentSession` does not try to execute them again.
 
 ## Component 2: ConversationEngine and Shared Components
 
@@ -171,6 +218,8 @@ package final class ConversationEngine: Sendable {
   package func makeRequest(
     prompt: Prompt?,
     tools: [any Tool],
+    toolChoice: ToolChoice?,
+    activeToolNames: Set<String>?,
     responseFormat: ResponseFormat?,
     options: GenerationOptions,
     continuation: ProviderContinuation?
@@ -199,6 +248,8 @@ Required helpers:
 - `PartialToolCallAccumulator`
 - `TokenUsageAccumulator`
 - `ResponseMetadataAccumulator`
+- `ToolDefinitionBuilder`
+- `AgentStopPolicy`
 
 ### Transcript Rules
 
@@ -361,6 +412,8 @@ Streaming throttling such as `minimumStreamingSnapshotInterval` should remain in
 
 Initial scope should not include memory, handoffs, approvals, retries, or guardrails, but the config should leave room for them.
 
+The public configuration starts with `maxIterations`, but the loop should be implemented through an internal stop-policy evaluator rather than scattering `iteration < maxIterations` checks throughout the runtime. This keeps richer stop conditions possible later without rewriting the loop. Vercel/Swift AI SDK models this as `stopWhen` conditions such as `stepCountIs` and `hasToolCall`; SwiftAgent should start with only max-iteration protection and keep a public richer stop-condition API for a future phase.
+
 ### Sendability and State Isolation
 
 `AgentSession` should use the same concurrency pattern as `LanguageModelSession`: `@unchecked Sendable` plus locked mutable state.
@@ -411,6 +464,7 @@ public struct AgentResult<Content: Sendable>: Sendable {
   public var content: Content
   public var rawContent: GeneratedContent
   public var transcript: Transcript
+  public var steps: [AgentStepResult]
   public var toolCalls: [Transcript.ToolCall]
   public var toolOutputs: [Transcript.ToolOutput]
   public var tokenUsage: TokenUsage?
@@ -418,6 +472,22 @@ public struct AgentResult<Content: Sendable>: Sendable {
   public var iterationCount: Int
 }
 ```
+
+### AgentStepResult
+
+```swift
+public struct AgentStepResult: Sendable {
+  public var index: Int
+  public var transcriptEntries: [Transcript.Entry]
+  public var toolCalls: [Transcript.ToolCall]
+  public var toolOutputs: [Transcript.ToolOutput]
+  public var tokenUsage: TokenUsage?
+  public var responseMetadata: ResponseMetadata?
+  public var finishReason: FinishReason
+}
+```
+
+`AgentStepResult` makes each model/tool iteration inspectable. This mirrors the production-tested `steps` model in Vercel/Swift AI SDK and is useful for debugging, activity timelines, usage accounting, approval flows, and future orchestration.
 
 ### AgentEvent
 
@@ -429,10 +499,17 @@ where Content: Generable & Sendable,
   case iterationStarted(Int)
   case modelEvent(ModelStreamEvent)
   case partialContent(Content.PartiallyGenerated)
+  case toolInputStarted(Transcript.ToolCall)
+  case toolInputDelta(id: String, delta: String)
+  case toolInputCompleted(Transcript.ToolCall)
   case toolCallStarted(Transcript.ToolCall)
+  case toolApprovalRequested(Transcript.ToolCall)
+  case toolExecutionStarted(Transcript.ToolCall)
+  case toolOutputDelta(Transcript.ToolOutput)
   case toolCallCompleted(Transcript.ToolCall)
   case toolOutput(Transcript.ToolOutput)
-  case iterationCompleted(Int)
+  case toolExecutionFailed(Transcript.ToolCall, Error)
+  case iterationCompleted(AgentStepResult)
   case completed(AgentResult<Content>)
   case failed(Error)
 }
@@ -444,6 +521,8 @@ This covers both normal text and structured output:
 
 - `String` conforms to `Generable`, and its partial representation is another `String`.
 - A macro-generated structured type conforms to `Generable`, and its partial representation is the macro-generated draft type.
+
+Agent events should also preserve tool lifecycle boundaries. The refactor does not build the full approval workflow yet, but it should expose enough event shape for a UI to later show streamed tool arguments, present approval sheets, show tool execution progress, and distinguish local tool execution from provider-executed tool results.
 
 ### Loop Contract
 
