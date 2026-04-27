@@ -52,8 +52,6 @@ flowchart TB
   GEN --> TE
 ```
 
-## Responsibility Split
-
 ## Future Orchestration Boundary
 
 This refactor does not build multi-agent orchestration. The architecture should still keep room for it by treating `AgentSession` as one agent runtime, not the whole agent system.
@@ -69,7 +67,9 @@ AgentOrchestrator / AgentSystem
   applies workflow policy
 ```
 
-Early handoffs can be represented as provider-neutral tools inside `AgentSession`, but provider adapters must not know about handoffs or multi-agent routing.
+Early handoffs may be represented as provider-neutral tools inside `AgentSession`, but this refactor does not decide or build that behavior. Provider adapters must not know about handoffs or multi-agent routing.
+
+## Responsibility Split
 
 ### LanguageModel
 
@@ -153,13 +153,15 @@ Owns:
 - Agent event stream.
 - Stop/cancel/error behavior.
 
-Later owns:
+Future integration considerations:
 
-- Memory hooks.
-- Handoff tools.
+- Memory.
+- Handoffs.
 - Guardrails.
 - Tool approvals.
-- Multi-agent integration points.
+- Multi-agent orchestration.
+
+These are not implementation targets for this refactor. The only requirement is that this refactor should not put provider, tool-loop, or transcript responsibilities in places that would block those features later.
 
 Does not own:
 

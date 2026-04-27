@@ -372,7 +372,7 @@ Exit criteria:
 | Streaming tool calls | Provider stream parser + `AgentSession` loop |
 | Tool rejections | Tool engine + `AgentSession` |
 | `@SessionSchema` | Transcript/schema layer, both sessions |
-| Simulated sessions | Mock/new fake `LanguageModel` plus engine tests |
+| Simulated sessions | Migrated deterministic `SimulatedSession` provider plus focused engine test fakes where useful |
 
 ## Explicit Non-Goals
 

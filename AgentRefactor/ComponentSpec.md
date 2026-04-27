@@ -225,7 +225,7 @@ Stateful conversation API for direct LLM calls.
 
 ```swift
 @Observable
-public final class LanguageModelSession: Sendable {
+public final class LanguageModelSession: @unchecked Sendable {
   public var isResponding: Bool { get }
   public var transcript: Transcript { get }
   public var tokenUsage: TokenUsage? { get }
