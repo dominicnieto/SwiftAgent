@@ -203,6 +203,9 @@ struct OpenAIProviderReplayTests {
     let replay = ReplayHTTPClient<JSONValue>(recordedResponses: [
       .init(body: #"""
       event: response.output_item.added
+      data: {"type":"response.output_item.added","item":{"id":"rs_weather","type":"reasoning","summary":[{"text":"Need weather"}],"encrypted_content":"encrypted-reasoning"},"output_index":0}
+
+      event: response.output_item.added
       data: {"type":"response.output_item.added","item":{"id":"fc_weather","type":"function_call","status":"in_progress","arguments":"","call_id":"call_weather","name":"get_weather"},"output_index":0}
 
       event: response.function_call_arguments.delta
@@ -263,6 +266,27 @@ struct OpenAIProviderReplayTests {
       return false
     })
     #expect(session.tokenUsage?.totalTokens == 42)
+
+    let requests = await replay.recordedRequests()
+    guard requests.count == 2 else {
+      Issue.record("Expected two OpenAI Responses requests, got \(requests.count)")
+      return
+    }
+    guard case let .object(secondBody) = requests[1].body,
+      case let .array(input)? = secondBody["input"]
+    else {
+      Issue.record("Expected second OpenAI Responses request input")
+      return
+    }
+    #expect(input.containsJSONObject { object in
+      object["type"] == .string("reasoning") && object["id"] == .string("rs_weather")
+    })
+    #expect(input.containsJSONObject { object in
+      object["type"] == .string("function_call") && object["call_id"] == .string("call_weather")
+    })
+    #expect(input.containsJSONObject { object in
+      object["type"] == .string("function_call_output") && object["call_id"] == .string("call_weather")
+    })
   }
 
   @Test func openAIResponsesProviderStreamsReasoningSeparatelyFromText() async throws {

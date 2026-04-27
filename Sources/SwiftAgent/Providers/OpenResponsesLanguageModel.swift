@@ -462,6 +462,7 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
                         )
                         var accumulatedText = ""
                         var streamingToolCalls: [String: StreamingOpenResponsesToolCall] = [:]
+                        var continuationItems = OpenResponsesContinuationItemBuffer()
                         for try await event in events {
                             switch event {
                             case .outputTextDelta(let delta):
@@ -484,6 +485,7 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
                                     continuation.yield(.init(content: content, rawContent: raw))
                                 }
                             case .outputItemAdded(let item):
+                                continuationItems.record(item)
                                 switch item.type {
                                 case "function_call":
                                     if let name = item.name {
@@ -509,6 +511,7 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
                                 streamingToolCalls[itemID]?.arguments += delta
                             case .functionCallArgumentsDone(let itemID, let arguments):
                                 streamingToolCalls[itemID]?.arguments = arguments
+                                continuationItems.updateFunctionCallArguments(itemID: itemID, arguments: arguments)
                             case .completed(let response):
                                 if let usage = response?.usage?.tokenUsage {
                                     continuation.yield(.init(tokenUsage: usage))
@@ -546,7 +549,13 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
                             continuation.yield(.init(transcriptEntries: [.toolCalls(.init(calls: calls))]))
                             continuation.yield(.init(transcriptEntries: results.map { .toolOutput($0.output) }))
 
-                            for call in calls {
+                            let continuationRawItems = continuationItems.rawItems()
+                            let continuedCallIDs = continuationRawItems.functionCallIDs()
+                            for item in continuationRawItems {
+                                messages.append(OpenResponsesMessage(role: .raw(rawContent: item), content: .text("")))
+                            }
+
+                            for call in calls where !continuedCallIDs.contains(call.callId) {
                                 messages.append(OpenResponsesMessage(
                                     role: .raw(rawContent: .object([
                                         "type": .string("function_call"),
@@ -612,6 +621,7 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
                             modelID: model
                         )))
                         var streamingToolCalls: [String: StreamingOpenResponsesToolCall] = [:]
+                        var continuationItems = OpenResponsesContinuationItemBuffer()
 
                         for try await event in eventStream.events {
                             switch event {
@@ -619,6 +629,7 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
                                 continuation.yield(.textDelta(id: "open-responses-text", delta: delta))
 
                             case .outputItemAdded(let item):
+                                continuationItems.record(item)
                                 switch item.type {
                                 case "function_call":
                                     if let name = item.name {
@@ -655,6 +666,7 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
 
                             case .functionCallArgumentsDone(let itemID, let arguments):
                                 streamingToolCalls[itemID]?.arguments = arguments
+                                continuationItems.updateFunctionCallArguments(itemID: itemID, arguments: arguments)
                                 continuation.yield(.toolInputEnd(
                                     id: itemID,
                                     arguments: arguments.isEmpty ? GeneratedContent(properties: [:]) : try GeneratedContent(json: arguments)
@@ -702,7 +714,13 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
                                 continuation.yield(.toolResult(result.output))
                             }
 
-                            for call in calls {
+                            let continuationRawItems = continuationItems.rawItems()
+                            let continuedCallIDs = continuationRawItems.functionCallIDs()
+                            for item in continuationRawItems {
+                                messages.append(OpenResponsesMessage(role: .raw(rawContent: item), content: .text("")))
+                            }
+
+                            for call in calls where !continuedCallIDs.contains(call.callId) {
                                 messages.append(OpenResponsesMessage(
                                     role: .raw(rawContent: .object([
                                         "type": .string("function_call"),
@@ -1429,6 +1447,7 @@ private struct OpenResponsesOutputItem: Decodable, Sendable {
     let callID: String?
     let encryptedContent: String?
     let summary: JSONValue?
+    let rawItem: JSONValue
 
     var summaryText: [String] {
         guard let summary else { return [] }
@@ -1450,6 +1469,18 @@ private struct OpenResponsesOutputItem: Decodable, Sendable {
         }
     }
 
+    init(from decoder: Decoder) throws {
+        rawItem = try JSONValue(from: decoder)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        type = try container.decode(String.self, forKey: .type)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        arguments = try container.decodeIfPresent(String.self, forKey: .arguments)
+        callID = try container.decodeIfPresent(String.self, forKey: .callID)
+        encryptedContent = try container.decodeIfPresent(String.self, forKey: .encryptedContent)
+        summary = try container.decodeIfPresent(JSONValue.self, forKey: .summary)
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id
         case type
@@ -1458,6 +1489,50 @@ private struct OpenResponsesOutputItem: Decodable, Sendable {
         case callID = "call_id"
         case encryptedContent = "encrypted_content"
         case summary
+    }
+}
+
+private struct OpenResponsesContinuationItemBuffer: Sendable {
+    private var orderedIDs: [String] = []
+    private var itemsByID: [String: JSONValue] = [:]
+
+    mutating func record(_ item: OpenResponsesOutputItem) {
+        if itemsByID[item.id] == nil {
+            orderedIDs.append(item.id)
+        }
+        itemsByID[item.id] = item.rawItem
+    }
+
+    mutating func updateFunctionCallArguments(itemID: String, arguments: String) {
+        guard case .object(var object)? = itemsByID[itemID],
+            object.jsonString(forKey: "type") == "function_call"
+        else { return }
+
+        object["arguments"] = .string(arguments)
+        object["status"] = .string("completed")
+        itemsByID[itemID] = .object(object)
+    }
+
+    func rawItems() -> [JSONValue] {
+        orderedIDs.compactMap { itemsByID[$0] }
+    }
+}
+
+private extension [JSONValue] {
+    func functionCallIDs() -> Set<String> {
+        Set(compactMap { value in
+            guard case .object(let object) = value,
+                object.jsonString(forKey: "type") == "function_call"
+            else { return nil }
+            return object.jsonString(forKey: "call_id")
+        })
+    }
+}
+
+private extension [String: JSONValue] {
+    func jsonString(forKey key: String) -> String? {
+        guard case .string(let value)? = self[key] else { return nil }
+        return value
     }
 }
 
