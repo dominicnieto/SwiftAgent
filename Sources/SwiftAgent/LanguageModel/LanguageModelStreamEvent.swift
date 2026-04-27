@@ -1,7 +1,7 @@
 import Foundation
 
 /// A normalized warning emitted by a provider or the main session.
-public struct LanguageModelWarning: Sendable, Equatable {
+public struct LanguageModelWarning: Sendable, Equatable, Codable {
   public var code: String
   public var message: String
   public var providerMetadata: [String: JSONValue]
@@ -14,7 +14,7 @@ public struct LanguageModelWarning: Sendable, Equatable {
 }
 
 /// Rate-limit information normalized from provider response metadata.
-public struct RateLimitState: Sendable, Equatable {
+public struct RateLimitState: Sendable, Equatable, Codable {
   public var limit: Int?
   public var remaining: Int?
   public var resetAt: Date?
@@ -29,7 +29,7 @@ public struct RateLimitState: Sendable, Equatable {
 }
 
 /// Metadata reported for a provider response or stream.
-public struct ResponseMetadata: Sendable, Equatable {
+public struct ResponseMetadata: Sendable, Equatable, Codable {
   public var id: String?
   public var requestID: UUID?
   public var providerRequestID: String?
@@ -81,7 +81,7 @@ public extension ResponseMetadata {
 }
 
 /// Normalized reason a provider finished a generation.
-public enum FinishReason: Sendable, Equatable {
+public enum FinishReason: Sendable, Equatable, Codable {
   case completed
   case length
   case contentFilter
@@ -93,7 +93,7 @@ public enum FinishReason: Sendable, Equatable {
 }
 
 /// A normalized streaming failure with provider metadata preserved outside the transcript.
-public struct LanguageModelStreamError: Error, LocalizedError, Sendable, Equatable {
+public struct LanguageModelStreamError: Error, LocalizedError, Sendable, Equatable, Codable {
   public var code: String
   public var message: String
   public var providerMetadata: [String: JSONValue]

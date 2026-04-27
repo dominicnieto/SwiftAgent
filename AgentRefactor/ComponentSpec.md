@@ -48,12 +48,25 @@ public struct ModelRequest: Sendable {
   public var instructions: Instructions?
   public var tools: [ToolDefinition]
   public var toolChoice: ToolChoice?
-  public var responseFormat: ResponseFormat?
+  public var structuredOutput: StructuredOutputRequest?
   public var generationOptions: GenerationOptions
   public var continuation: ProviderContinuation?
   public var attachments: [ModelAttachment]
 }
 ```
+
+```swift
+public struct StructuredOutputRequest: Sendable, Equatable {
+  public var format: ResponseFormat
+  public var includeSchemaInPrompt: Bool
+}
+```
+
+`includeSchemaInPrompt` is request-building policy, not provider wire-format identity.
+`ModelRequestBuilder` should use it to decide whether schema instructions are injected into
+prompt messages before the provider serializes the neutral request. This preserves the current
+`LanguageModelSession.respond(... includeSchemaInPrompt:)` behavior while moving prompt construction
+out of providers.
 
 ```swift
 public enum ToolChoice: Sendable, Equatable {
@@ -90,7 +103,7 @@ Local tools are executed by `AgentSession` through SwiftAgent's tool execution r
 public struct ModelResponse: Sendable {
   public var content: GeneratedContent?
   public var transcriptEntries: [Transcript.Entry]
-  public var toolCalls: [Transcript.ToolCall]
+  public var toolCalls: [ModelToolCall]
   public var reasoning: [Transcript.Reasoning]
   public var finishReason: FinishReason
   public var tokenUsage: TokenUsage?
@@ -99,6 +112,18 @@ public struct ModelResponse: Sendable {
   public var rawProviderOutput: JSONValue?
 }
 ```
+
+```swift
+public struct ModelToolCall: Sendable, Equatable {
+  public var call: Transcript.ToolCall
+  public var kind: ToolDefinitionKind
+  public var providerMetadata: [String: JSONValue]
+}
+```
+
+Completed tool calls must preserve `ToolDefinitionKind`. `AgentSession` executes `.local`
+tool calls through SwiftAgent's tool runtime, but must not execute `.providerDefined` calls
+that were handled by provider/server-side tools.
 
 ```swift
 public enum ModelStreamEvent: Sendable, Equatable {
@@ -115,7 +140,7 @@ public enum ModelStreamEvent: Sendable, Equatable {
   case toolInputDelta(id: String, delta: String)
   case toolInputCompleted(id: String)
   case toolCallPartial(ToolCallPartial)
-  case toolCallsCompleted([Transcript.ToolCall], continuation: ProviderContinuation?)
+  case toolCallsCompleted([ModelToolCall], continuation: ProviderContinuation?)
   case providerToolResult(Transcript.ToolOutput)
   case source(ModelSource)
   case file(ModelFile)
@@ -149,7 +174,17 @@ package struct ProviderContinuation: Sendable, Codable, Equatable {
 }
 ```
 
-`ProviderContinuation` should stay package/internal because all supported providers live inside SwiftAgent. If it ever becomes public, document it as an advanced provider-authoring type, not an app-facing transcript feature.
+`ProviderContinuation` should stay package/internal if all supported providers live inside SwiftAgent.
+This is an API ownership decision, not a hard correctness rule. Before Phase 2 expands usage,
+choose one of these directions:
+
+- Public provider-authoring API: keep `LanguageModel`, `ModelRequest`, `ModelResponse`,
+  `ModelStreamEvent`, and `ProviderContinuation` public. Document `ProviderContinuation` as
+  advanced provider-authoring state, not as app-facing transcript data.
+- Internal provider API: make the neutral provider-turn contract package-scoped so
+  `ProviderContinuation` can also remain package/internal.
+- Opaque public state: keep request/response types public, but expose a public opaque wrapper
+  for continuation state so apps can carry it without inspecting provider-native payloads.
 
 The runtime stores it but does not interpret it.
 
@@ -220,7 +255,7 @@ package final class ConversationEngine: Sendable {
     tools: [any Tool],
     toolChoice: ToolChoice?,
     activeToolNames: Set<String>?,
-    responseFormat: ResponseFormat?,
+    structuredOutput: StructuredOutputRequest?,
     options: GenerationOptions,
     continuation: ProviderContinuation?
   ) throws -> ModelRequest

@@ -79,12 +79,13 @@ Tasks:
    - required
    - named tool
 7. Add `ToolDefinition` support for local SwiftAgent tools and provider-defined server-side tools.
-8. Add `ToolCallPartial` and tool-input lifecycle types if existing stream event types are insufficient.
-9. Add `ResponseFormat` if current structured output options need a clearer home.
-10. Define `LanguageModel.respond(to:)`.
-11. Define `LanguageModel.streamResponse(to:)`.
-12. Move provider availability/capabilities onto the new protocol.
-13. Expand `ModelStreamEvent` with a rich lifecycle taxonomy, using Vercel/Swift AI SDK as a reference:
+8. Add `ModelToolCall` so completed tool calls preserve `.local` vs `.providerDefined` execution ownership.
+9. Add `ToolCallPartial` and tool-input lifecycle types if existing stream event types are insufficient.
+10. Add `ResponseFormat` and `StructuredOutputRequest` so structured output carries both format and `includeSchemaInPrompt` request-building policy.
+11. Define `LanguageModel.respond(to:)`.
+12. Define `LanguageModel.streamResponse(to:)`.
+13. Move provider availability/capabilities onto the new protocol.
+14. Expand `ModelStreamEvent` with a rich lifecycle taxonomy, using Vercel/Swift AI SDK as a reference:
    - text start/delta/end
    - reasoning start/delta/end
    - tool input start/delta/end
