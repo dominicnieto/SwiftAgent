@@ -335,513 +335,222 @@ public struct AnthropicLanguageModel: EventStreamingLanguageModel, StreamingTool
         )
     }
 
-    public func respond<Content>(
-        within session: LanguageModelSession,
-        to prompt: Prompt,
-        generating type: Content.Type,
-        includeSchemaInPrompt: Bool,
-        options: GenerationOptions
-    ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
-        // Convert available tools to Anthropic format
-        let anthropicTools: [AnthropicTool] = try session.tools.map { tool in
-            try convertToolToAnthropicFormat(tool)
+    public func respond(to request: ModelRequest) async throws -> ModelResponse {
+        var params = try createMessageParams(
+            model: model,
+            system: request.instructions?.description,
+            messages: anthropicMessages(from: request),
+            tools: request.tools.isEmpty ? nil : try request.tools.map(anthropicToolDefinition),
+            responseSchema: try request.structuredOutput.map { try anthropicSchemaValue(from: $0.format) },
+            options: request.generationOptions
+        )
+        if let toolChoice = request.toolChoice {
+            params["tool_choice"] = anthropicToolChoiceJSON(toolChoice)
         }
 
-        let responseSchema = type == String.self ? nil : try convertSchemaToAnthropicFormat(Content.generationSchema)
-        var entries: [Transcript.Entry] = []
-        var messages = session.transcript.toAnthropicMessages()
-        var text = ""
-        var lastMetadata: ResponseMetadata?
-        var lastTokenUsage: TokenUsage?
-
-        while true {
-            let params = try createMessageParams(
-                model: model,
-                system: nil,
-                messages: messages,
-                tools: anthropicTools.isEmpty ? nil : anthropicTools,
-                responseSchema: responseSchema,
-                options: options
+        let httpResponse: HTTPClientDecodedResponse<AnthropicMessageResponse> = try await httpClient.sendResponse(
+            path: "v1/messages",
+            method: .post,
+            queryItems: nil,
+            headers: nil,
+            body: params,
+            responseType: AnthropicMessageResponse.self
+        )
+        let message = httpResponse.body
+        let metadata = ResponseMetadata
+            .providerHTTPMetadata(
+                requestID: httpResponse.requestID,
+                headers: httpResponse.headers,
+                providerName: "Anthropic"
             )
-
-            let httpResponse: HTTPClientDecodedResponse<AnthropicMessageResponse> = try await httpClient.sendResponse(
-                path: "v1/messages",
-                method: .post,
-                queryItems: nil,
-                headers: nil,
-                body: params,
-                responseType: AnthropicMessageResponse.self
-            )
-            let message = httpResponse.body
-
-            lastMetadata = ResponseMetadata
-                .providerHTTPMetadata(
-                    requestID: httpResponse.requestID,
-                    headers: httpResponse.headers,
-                    providerName: "Anthropic"
-                )
-                .merging(message.responseMetadata(providerName: "Anthropic"))
-            lastTokenUsage = message.usage?.tokenUsage
-
-            let toolUses: [AnthropicToolUse] = message.content.compactMap { block in
-                if case .toolUse(let u) = block { return u }
-                return nil
-            }
-
-            if !toolUses.isEmpty {
-                messages.append(AnthropicMessage(role: .assistant, content: message.content))
-
-                let resolution = try await resolveToolUses(toolUses, session: session)
-                switch resolution {
-                case .stop(let calls):
-                    if !calls.isEmpty {
-                        entries.append(.toolCalls(Transcript.ToolCalls(calls)))
-                    }
-                    let empty = try emptyResponseContent(for: type)
-                    return LanguageModelSession.Response(
-                        content: empty.content,
-                        rawContent: empty.rawContent,
-                        transcriptEntries: entries,
-                        tokenUsage: lastTokenUsage,
-                        responseMetadata: lastMetadata
-                    )
-                case .invocations(let invocations):
-                    if !invocations.isEmpty {
-                        entries.append(.toolCalls(Transcript.ToolCalls(invocations.map(\.call))))
-                        for invocation in invocations {
-                            entries.append(.toolOutput(invocation.output))
-                            messages.append(
-                                AnthropicMessage(
-                                    role: .user,
-                                    content: [
-                                        .toolResult(
-                                            AnthropicToolResult(
-                                                toolUseId: invocation.call.id,
-                                                content: convertSegmentsToAnthropicContent(invocation.output.segments)
-                                            )
-                                        )
-                                    ]
-                                )
-                            )
-                        }
-                        continue
-                    }
-                }
-            }
-
-            text = message.content.compactMap { block -> String? in
-                switch block {
-                case .text(let t): return t.text
-                default: return nil
-                }
-            }.joined()
-            break
+            .merging(message.responseMetadata(providerName: "Anthropic"))
+        let toolCalls = try message.content.compactMap { block -> ModelToolCall? in
+            guard case let .toolUse(toolUse) = block else { return nil }
+            return ModelToolCall(call: Transcript.ToolCall(
+                id: toolUse.id,
+                callId: toolUse.id,
+                toolName: toolUse.name,
+                arguments: try toGeneratedContent(toolUse.input),
+                status: .completed
+            ))
         }
+        let text = message.content.compactMap { block -> String? in
+            guard case let .text(text) = block else { return nil }
+            return text.text
+        }.joined()
+        let content = try anthropicGeneratedContent(text: text, structuredOutput: request.structuredOutput)
+        let continuation = try anthropicContinuation(
+            content: message.content,
+            responseID: message.id,
+            modelID: message.model
+        )
 
-        if type == String.self {
-            return LanguageModelSession.Response(
-                content: text as! Content,
-                rawContent: GeneratedContent(text),
-                transcriptEntries: entries,
-                tokenUsage: lastTokenUsage,
-                responseMetadata: lastMetadata
-            )
-        }
-
-        let rawContent = try GeneratedContent(json: text)
-        let content = try Content(rawContent)
-        return LanguageModelSession.Response(
+        return ModelResponse(
             content: content,
-            rawContent: rawContent,
-            transcriptEntries: entries,
-            tokenUsage: lastTokenUsage,
-            responseMetadata: lastMetadata
+            toolCalls: toolCalls,
+            finishReason: toolCalls.isEmpty ? anthropicFinishReason(message.stopReason) : .toolCalls,
+            tokenUsage: message.usage?.tokenUsage,
+            responseMetadata: metadata,
+            continuation: continuation,
+            rawProviderOutput: try? JSONValue(message.content)
         )
     }
 
-    public func streamResponse<Content>(
-        within session: LanguageModelSession,
-        to prompt: Prompt,
-        generating type: Content.Type,
-        includeSchemaInPrompt: Bool,
-        options: GenerationOptions
-    ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
-        let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> = .init {
-            continuation in
-            let task = Task { @Sendable in
-                do {
-                    // Convert available tools to Anthropic format
-                    let anthropicTools: [AnthropicTool] = try session.tools.map { tool in
-                        try convertToolToAnthropicFormat(tool)
-                    }
-
-                    let responseSchema =
-                        type == String.self ? nil : try convertSchemaToAnthropicFormat(Content.generationSchema)
-                    var messages = session.transcript.toAnthropicMessages()
-                    let expectsStructuredResponse = type != String.self
-
-                    while true {
-                        var params = try createMessageParams(
-                            model: model,
-                            system: nil,
-                            messages: messages,
-                            tools: anthropicTools.isEmpty ? nil : anthropicTools,
-                            responseSchema: responseSchema,
-                            options: options
-                        )
-                        params["stream"] = .bool(true)
-
-                        let eventStream = try await httpClient.decodedEventStreamResponse(
-                            path: "v1/messages",
-                            body: params,
-                            as: AnthropicStreamEvent.self
-                        )
-                        continuation.yield(.init(responseMetadata: ResponseMetadata.providerHTTPMetadata(
-                            requestID: eventStream.requestID,
-                            headers: eventStream.headers,
-                            providerName: "Anthropic",
-                            modelID: model
-                        )))
-
-                        var accumulatedText = ""
-                        var assistantContent: [AnthropicContent] = []
-                        var toolInputs: [Int: StreamingAnthropicToolInput] = [:]
-                        var reasoningSummaries: [Int: String] = [:]
-                        var stopReason: String?
-
-                        for try await event in eventStream.events {
-                            switch event {
-                            case .messageStart(let event):
-                                continuation.yield(.init(responseMetadata: event.message.responseMetadata(
-                                    providerName: "Anthropic"
-                                )))
-                                if let usage = event.message.usage?.tokenUsage {
-                                    continuation.yield(.init(tokenUsage: usage))
-                                }
-
-                            case .contentBlockStart(let event):
-                                switch event.contentBlock.type {
-                                case "tool_use":
-                                    if let id = event.contentBlock.id, let name = event.contentBlock.name {
-                                        toolInputs[event.index] = StreamingAnthropicToolInput(id: id, name: name)
-                                    }
-                                case "thinking":
-                                    let reasoning = Transcript.Reasoning(
-                                        id: "anthropic-thinking-\(event.index)",
-                                        summary: [],
-                                        encryptedReasoning: nil,
-                                        status: .inProgress
-                                    )
-                                    continuation.yield(.init(transcriptEntries: [.reasoning(reasoning)]))
-                                default:
-                                    break
-                                }
-
-                            case .contentBlockDelta(let delta):
-                                switch delta.delta {
-                                case .textDelta(let textDelta):
-                                    accumulatedText += textDelta.text
-
-                                    if expectsStructuredResponse {
-                                        if let snapshot: LanguageModelSession.ResponseStream<Content>.Snapshot =
-                                            try? partialSnapshot(from: accumulatedText)
-                                        {
-                                            continuation.yield(snapshot)
-                                        }
-                                    } else {
-                                        let raw = GeneratedContent(accumulatedText)
-                                        let content: Content.PartiallyGenerated = (accumulatedText as! Content)
-                                            .asPartiallyGenerated()
-                                        continuation.yield(.init(content: content, rawContent: raw))
-                                    }
-
-                                case .inputJsonDelta(let inputDelta):
-                                    toolInputs[delta.index]?.arguments += inputDelta.partialJson
-
-                                case .thinkingDelta(let thinkingDelta):
-                                    reasoningSummaries[delta.index, default: ""] += thinkingDelta.thinking
-                                    let reasoning = Transcript.Reasoning(
-                                        id: "anthropic-thinking-\(delta.index)",
-                                        summary: [reasoningSummaries[delta.index, default: ""]],
-                                        encryptedReasoning: nil,
-                                        status: .inProgress
-                                    )
-                                    continuation.yield(.init(transcriptEntries: [.reasoning(reasoning)]))
-
-                                case .signatureDelta(let signatureDelta):
-                                    let reasoning = Transcript.Reasoning(
-                                        id: "anthropic-thinking-\(delta.index)",
-                                        summary: reasoningSummaries[delta.index].map { [$0] } ?? [],
-                                        encryptedReasoning: signatureDelta.signature,
-                                        status: .completed
-                                    )
-                                    continuation.yield(.init(transcriptEntries: [.reasoning(reasoning)]))
-
-                                case .ignored:
-                                    break
-                                }
-
-                            case .contentBlockStop(let event):
-                                if let toolInput = toolInputs[event.index] {
-                                    let input = try toAnthropicToolInputObject(toolInput.arguments)
-                                    assistantContent.append(.toolUse(AnthropicToolUse(
-                                        id: toolInput.id,
-                                        name: toolInput.name,
-                                        input: input
-                                    )))
-                                }
-
-                            case .messageDelta(let event):
-                                stopReason = event.delta.stopReason
-                                if let usage = event.usage?.tokenUsage {
-                                    continuation.yield(.init(tokenUsage: usage))
-                                }
-
-                            case .messageStop:
-                                break
-
-                            case .ping, .ignored:
-                                break
-                            }
-                        }
-
-                        if !accumulatedText.isEmpty {
-                            assistantContent.append(.text(AnthropicText(text: accumulatedText)))
-                        }
-
-                        let toolUses = assistantContent.compactMap { block in
-                            if case .toolUse(let toolUse) = block { return toolUse }
-                            return nil
-                        }
-
-                        if stopReason == "tool_use", !toolUses.isEmpty {
-                            messages.append(AnthropicMessage(role: .assistant, content: assistantContent))
-
-                            let resolution = try await resolveToolUses(toolUses, session: session)
-                            switch resolution {
-                            case .stop(let calls):
-                                continuation.yield(.init(transcriptEntries: [.toolCalls(.init(calls: calls))]))
-                                continuation.finish()
-                                return
-                            case .invocations(let invocations):
-                                guard !invocations.isEmpty else {
-                                    continuation.finish()
-                                    return
-                                }
-
-                                let calls = invocations.map(\.call)
-                                let outputs = invocations.map(\.output)
-                                continuation.yield(.init(transcriptEntries: [.toolCalls(.init(calls: calls))]))
-                                continuation.yield(.init(transcriptEntries: outputs.map { .toolOutput($0) }))
-
-                                for invocation in invocations {
-                                    messages.append(
-                                        AnthropicMessage(
-                                            role: .user,
-                                            content: [
-                                                .toolResult(
-                                                    AnthropicToolResult(
-                                                        toolUseId: invocation.call.id,
-                                                        content: convertSegmentsToAnthropicContent(invocation.output.segments)
-                                                    )
-                                                )
-                                            ]
-                                        )
-                                    )
-                                }
-                                continue
-                            }
-                        }
-
-                        continuation.finish()
-                        return
-                    }
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
-
-        return LanguageModelSession.ResponseStream(stream: stream)
-    }
-
-    public func streamEvents<Content>(
-        within session: LanguageModelSession,
-        to prompt: Prompt,
-        generating type: Content.Type,
-        includeSchemaInPrompt: Bool,
-        options: GenerationOptions
-    ) -> AsyncThrowingStream<LanguageModelStreamEvent, any Error> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
+    public func streamResponse(to request: ModelRequest) -> AsyncThrowingStream<ModelStreamEvent, any Error> {
         AsyncThrowingStream { continuation in
-            let task = Task { @Sendable in
+            let task = Task {
                 do {
-                    let anthropicTools: [AnthropicTool] = try session.tools.map { tool in
-                        try convertToolToAnthropicFormat(tool)
+                    var params = try createMessageParams(
+                        model: model,
+                        system: request.instructions?.description,
+                        messages: anthropicMessages(from: request),
+                        tools: request.tools.isEmpty ? nil : try request.tools.map(anthropicToolDefinition),
+                        responseSchema: try request.structuredOutput.map { try anthropicSchemaValue(from: $0.format) },
+                        options: request.generationOptions
+                    )
+                    if let toolChoice = request.toolChoice {
+                        params["tool_choice"] = anthropicToolChoiceJSON(toolChoice)
                     }
-                    let responseSchema =
-                        type == String.self ? nil : try convertSchemaToAnthropicFormat(Content.generationSchema)
-                    var messages = session.transcript.toAnthropicMessages()
+                    params["stream"] = .bool(true)
 
-                    while true {
-                        var params = try createMessageParams(
-                            model: model,
-                            system: nil,
-                            messages: messages,
-                            tools: anthropicTools.isEmpty ? nil : anthropicTools,
-                            responseSchema: responseSchema,
-                            options: options
-                        )
-                        params["stream"] = .bool(true)
+                    let stream = try await httpClient.decodedEventStreamResponse(
+                        path: "v1/messages",
+                        body: params,
+                        as: AnthropicStreamEvent.self
+                    )
+                    continuation.yield(.started(ResponseMetadata.providerHTTPMetadata(
+                        requestID: stream.requestID,
+                        headers: stream.headers,
+                        providerName: "Anthropic",
+                        modelID: model
+                    )))
 
-                        let eventStream = try await httpClient.decodedEventStreamResponse(
-                            path: "v1/messages",
-                            body: params,
-                            as: AnthropicStreamEvent.self
-                        )
-                        continuation.yield(LanguageModelStreamEvent.responseMetadata(ResponseMetadata.providerHTTPMetadata(
-                            requestID: eventStream.requestID,
-                            headers: eventStream.headers,
-                            providerName: "Anthropic",
-                            modelID: model
-                        )))
+                    var currentTextByIndex: [Int: String] = [:]
+                    var currentToolByIndex: [Int: StreamingAnthropicToolInput] = [:]
+                    var thinkingByIndex: [Int: String] = [:]
+                    var contentBlocksByIndex: [Int: AnthropicContent] = [:]
+                    var messageID = UUID().uuidString
+                    var messageModel = model
+                    var latestFinishReason: FinishReason = .completed
 
-                        var accumulatedText = ""
-                        var assistantContent: [AnthropicContent] = []
-                        var toolInputs: [Int: StreamingAnthropicToolInput] = [:]
-                        var stopReason: String?
+                    for try await event in stream.events {
+                        switch event {
+                        case .messageStart(let start):
+                            messageID = start.message.id
+                            messageModel = start.message.model
+                            if let usage = start.message.usage?.tokenUsage {
+                                continuation.yield(.usage(usage))
+                            }
+                            continuation.yield(.metadata(start.message.responseMetadata(providerName: "Anthropic")))
 
-                        for try await event in eventStream.events {
-                            switch event {
-                            case .messageStart(let event):
-                                continuation.yield(.responseMetadata(event.message.responseMetadata(providerName: "Anthropic")))
-                                if let usage = event.message.usage?.tokenUsage {
-                                    continuation.yield(.usage(usage))
+                        case .contentBlockStart(let start):
+                            switch start.contentBlock.type {
+                            case "text":
+                                currentTextByIndex[start.index] = start.contentBlock.text ?? ""
+                                continuation.yield(.textStarted(id: "anthropic-text-\(start.index)", metadata: nil))
+                            case "tool_use":
+                                if let id = start.contentBlock.id, let name = start.contentBlock.name {
+                                    currentToolByIndex[start.index] = StreamingAnthropicToolInput(id: id, name: name)
+                                    continuation.yield(.toolInputStarted(.init(id: id, callId: id, toolName: name)))
                                 }
-
-                            case .contentBlockStart(let event):
-                                switch event.contentBlock.type {
-                                case "tool_use":
-                                    if let id = event.contentBlock.id, let name = event.contentBlock.name {
-                                        toolInputs[event.index] = StreamingAnthropicToolInput(id: id, name: name)
-                                        continuation.yield(.toolInputStart(id: id, callId: id, toolName: name))
-                                    }
-                                case "thinking":
-                                    continuation.yield(.reasoningStart(id: "anthropic-thinking-\(event.index)"))
-                                default:
-                                    break
-                                }
-
-                            case .contentBlockDelta(let delta):
-                                switch delta.delta {
-                                case .textDelta(let textDelta):
-                                    accumulatedText += textDelta.text
-                                    continuation.yield(.textDelta(id: "anthropic-text", delta: textDelta.text))
-
-                                case .inputJsonDelta(let inputDelta):
-                                    toolInputs[delta.index]?.arguments += inputDelta.partialJson
-                                    if let toolInput = toolInputs[delta.index] {
-                                        continuation.yield(.toolInputDelta(id: toolInput.id, delta: inputDelta.partialJson))
-                                    }
-
-                                case .thinkingDelta(let thinkingDelta):
-                                    continuation.yield(.reasoningDelta(
-                                        id: "anthropic-thinking-\(delta.index)",
-                                        delta: thinkingDelta.thinking
-                                    ))
-
-                                case .signatureDelta(let signatureDelta):
-                                    continuation.yield(.reasoningEnd(
-                                        id: "anthropic-thinking-\(delta.index)",
-                                        encryptedReasoning: signatureDelta.signature
-                                    ))
-
-                                case .ignored:
-                                    break
-                                }
-
-                            case .contentBlockStop(let event):
-                                if let toolInput = toolInputs[event.index] {
-                                    let input = try toAnthropicToolInputObject(toolInput.arguments)
-                                    assistantContent.append(.toolUse(AnthropicToolUse(
-                                        id: toolInput.id,
-                                        name: toolInput.name,
-                                        input: input
-                                    )))
-                                    continuation.yield(.toolInputEnd(id: toolInput.id, arguments: try toGeneratedContent(input)))
-                                }
-
-                            case .messageDelta(let event):
-                                stopReason = event.delta.stopReason
-                                if let usage = event.usage?.tokenUsage {
-                                    continuation.yield(.usage(usage))
-                                }
-
-                            case .messageStop:
-                                break
-
-                            case .ping, .ignored:
+                            case "thinking":
+                                thinkingByIndex[start.index] = ""
+                                continuation.yield(.reasoningStarted(id: "anthropic-thinking-\(start.index)", metadata: nil))
+                            default:
                                 break
                             }
-                        }
 
-                        if accumulatedText.isEmpty == false {
-                            assistantContent.append(.text(AnthropicText(text: accumulatedText)))
-                        }
-
-                        let toolUses = assistantContent.compactMap { block in
-                            if case .toolUse(let toolUse) = block { return toolUse }
-                            return nil
-                        }
-
-                        if stopReason == "tool_use", toolUses.isEmpty == false {
-                            messages.append(AnthropicMessage(role: .assistant, content: assistantContent))
-
-                            let resolution = try await resolveToolUses(toolUses, session: session)
-                            switch resolution {
-                            case .stop:
-                                continuation.yield(.finished(.toolCalls))
-                                continuation.finish()
-                                return
-
-                            case .invocations(let invocations):
-                                guard invocations.isEmpty == false else {
-                                    continuation.yield(.finished(.completed))
-                                    continuation.finish()
-                                    return
+                        case .contentBlockDelta(let delta):
+                            switch delta.delta {
+                            case .textDelta(let textDelta):
+                                currentTextByIndex[delta.index, default: ""] += textDelta.text
+                                if request.structuredOutput != nil,
+                                    let content = try? GeneratedContent(json: currentTextByIndex[delta.index] ?? "")
+                                {
+                                    continuation.yield(.structuredDelta(id: "anthropic-structured-\(delta.index)", delta: content))
+                                } else {
+                                    continuation.yield(.textDelta(id: "anthropic-text-\(delta.index)", delta: textDelta.text))
                                 }
-
-                                for invocation in invocations {
-                                    continuation.yield(.toolResult(invocation.output))
-                                    messages.append(
-                                        AnthropicMessage(
-                                            role: .user,
-                                            content: [
-                                                .toolResult(
-                                                    AnthropicToolResult(
-                                                        toolUseId: invocation.call.id,
-                                                        content: convertSegmentsToAnthropicContent(invocation.output.segments)
-                                                    )
-                                                )
-                                            ]
-                                        )
-                                    )
+                            case .inputJsonDelta(let inputDelta):
+                                currentToolByIndex[delta.index]?.arguments += inputDelta.partialJson
+                                if let tool = currentToolByIndex[delta.index] {
+                                    continuation.yield(.toolInputDelta(id: tool.id, delta: inputDelta.partialJson))
                                 }
-                                continue
+                            case .thinkingDelta(let thinking):
+                                thinkingByIndex[delta.index, default: ""] += thinking.thinking
+                                continuation.yield(.reasoningDelta(id: "anthropic-thinking-\(delta.index)", delta: thinking.thinking))
+                            case .signatureDelta(let signature):
+                                continuation.yield(.reasoningCompleted(Transcript.Reasoning(
+                                    id: "anthropic-thinking-\(delta.index)",
+                                    summary: [thinkingByIndex[delta.index] ?? ""],
+                                    encryptedReasoning: signature.signature,
+                                    status: .completed
+                                )))
+                            case .ignored:
+                                break
                             }
-                        }
 
-                        continuation.yield(.finished(.completed))
-                        continuation.finish()
-                        return
+                        case .contentBlockStop(let stop):
+                            if let text = currentTextByIndex[stop.index] {
+                                contentBlocksByIndex[stop.index] = .text(AnthropicText(text: text))
+                                continuation.yield(.textCompleted(id: "anthropic-text-\(stop.index)", metadata: nil))
+                            }
+                            if let tool = currentToolByIndex[stop.index] {
+                                let arguments = try GeneratedContent(json: tool.arguments.isEmpty ? "{}" : tool.arguments)
+                                let call = Transcript.ToolCall(
+                                    id: tool.id,
+                                    callId: tool.id,
+                                    toolName: tool.name,
+                                    arguments: arguments,
+                                    status: .completed
+                                )
+                                contentBlocksByIndex[stop.index] = .toolUse(AnthropicToolUse(
+                                    id: tool.id,
+                                    name: tool.name,
+                                    input: try fromGeneratedContent(arguments)
+                                ))
+                                continuation.yield(.toolInputCompleted(id: tool.id))
+                                let providerContinuation = try anthropicContinuation(
+                                    content: contentBlocksByIndex.sorted { $0.key < $1.key }.map(\.value),
+                                    responseID: messageID,
+                                    modelID: messageModel
+                                )
+                                continuation.yield(.toolCallsCompleted([ModelToolCall(call: call)], continuation: providerContinuation))
+                            }
+
+                        case .messageDelta(let delta):
+                            if let usage = delta.usage?.tokenUsage {
+                                continuation.yield(.usage(usage))
+                            }
+                            latestFinishReason = anthropicFinishReason(delta.delta.stopReason)
+
+                        case .messageStop:
+                            let providerContinuation = try anthropicContinuation(
+                                content: contentBlocksByIndex.sorted { $0.key < $1.key }.map(\.value),
+                                responseID: messageID,
+                                modelID: messageModel
+                            )
+                            continuation.yield(.completed(.init(
+                                finishReason: latestFinishReason,
+                                continuation: providerContinuation
+                            )))
+                            continuation.finish()
+                            return
+
+                        case .ping, .ignored:
+                            break
+                        }
                     }
+                    continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
                 }
             }
+
             continuation.onTermination = { _ in task.cancel() }
         }
     }
+
 
 }
 
@@ -945,88 +654,21 @@ private func createMessageParams(
     return params
 }
 
-// MARK: - Tool Invocation Handling
-
-private struct ToolInvocationResult {
-    let call: Transcript.ToolCall
-    let output: Transcript.ToolOutput
-}
-
-private enum ToolResolutionOutcome {
-    case stop(calls: [Transcript.ToolCall])
-    case invocations([ToolInvocationResult])
-}
-
-private func emptyResponseContent<Content: Generable>(
-    for type: Content.Type
-) throws -> (content: Content, rawContent: GeneratedContent) {
-    if type == String.self {
-        let raw = GeneratedContent("")
-        return ("" as! Content, raw)
-    }
-
-    let emptyObject = GeneratedContent(properties: [:])
-    if let content = try? Content(emptyObject) {
-        return (content, emptyObject)
-    }
-
-    let nullContent = GeneratedContent(kind: .null)
-    if let content = try? Content(nullContent) {
-        return (content, nullContent)
-    }
-
-    throw GeneratedContentConversionError.typeMismatch
-}
-
-private func partialSnapshot<Content: Generable>(
-    from accumulatedText: String
-) throws -> LanguageModelSession.ResponseStream<Content>.Snapshot {
-    guard let partial = partialStructuredGeneration(from: accumulatedText, as: Content.self) else {
-        throw GeneratedContentConversionError.typeMismatch
-    }
-    return .init(content: partial.content, rawContent: partial.rawContent)
-}
-
+// Convert our GenerationSchema into Anthropic's expected JSON Schema payload
 private func convertSchemaToAnthropicFormat(_ schema: GenerationSchema) throws -> JSONSchema {
     let resolvedSchema = schema.withResolvedRoot() ?? schema
     let data = try JSONEncoder().encode(resolvedSchema)
     return try JSONDecoder().decode(JSONSchema.self, from: data)
 }
 
-private func resolveToolUses(
-    _ toolUses: [AnthropicToolUse],
-    session: LanguageModelSession
-) async throws -> ToolResolutionOutcome {
-    if toolUses.isEmpty { return .invocations([]) }
-
-    var transcriptCalls: [Transcript.ToolCall] = []
-    transcriptCalls.reserveCapacity(toolUses.count)
-    for use in toolUses {
-        let args = try toGeneratedContent(use.input)
-        let callID = use.id
-        transcriptCalls.append(
-            Transcript.ToolCall(
-                id: callID,
-                toolName: use.name,
-                arguments: args
-            )
-        )
-    }
-
-    guard !transcriptCalls.isEmpty else { return .invocations([]) }
-
-    switch try await session.executeToolCalls(transcriptCalls, recordTranscript: false) {
-    case .stop(let calls):
-        return .stop(calls: calls)
-    case .outputs(let results):
-        return .invocations(results.map { ToolInvocationResult(call: $0.call, output: $0.output) })
-    }
-}
-
-// Convert our GenerationSchema into Anthropic's expected JSON Schema payload
 private func convertToolToAnthropicFormat(_ tool: any Tool) throws -> AnthropicTool {
     let schema = try convertSchemaToAnthropicFormat(tool.parameters)
     return AnthropicTool(name: tool.name, description: tool.description, inputSchema: schema)
+}
+
+private func anthropicToolDefinition(_ definition: ToolDefinition) throws -> AnthropicTool {
+    let schema = try convertSchemaToAnthropicFormat(definition.schema)
+    return AnthropicTool(name: definition.name, description: definition.description ?? "", inputSchema: schema)
 }
 
 private func toGeneratedContent(_ value: [String: JSONValue]?) throws -> GeneratedContent {
@@ -1044,6 +686,85 @@ private func fromGeneratedContent(_ content: GeneratedContent) throws -> [String
         return [:]
     }
     return dict
+}
+
+private func anthropicGeneratedContent(text: String, structuredOutput: StructuredOutputRequest?) throws -> GeneratedContent {
+    guard structuredOutput != nil else {
+        return GeneratedContent(text)
+    }
+    return try GeneratedContent(json: text)
+}
+
+private func anthropicFinishReason(_ stopReason: AnthropicMessageResponse.StopReason?) -> FinishReason {
+    guard let stopReason else { return .completed }
+    switch stopReason {
+    case .endTurn:
+        return .completed
+    case .maxTokens:
+        return .length
+    case .stopSequence:
+        return .stopSequence
+    case .toolUse:
+        return .toolCalls
+    case .refusal:
+        return .contentFilter
+    case .modelContextWindowExceeded:
+        return .length
+    case .pauseTurn:
+        return .unknown("pause_turn")
+    }
+}
+
+private func anthropicFinishReason(_ stopReason: String?) -> FinishReason {
+    guard let stopReason else { return .completed }
+    return anthropicFinishReason(AnthropicMessageResponse.StopReason(rawValue: stopReason))
+}
+
+private func anthropicContinuation(
+    content: [AnthropicContent],
+    responseID: String,
+    modelID: String
+) throws -> ProviderContinuation? {
+    guard content.isEmpty == false else { return nil }
+    return ProviderContinuation(
+        providerName: "Anthropic",
+        modelID: modelID,
+        turnID: responseID,
+        payload: .object(["content": try JSONValue(content)])
+    )
+}
+
+private func anthropicContinuationContent(from continuation: ProviderContinuation?) -> [AnthropicContent] {
+    guard let continuation,
+        continuation.providerName == "Anthropic",
+        case let .object(payload) = continuation.payload,
+        let value = payload["content"],
+        let data = try? JSONEncoder().encode(value),
+        let content = try? JSONDecoder().decode([AnthropicContent].self, from: data)
+    else { return [] }
+    return content
+}
+
+private func anthropicSchemaValue(from format: ResponseFormat) throws -> JSONSchema {
+    switch format {
+    case .text:
+        return try convertSchemaToAnthropicFormat(GeneratedContent.generationSchema)
+    case .jsonSchema(_, let schema, _), .generatedContent(_, let schema, _):
+        return try convertSchemaToAnthropicFormat(schema)
+    }
+}
+
+private func anthropicToolChoiceJSON(_ choice: ToolChoice) -> JSONValue {
+    switch choice {
+    case .automatic:
+        .object(["type": .string("auto")])
+    case .none:
+        .object(["type": .string("none")])
+    case .required:
+        .object(["type": .string("any")])
+    case .named(let name):
+        .object(["type": .string("tool"), "name": .string(name)])
+    }
 }
 
 // MARK: - Supporting Types
@@ -1115,6 +836,57 @@ extension Transcript {
     }
 }
 
+private func anthropicMessages(from request: ModelRequest) -> [AnthropicMessage] {
+    var messages: [AnthropicMessage] = []
+    let continuationContent = anthropicContinuationContent(from: request.continuation)
+
+    for message in request.messages {
+        switch message.role {
+        case .system:
+            continue
+        case .user:
+            messages.append(.init(role: .user, content: convertSegmentsToAnthropicContent(message.segments)))
+        case .assistant:
+            if continuationContent.isEmpty == false,
+                message.providerMetadata["tool_calls"] != nil
+            {
+                continue
+            }
+            let content = convertSegmentsToAnthropicContent(message.segments)
+            if content.isEmpty == false {
+                messages.append(.init(role: .assistant, content: content))
+            }
+        case .tool:
+            let toolUseID: String
+            if case let .string(callID)? = message.providerMetadata["call_id"] {
+                toolUseID = callID
+            } else {
+                toolUseID = UUID().uuidString
+            }
+            messages.append(.init(
+                role: .user,
+                content: [.toolResult(AnthropicToolResult(
+                    toolUseId: toolUseID,
+                    content: convertSegmentsToAnthropicContent(message.segments)
+                ))]
+            ))
+        case .providerDefined:
+            break
+        }
+    }
+
+    if continuationContent.isEmpty == false {
+        var continued: [AnthropicMessage] = []
+        let leadingUserMessages = messages.filter { $0.role == .user && !$0.content.containsToolResult }
+        continued.append(contentsOf: leadingUserMessages)
+        continued.append(.init(role: .assistant, content: continuationContent))
+        continued.append(contentsOf: messages.filter { $0.role == .user && $0.content.containsToolResult })
+        return continued
+    }
+
+    return messages
+}
+
 private struct AnthropicTool: Codable, Sendable {
     let name: String
     let description: String
@@ -1167,6 +939,17 @@ private enum AnthropicContent: Codable, Sendable {
         case .image(let i): try i.encode(to: encoder)
         case .toolUse(let u): try u.encode(to: encoder)
         case .toolResult(let r): try r.encode(to: encoder)
+        }
+    }
+}
+
+private extension [AnthropicContent] {
+    var containsToolResult: Bool {
+        contains { content in
+            if case .toolResult = content {
+                return true
+            }
+            return false
         }
     }
 }

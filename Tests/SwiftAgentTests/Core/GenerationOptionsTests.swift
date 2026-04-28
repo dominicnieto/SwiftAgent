@@ -102,7 +102,7 @@ struct LanguageModelSessionTests {
       snapshots.append(snapshot)
     }
 
-    #expect(snapshots.count == 3)
+    #expect(snapshots.count == 5)
     #expect(snapshots.first?.content == "Hel")
     #expect(snapshots.last?.content == "Hello")
     #expect(snapshots.last?.transcript.entries.count == 2)
@@ -134,56 +134,37 @@ private struct MockLanguageModel: LanguageModel {
     self.responseProvider = responseProvider
   }
 
-  func respond<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) async throws -> LanguageModelSession.Response<Content> where Content: Generable & Sendable {
-    _ = session
-    _ = includeSchemaInPrompt
-
-    let text = try await responseProvider(prompt, options)
-    let content = try #require(text as? Content)
-
-    return LanguageModelSession.Response(
-      content: content,
-      rawContent: GeneratedContent(text),
+  func respond(to request: ModelRequest) async throws -> ModelResponse {
+    let prompt = Prompt(request.messages.last?.segments.compactMap { segment in
+      if case let .text(text) = segment {
+        return text.content
+      }
+      return nil
+    }.joined(separator: "\n") ?? "")
+    let text = try await responseProvider(prompt, request.generationOptions)
+    return ModelResponse(
+      content: GeneratedContent(text),
+      finishReason: .completed,
       tokenUsage: TokenUsage(inputTokens: 1, outputTokens: 2, totalTokens: 3),
     )
   }
 
-  func streamResponse<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
-    _ = session
-    _ = prompt
-    _ = type
-    _ = includeSchemaInPrompt
-    _ = options
-
+  func streamResponse(to request: ModelRequest) -> AsyncThrowingStream<ModelStreamEvent, any Error> {
     let streamedText = streamedText
-    let stream = AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> { continuation in
-      Task {
-        for text in streamedText {
-          let content = text as? Content.PartiallyGenerated
-          continuation.yield(.init(
-            content: content,
-            rawContent: GeneratedContent(text),
-            tokenUsage: TokenUsage(outputTokens: 1),
-          ))
-        }
-        continuation.finish()
+    return AsyncThrowingStream { continuation in
+      var previous = ""
+      for text in streamedText {
+        let delta = text.hasPrefix(previous) ? String(text.dropFirst(previous.count)) : text
+        previous = text
+        continuation.yield(.textDelta(id: "mock-text", delta: delta))
+        continuation.yield(.usage(TokenUsage(outputTokens: 1)))
       }
+      continuation.yield(.completed(.init(finishReason: .completed)))
+      continuation.finish()
     }
-
-    return LanguageModelSession.ResponseStream(stream: stream)
   }
+
+
 }
 
 private struct OtherMockLanguageModel: LanguageModel {
@@ -191,33 +172,5 @@ private struct OtherMockLanguageModel: LanguageModel {
     var flag: Bool
   }
 
-  func respond<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) async throws -> LanguageModelSession.Response<Content> where Content: Generable & Sendable {
-    _ = session
-    _ = prompt
-    _ = type
-    _ = includeSchemaInPrompt
-    _ = options
-    throw LanguageModelSession.GenerationError.decodingFailure(.init(debugDescription: "Not implemented"))
-  }
 
-  func streamResponse<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
-    _ = session
-    _ = prompt
-    _ = type
-    _ = includeSchemaInPrompt
-    _ = options
-    return LanguageModelSession.ResponseStream(stream: AsyncThrowingStream { $0.finish() })
-  }
 }

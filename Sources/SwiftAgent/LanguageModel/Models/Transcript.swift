@@ -32,7 +32,7 @@ public struct Transcript: Sendable, Equatable, Codable {
   /// - Parameters:
   ///   - schema: The session schema to use to resolve the transcript.
   /// - Returns: The resolved transcript.
-  public func resolved<SessionSchema: LanguageModelSessionSchema>(
+  public func resolved<SessionSchema: TranscriptSchema>(
     using schema: SessionSchema,
   ) throws -> SessionSchema.Transcript {
     let resolver = TranscriptResolver(for: schema)

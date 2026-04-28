@@ -73,13 +73,13 @@ public enum ReadmeCode {
   func sessionSchemaToolResolution() async throws {
     let schema = SessionSchema()
     let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
-    let session = LanguageModelSession(
+    let session = AgentSession(
       model: model,
-      tools: [schema.weatherTool],
+      schema: schema,
       instructions: "You are a helpful assistant.",
     )
 
-    _ = try await session.respond(to: "What's the weather like in San Francisco?")
+    _ = try await session.run(to: "What's the weather like in San Francisco?")
 
     for entry in try schema.resolve(session.transcript) {
       guard case let .toolRun(toolRun) = entry else {
@@ -106,6 +106,7 @@ public enum ReadmeCode {
     let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
     let session = LanguageModelSession(
       model: model,
+      schema: schema,
       instructions: "Return accurate weather reports.",
     )
 

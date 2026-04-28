@@ -12,7 +12,7 @@ public extension Transcript {
   /// Use ``Transcript/resolved(using:)`` to obtain this type and display it in your app. The resolved
   /// view stays lightweight: it preserves ordering, streaming identifiers, and even resolution errors
   /// when resolving fails so you can surface them to the user.
-  struct Resolved<SessionSchema: LanguageModelSessionSchema>: Equatable, Sendable {
+  struct Resolved<SessionSchema: TranscriptSchema>: Equatable, Sendable {
     /// Ordered transcript entries with schema-backed values.
     public package(set) var entries: [Entry]
 

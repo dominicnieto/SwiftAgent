@@ -23,56 +23,17 @@ struct LanguageModelSessionStreamingTests {
 private struct BurstStreamingLanguageModel: EventStreamingLanguageModel {
   typealias UnavailableReason = Never
 
-  func respond<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) async throws -> LanguageModelSession.Response<Content> where Content: Generable & Sendable {
-    _ = session
-    _ = prompt
-    _ = type
-    _ = includeSchemaInPrompt
-    _ = options
-    throw LanguageModelSession.GenerationError.decodingFailure(.init(debugDescription: "Streaming-only test model"))
-  }
-
-  func streamResponse<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) -> sending LanguageModelSession.ResponseStream<Content>
-    where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
-    _ = session
-    _ = prompt
-    _ = type
-    _ = includeSchemaInPrompt
-    _ = options
-    return LanguageModelSession.ResponseStream(stream: AsyncThrowingStream { $0.finish() })
-  }
-
-  func streamEvents<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) -> AsyncThrowingStream<LanguageModelStreamEvent, any Error>
-    where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
-    _ = session
-    _ = prompt
-    _ = type
-    _ = includeSchemaInPrompt
-    _ = options
+  func streamResponse(to request: ModelRequest) -> AsyncThrowingStream<ModelStreamEvent, any Error> {
+    _ = request
     return AsyncThrowingStream { continuation in
       continuation.yield(.textDelta(id: "text", delta: "A"))
       continuation.yield(.textDelta(id: "text", delta: "B"))
       continuation.yield(.textDelta(id: "text", delta: "C"))
-      continuation.yield(.finished(.completed))
+      continuation.yield(.completed(.init(finishReason: .completed)))
       continuation.finish()
     }
   }
+
+
+
 }

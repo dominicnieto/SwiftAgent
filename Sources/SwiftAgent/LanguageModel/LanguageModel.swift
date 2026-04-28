@@ -25,49 +25,16 @@ public protocol LanguageModel: Sendable {
 
   /// Builds an attachment that can be sent to the provider's feedback endpoint.
   func logFeedbackAttachment(_ request: FeedbackAttachmentRequest) -> Data
-
-  /// Prepares the model for an upcoming prompt prefix when the provider supports prewarming.
-  func prewarm(for session: LanguageModelSession, promptPrefix: Prompt?)
-
-  /// Generates one complete response.
-  func respond<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) async throws -> LanguageModelSession.Response<Content> where Content: Generable & Sendable
-
-  /// Streams a response as provider updates arrive.
-  func streamResponse<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) -> sending LanguageModelSession.ResponseStream<Content>
-    where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable
-
-  /// Builds an attachment that can be sent to the provider's feedback endpoint.
-  func logFeedbackAttachment(
-    within session: LanguageModelSession,
-    sentiment: LanguageModelFeedback.Sentiment?,
-    issues: [LanguageModelFeedback.Issue],
-    desiredOutput: Transcript.Entry?,
-  ) -> Data
 }
 
-/// Error used by compatibility defaults while providers migrate to the neutral turn contract.
+/// Error used when a model omits the neutral turn contract.
 public enum LanguageModelContractError: Error, LocalizedError, Sendable, Equatable {
   case neutralTurnNotImplemented(modelType: String)
-  case sessionTurnNotImplemented(modelType: String)
 
   public var errorDescription: String? {
     switch self {
     case let .neutralTurnNotImplemented(modelType):
       "\(modelType) has not implemented the neutral model-turn API."
-    case let .sessionTurnNotImplemented(modelType):
-      "\(modelType) has not implemented the legacy session-shaped API."
     }
   }
 }
@@ -110,26 +77,6 @@ public extension LanguageModel {
   /// Default empty feedback attachment implementation for neutral requests.
   func logFeedbackAttachment(_ request: FeedbackAttachmentRequest) -> Data {
     _ = request
-    return Data()
-  }
-
-  /// Default no-op prewarm implementation.
-  func prewarm(for session: LanguageModelSession, promptPrefix: Prompt? = nil) {
-    _ = session
-    _ = promptPrefix
-  }
-
-  /// Default empty feedback attachment implementation.
-  func logFeedbackAttachment(
-    within session: LanguageModelSession,
-    sentiment: LanguageModelFeedback.Sentiment? = nil,
-    issues: [LanguageModelFeedback.Issue] = [],
-    desiredOutput: Transcript.Entry? = nil,
-  ) -> Data {
-    _ = session
-    _ = sentiment
-    _ = issues
-    _ = desiredOutput
     return Data()
   }
 }

@@ -15,7 +15,7 @@ enum AnthropicStreamingToolCallsWeatherScenario {
         model: AnthropicRecordingModel.model,
         httpClient: AnthropicRecordingHTTPClient.make(apiKey: apiKey, recorder: recorder),
       )
-      let session = LanguageModelSession(
+      let session = AgentSession(
         model: model,
         tools: [WeatherTool()],
         instructions: """
@@ -26,7 +26,7 @@ enum AnthropicStreamingToolCallsWeatherScenario {
         """,
       )
 
-      let stream = session.streamResponse(to: "Weather update")
+      let stream = session.stream(to: "Weather update")
 
       for try await _ in stream {}
     },

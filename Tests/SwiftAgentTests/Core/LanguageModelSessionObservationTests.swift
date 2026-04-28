@@ -119,58 +119,29 @@ private struct ObservationLanguageModel: LanguageModel {
     self.streamDelay = streamDelay
   }
 
-  func respond<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) async throws -> LanguageModelSession.Response<Content> where Content: Generable & Sendable {
-    _ = session
-    _ = prompt
-    _ = type
-    _ = includeSchemaInPrompt
-    _ = options
-
+  func respond(to request: ModelRequest) async throws -> ModelResponse {
+    _ = request
     if let responseDelay {
       try await Task.sleep(for: responseDelay)
     }
-
-    let text = "Observed"
-    let content = try #require(text as? Content)
-    return LanguageModelSession.Response(content: content, rawContent: GeneratedContent(text))
+    return ModelResponse(content: GeneratedContent("Observed"), finishReason: .completed)
   }
 
-  func streamResponse<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
-    _ = session
-    _ = prompt
-    _ = type
-    _ = includeSchemaInPrompt
-    _ = options
-
+  func streamResponse(to request: ModelRequest) -> AsyncThrowingStream<ModelStreamEvent, any Error> {
+    _ = request
     let streamDelay = streamDelay
-    let stream = AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> { continuation in
+    return AsyncThrowingStream { continuation in
       let task = Task {
         if let streamDelay {
           try await Task.sleep(for: streamDelay)
         }
-
-        let text = "Observed"
-        continuation.yield(.init(
-          content: (text as? Content)?.asPartiallyGenerated(),
-          rawContent: GeneratedContent(text),
-        ))
+        continuation.yield(.textDelta(id: "observation-text", delta: "Observed"))
+        continuation.yield(.completed(.init(finishReason: .completed)))
         continuation.finish()
       }
       continuation.onTermination = { _ in task.cancel() }
     }
-
-    return LanguageModelSession.ResponseStream(stream: stream)
   }
+
+
 }

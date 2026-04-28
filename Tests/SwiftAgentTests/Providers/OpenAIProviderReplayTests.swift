@@ -236,27 +236,30 @@ struct OpenAIProviderReplayTests {
       apiVariant: .responses,
       httpClient: replay,
     )
-    let session = LanguageModelSession(
+    let session = AgentSession(
       model: model,
       tools: [WeatherTool()],
-      toolExecutionPolicy: .init(allowsParallelExecution: false),
+      configuration: .init(toolExecutionPolicy: .init(allowsParallelExecution: false)),
     )
 
     var sawPartialArgumentsBeforeOutput = false
     var sawToolOutput = false
-    for try await snapshot in session.streamResponse(
-      to: "What is the weather?",
+    for try await event in session.stream(
+      to: Prompt("What is the weather?"),
       options: GenerationOptions(minimumStreamingSnapshotInterval: .zero),
     ) {
-      for entry in snapshot.transcript.entries {
-        if case .toolOutput = entry {
-          sawToolOutput = true
-        }
-        if case let .toolCalls(toolCalls) = entry,
-           toolCalls.calls.contains(where: { $0.partialArguments?.contains(#""Spokane""#) == true }),
-           sawToolOutput == false {
-          sawPartialArgumentsBeforeOutput = true
-        }
+      if case let .toolInputDelta(_, delta) = event,
+         delta.contains("Spokane"),
+         sawToolOutput == false {
+        sawPartialArgumentsBeforeOutput = true
+      }
+      if case let .toolInputStarted(call) = event,
+         call.partialArguments?.contains("Spokane") == true,
+         sawToolOutput == false {
+        sawPartialArgumentsBeforeOutput = true
+      }
+      if case .toolOutput = event {
+        sawToolOutput = true
       }
     }
 
@@ -363,7 +366,7 @@ struct OpenAIProviderReplayTests {
     #expect(response.responseMetadata?.rateLimits["requests"]?.retryAfter == 2)
   }
 
-  @Test func openAIRefusalThrowsSessionGenerationError() async throws {
+  @Test func openAIRefusalThrowsGenerationError() async throws {
     let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(body: """
     {
       "id": "chatcmpl_refusal",
@@ -392,13 +395,12 @@ struct OpenAIProviderReplayTests {
     do {
       _ = try await session.respond(to: "Refuse")
       Issue.record("Expected OpenAI refusal to throw")
-    } catch let error as LanguageModelSession.GenerationError {
-      guard case let .refusal(refusal, _) = error else {
+    } catch let error as GenerationError {
+      guard case let .contentRefusal(context) = error else {
         Issue.record("Expected refusal error, got \(error)")
         return
       }
-      let explanation = try await refusal.explanation
-      #expect(explanation.content == "I cannot help with that.")
+      #expect(context.reason == "I cannot help with that.")
     }
   }
 

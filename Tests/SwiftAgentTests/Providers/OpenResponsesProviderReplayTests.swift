@@ -170,7 +170,7 @@ struct OpenResponsesProviderReplayTests {
     #expect(body["text"] != nil)
   }
 
-  @Test func openResponsesProviderStreamsToolCallsThroughMainSessionPolicy() async throws {
+  @Test func openResponsesProviderStreamsToolCallsThroughAgentSessionPolicy() async throws {
     let replay = ReplayHTTPClient<JSONValue>(recordedResponses: [
       .init(body: #"""
       event: response.output_item.added
@@ -207,26 +207,26 @@ struct OpenResponsesProviderReplayTests {
       model: "openai/gpt-test",
       httpClient: replay,
     )
-    let session = LanguageModelSession(model: model, tools: [WeatherTool()])
+    let session = AgentSession(model: model, tools: [WeatherTool()])
 
-    var finalContent: String?
+    var didFinish = false
     var sawPartialArgumentsBeforeOutput = false
     var sawToolOutput = false
-    for try await snapshot in session.streamResponse(to: "What is the weather?") {
-      finalContent = snapshot.content ?? finalContent
-      for entry in snapshot.transcript.entries {
-        if case .toolOutput = entry {
-          sawToolOutput = true
-        }
-        if case let .toolCalls(toolCalls) = entry,
-           toolCalls.calls.contains(where: { $0.partialArguments?.contains(#""Spokane""#) == true }),
-           sawToolOutput == false {
-          sawPartialArgumentsBeforeOutput = true
-        }
+    for try await event in session.stream(to: Prompt("What is the weather?")) {
+      if case .completed = event {
+        didFinish = true
+      }
+      if case let .toolInputDelta(_, delta) = event,
+         delta.contains("Spokane"),
+         sawToolOutput == false {
+        sawPartialArgumentsBeforeOutput = true
+      }
+      if case .toolOutput = event {
+        sawToolOutput = true
       }
     }
 
-    #expect(finalContent == "Weather in Spokane: Sunny")
+    #expect(didFinish)
     #expect(sawPartialArgumentsBeforeOutput)
     #expect(session.transcript.entries.contains { entry in
       if case .toolCalls = entry { return true }
@@ -260,7 +260,7 @@ struct OpenResponsesProviderReplayTests {
     })
   }
 
-  @Test func openResponsesProviderExecutesToolsThroughMainSessionPolicy() async throws {
+  @Test func openResponsesProviderExecutesToolsThroughAgentSessionPolicy() async throws {
     let replay = ReplayHTTPClient<JSONValue>(recordedResponses: [
       .init(body: """
       {
@@ -290,9 +290,9 @@ struct OpenResponsesProviderReplayTests {
       model: "openai/gpt-test",
       httpClient: replay,
     )
-    let session = LanguageModelSession(model: model, tools: [WeatherTool()])
+    let session = AgentSession(model: model, tools: [WeatherTool()])
 
-    let response = try await session.respond(to: "What is the weather?")
+    let response = try await session.run(to: "What is the weather?")
 
     #expect(response.content == "Weather in Spokane: Sunny")
     let requests = await replay.recordedRequests()

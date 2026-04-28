@@ -15,7 +15,7 @@ enum AnthropicStreamingToolCallsNoArgsPingScenario {
         model: AnthropicRecordingModel.model,
         httpClient: AnthropicRecordingHTTPClient.make(apiKey: apiKey, recorder: recorder),
       )
-      let session = LanguageModelSession(
+      let session = AgentSession(
         model: model,
         tools: [PingTool()],
         instructions: """
@@ -25,7 +25,7 @@ enum AnthropicStreamingToolCallsNoArgsPingScenario {
         """,
       )
 
-      let stream = session.streamResponse(to: "Ping")
+      let stream = session.stream(to: "Ping")
 
       for try await _ in stream {}
     },

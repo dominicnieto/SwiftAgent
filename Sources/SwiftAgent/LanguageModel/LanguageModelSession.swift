@@ -5,23 +5,14 @@ import Observation
 @Observable
 public final class LanguageModelSession: @unchecked Sendable {
   @ObservationIgnored private let model: any LanguageModel
+  @ObservationIgnored private let engine: ConversationEngine
   @ObservationIgnored private let state: Locked<State>
-  @ObservationIgnored private let toolExecutionDelegateStorage = Locked<(any ToolExecutionDelegate)?>(nil)
 
   /// Tools available to the model during this session.
   public let tools: [any Tool]
 
   /// Instructions applied to each turn.
   public let instructions: Instructions?
-
-  /// Policy used when providers emit tool calls for the session to execute.
-  public let toolExecutionPolicy: ToolExecutionPolicy
-
-  /// Delegate that can approve, stop, or provide output for tool calls.
-  public var toolExecutionDelegate: (any ToolExecutionDelegate)? {
-    get { toolExecutionDelegateStorage.withLock { $0 } }
-    set { toolExecutionDelegateStorage.withLock { $0 = newValue } }
-  }
 
   /// Whether this session is currently waiting on model output.
   public var isResponding: Bool {
@@ -52,12 +43,11 @@ public final class LanguageModelSession: @unchecked Sendable {
     model: any LanguageModel,
     tools: [any Tool] = [],
     instructions: Instructions? = nil,
-    toolExecutionPolicy: ToolExecutionPolicy = .automatic,
   ) {
     self.model = model
     self.tools = tools
     self.instructions = instructions
-    self.toolExecutionPolicy = toolExecutionPolicy
+    engine = ConversationEngine(model: model, instructions: instructions, tools: tools)
     state = Locked(State(transcript: Self.initialTranscript(instructions: instructions, tools: tools)))
   }
 
@@ -66,29 +56,44 @@ public final class LanguageModelSession: @unchecked Sendable {
     model: any LanguageModel,
     tools: [any Tool] = [],
     instructions: String,
-    toolExecutionPolicy: ToolExecutionPolicy = .automatic,
   ) {
     self.init(
       model: model,
       tools: tools,
       instructions: Instructions(instructions),
-      toolExecutionPolicy: toolExecutionPolicy,
     )
+  }
+
+  /// Creates a direct model session with tools declared by a session schema.
+  public convenience init<SessionSchema>(
+    model: any LanguageModel,
+    schema: SessionSchema,
+    instructions: Instructions? = nil,
+  ) where SessionSchema: TranscriptSchema {
+    self.init(model: model, tools: schema.tools, instructions: instructions)
+  }
+
+  /// Creates a direct model session with schema-declared tools and string instructions.
+  public convenience init<SessionSchema>(
+    model: any LanguageModel,
+    schema: SessionSchema,
+    instructions: String,
+  ) where SessionSchema: TranscriptSchema {
+    self.init(model: model, schema: schema, instructions: Instructions(instructions))
   }
 
   /// Creates a session with instructions from an ``InstructionsBuilder``.
   public convenience init(
     model: any LanguageModel,
     tools: [any Tool] = [],
-    toolExecutionPolicy: ToolExecutionPolicy = .automatic,
     @InstructionsBuilder instructions: () throws -> Instructions,
   ) rethrows {
-    try self.init(model: model, tools: tools, instructions: instructions(), toolExecutionPolicy: toolExecutionPolicy)
+    try self.init(model: model, tools: tools, instructions: instructions())
   }
 
   /// Prepares the underlying model for an upcoming prompt prefix when supported.
   public func prewarm(promptPrefix: Prompt? = nil) {
-    model.prewarm(for: self, promptPrefix: promptPrefix)
+    model.prewarm(for: ModelPrewarmRequest(request: ModelRequest(), promptPrefix: promptPrefix))
   }
 
   /// Generates a complete response.
@@ -118,22 +123,23 @@ public final class LanguageModelSession: @unchecked Sendable {
     beginResponding()
     defer { endResponding() }
 
-    appendPrompt(promptEntry)
-
-    let response = try await model.respond(
-      within: self,
-      to: prompt,
-      generating: type,
-      includeSchemaInPrompt: includeSchemaInPrompt,
+    let modelResponse = try await engine.respond(
+      promptEntry: promptEntry,
+      structuredOutput: Self.structuredOutputRequest(for: type, includeSchemaInPrompt: includeSchemaInPrompt),
       options: options,
     )
+    await syncFromEngine()
 
-    recordProviderEntries(response.transcriptEntries)
-    recordResponse(rawContent: response.rawContent, status: .completed)
-    recordTokenUsage(response.tokenUsage)
-    recordResponseMetadata(response.responseMetadata)
+    let rawContent = modelResponse.content ?? Self.emptyRawContent(for: type)
+    let content = try Self.decode(rawContent, as: type)
 
-    return response
+    return Response(
+      content: content,
+      rawContent: rawContent,
+      transcriptEntries: Self.responseTranscriptEntries(from: modelResponse),
+      tokenUsage: modelResponse.tokenUsage,
+      responseMetadata: modelResponse.responseMetadata,
+    )
   }
 
   /// Streams a response and derives each public snapshot from transcript and usage state.
@@ -159,32 +165,17 @@ public final class LanguageModelSession: @unchecked Sendable {
     includeSchemaInPrompt: Bool = true,
     options: GenerationOptions = GenerationOptions(),
   ) -> sending ResponseStream<Content> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
-    appendPrompt(promptEntry)
-
-    if let eventStreamingModel = model as? any EventStreamingLanguageModel {
-      return streamEventResponse(
-        eventStreamingModel,
-        to: prompt,
-        generating: type,
-        includeSchemaInPrompt: includeSchemaInPrompt,
-        options: options,
-      )
-    }
-
-    let upstream = model.streamResponse(
-      within: self,
-      to: prompt,
-      generating: type,
-      includeSchemaInPrompt: includeSchemaInPrompt,
-      options: options,
-    )
-
     let relay = AsyncThrowingStream<ResponseStream<Content>.Snapshot, any Error> { continuation in
       Task {
         self.beginResponding()
         defer { self.endResponding() }
 
         do {
+          let upstream = await self.engine.streamResponse(
+            promptEntry: promptEntry,
+            structuredOutput: Self.structuredOutputRequest(for: type, includeSchemaInPrompt: includeSchemaInPrompt),
+            options: options,
+          )
           var lastSnapshot: ResponseStream<Content>.Snapshot?
           var pendingSnapshot: ResponseStream<Content>.Snapshot?
           var lastYield: ContinuousClock.Instant?
@@ -203,16 +194,10 @@ public final class LanguageModelSession: @unchecked Sendable {
           }
 
           for try await snapshot in upstream {
-            self.recordProviderEntries(snapshot.transcriptEntries)
-            self.recordTokenUsage(snapshot.tokenUsage)
-            self.recordResponseMetadata(snapshot.responseMetadata)
-
-            if let rawContent = snapshot.rawContent {
-              self.recordResponse(rawContent: rawContent, status: .inProgress)
-            }
-
+            await self.syncFromEngine()
+            let content = Self.partialContent(from: snapshot.rawContent, as: type)
             let derived = ResponseStream<Content>.Snapshot(
-              content: snapshot.content,
+              content: content,
               rawContent: snapshot.rawContent,
               transcript: self.transcript,
               tokenUsage: self.tokenUsage,
@@ -225,16 +210,7 @@ public final class LanguageModelSession: @unchecked Sendable {
             yieldSnapshot(derived)
           }
 
-          if let rawContent = lastSnapshot?.rawContent {
-            self.recordResponse(rawContent: rawContent, status: .completed)
-            yieldSnapshot(ResponseStream<Content>.Snapshot(
-              content: lastSnapshot?.content,
-              rawContent: rawContent,
-              transcript: self.transcript,
-              tokenUsage: self.tokenUsage,
-              responseMetadata: self.responseMetadata,
-            ), force: true)
-          } else if let pendingSnapshot {
+          if let pendingSnapshot {
             yieldSnapshot(pendingSnapshot, force: true)
           }
 
@@ -441,12 +417,13 @@ public final class LanguageModelSession: @unchecked Sendable {
     issues: [LanguageModelFeedback.Issue] = [],
     desiredOutput: Transcript.Entry? = nil,
   ) -> Data {
-    model.logFeedbackAttachment(
-      within: self,
+    model.logFeedbackAttachment(FeedbackAttachmentRequest(
+      transcript: transcript,
       sentiment: sentiment,
       issues: issues,
       desiredOutput: desiredOutput,
-    )
+      responseMetadata: responseMetadata,
+    ))
   }
 }
 
@@ -460,7 +437,7 @@ public extension LanguageModelSession {
     options: GenerationOptions = GenerationOptions(),
     @PromptBuilder embeddingInto prompt: @Sendable (_ input: String, _ sources: [SessionSchema.DecodedGrounding])
       -> Prompt,
-  ) async throws -> Response<String> where SessionSchema: LanguageModelSessionSchema & GroundingSupportingSchema {
+  ) async throws -> Response<String> where SessionSchema: TranscriptSchema & GroundingSupportingSchema {
     let renderedPrompt = prompt(input, sources)
     return try await respond(
       to: renderedPrompt,
@@ -482,7 +459,7 @@ public extension LanguageModelSession {
     @PromptBuilder embeddingInto prompt: @Sendable (_ input: String, _ sources: [SessionSchema.DecodedGrounding])
       -> Prompt,
   ) async throws -> Response<Content>
-    where SessionSchema: LanguageModelSessionSchema & GroundingSupportingSchema,
+    where SessionSchema: TranscriptSchema & GroundingSupportingSchema,
     Content: Generable & Sendable {
     let renderedPrompt = prompt(input, sources)
     return try await respond(
@@ -506,7 +483,7 @@ public extension LanguageModelSession {
     @PromptBuilder embeddingInto prompt: @Sendable (_ input: String, _ sources: [SessionSchema.DecodedGrounding])
       -> Prompt,
   ) async throws -> Response<Output.Schema>
-    where SessionSchema: LanguageModelSessionSchema & GroundingSupportingSchema,
+    where SessionSchema: TranscriptSchema & GroundingSupportingSchema,
     Output: StructuredOutput,
     Output.Schema: Sendable {
     try await respond(
@@ -528,7 +505,7 @@ public extension LanguageModelSession {
     options: GenerationOptions = GenerationOptions(),
     @PromptBuilder embeddingInto prompt: @Sendable (_ input: String, _ sources: [SessionSchema.DecodedGrounding])
       -> Prompt,
-  ) throws -> sending ResponseStream<String> where SessionSchema: LanguageModelSessionSchema & GroundingSupportingSchema {
+  ) throws -> sending ResponseStream<String> where SessionSchema: TranscriptSchema & GroundingSupportingSchema {
     let renderedPrompt = prompt(input, sources)
     return try streamResponse(
       to: renderedPrompt,
@@ -549,7 +526,7 @@ public extension LanguageModelSession {
     @PromptBuilder embeddingInto prompt: @Sendable (_ input: String, _ sources: [SessionSchema.DecodedGrounding])
       -> Prompt,
   ) throws -> sending ResponseStream<Content>
-    where SessionSchema: LanguageModelSessionSchema & GroundingSupportingSchema,
+    where SessionSchema: TranscriptSchema & GroundingSupportingSchema,
     Content: Generable & Sendable,
     Content.PartiallyGenerated: Sendable {
     let renderedPrompt = prompt(input, sources)
@@ -573,7 +550,7 @@ public extension LanguageModelSession {
     @PromptBuilder embeddingInto prompt: @Sendable (_ input: String, _ sources: [SessionSchema.DecodedGrounding])
       -> Prompt,
   ) throws -> sending ResponseStream<Output.Schema>
-    where SessionSchema: LanguageModelSessionSchema & GroundingSupportingSchema,
+    where SessionSchema: TranscriptSchema & GroundingSupportingSchema,
     Output: StructuredOutput,
     Output.Schema: Sendable,
     Output.Schema.PartiallyGenerated: Sendable {
@@ -755,102 +732,6 @@ public extension LanguageModelSession {
     public var failureReason: String? { nil }
   }
 
-  /// Error thrown when a session-owned tool call cannot be completed.
-  struct ToolCallError: Error, LocalizedError {
-    /// The tool name emitted by the model.
-    public let toolName: String
-
-    /// The underlying execution failure.
-    public let underlyingError: any Error
-
-    /// Creates a tool call error for a registered tool.
-    public init(tool: any Tool, underlyingError: any Error) {
-      toolName = tool.name
-      self.underlyingError = underlyingError
-    }
-
-    /// Creates a tool call error for a missing or unavailable tool.
-    public init(toolName: String, underlyingError: any Error) {
-      self.toolName = toolName
-      self.underlyingError = underlyingError
-    }
-
-    public var errorDescription: String? {
-      "Tool '\(toolName)' failed: \(underlyingError.localizedDescription)"
-    }
-  }
-
-  /// Output from a session-owned tool call.
-  struct ToolExecutionResult: Sendable, Equatable {
-    /// The model-emitted tool call.
-    public var call: Transcript.ToolCall
-
-    /// The output recorded for the call.
-    public var output: Transcript.ToolOutput
-
-    public init(call: Transcript.ToolCall, output: Transcript.ToolOutput) {
-      self.call = call
-      self.output = output
-    }
-  }
-
-  /// Result of asking the session to handle emitted tool calls.
-  enum ToolExecutionOutcome: Sendable, Equatable {
-    /// Execution stopped after recording tool calls.
-    case stop(calls: [Transcript.ToolCall])
-
-    /// Tool outputs were produced for the calls.
-    case outputs([ToolExecutionResult])
-  }
-}
-
-public extension LanguageModelSession {
-  /// Executes model-emitted tool calls through this session's tool policy.
-  ///
-  /// Providers should call this after emitting tool calls instead of executing tools directly.
-  /// The session records tool-call and tool-output transcript entries when requested.
-  func executeToolCalls(
-    _ calls: [Transcript.ToolCall],
-    recordTranscript: Bool = true,
-  ) async throws -> ToolExecutionOutcome {
-    guard calls.isEmpty == false else {
-      return .outputs([])
-    }
-
-    let delegate = toolExecutionDelegate
-    await delegate?.didGenerateToolCalls(calls, in: self)
-
-    var decisions: [ToolExecutionDecision] = []
-    decisions.reserveCapacity(calls.count)
-
-    for call in calls {
-      let decision = await delegate?.toolCallDecision(for: call, in: self) ?? .execute
-      if case .stop = decision {
-        if recordTranscript {
-          recordProviderEntries([.toolCalls(.init(calls: calls))])
-        }
-        return .stop(calls: calls)
-      }
-      decisions.append(decision)
-    }
-
-    if recordTranscript {
-      recordProviderEntries([.toolCalls(.init(calls: calls))])
-    }
-
-    let results: [ToolExecutionResult]
-    if toolExecutionPolicy.allowsParallelExecution {
-      results = try await executeToolCallsInParallel(calls, decisions: decisions, delegate: delegate)
-    } else {
-      results = try await executeToolCallsSerially(calls, decisions: decisions, delegate: delegate)
-    }
-
-    if recordTranscript {
-      recordProviderEntries(results.map { .toolOutput($0.output) })
-    }
-
-    return .outputs(results)
-  }
 }
 
 extension LanguageModelSession.ResponseStream: AsyncSequence {
@@ -911,271 +792,78 @@ extension LanguageModelSession.ResponseStream: AsyncSequence {
 }
 
 private extension LanguageModelSession {
-  func streamEventResponse<Content>(
-    _ eventStreamingModel: any EventStreamingLanguageModel,
-    to prompt: Prompt,
-    generating type: Content.Type,
+  static func structuredOutputRequest<Content>(
+    for type: Content.Type,
     includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) -> sending ResponseStream<Content> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
-    let events = eventStreamingModel.streamEvents(
-      within: self,
-      to: prompt,
-      generating: type,
+  ) -> StructuredOutputRequest? where Content: Generable {
+    guard type != String.self else { return nil }
+    return StructuredOutputRequest(
+      format: .generatedContent(
+        typeName: String(describing: type),
+        schema: Content.generationSchema,
+        strict: true,
+      ),
       includeSchemaInPrompt: includeSchemaInPrompt,
-      options: options,
     )
+  }
 
-    let relay = AsyncThrowingStream<ResponseStream<Content>.Snapshot, any Error> { continuation in
-      Task {
-        self.beginResponding()
-        defer { self.endResponding() }
+  static func decode<Content>(_ rawContent: GeneratedContent, as type: Content.Type) throws -> Content where Content: Generable {
+    if type == String.self {
+      if case let .string(text) = rawContent.kind {
+        return text as! Content
+      }
+      return rawContent.jsonString as! Content
+    }
+    return try Content(rawContent)
+  }
 
-        let clock = ContinuousClock()
-        var lastYield: ContinuousClock.Instant?
-        var pendingSnapshot: ResponseStream<Content>.Snapshot?
-        var lastSnapshot: ResponseStream<Content>.Snapshot?
-        var accumulatedTextByID: [String: String] = [:]
-        var textOrder: [String] = []
-        var reasoningByID: [String: Transcript.Reasoning] = [:]
-        var toolCallsByID: [String: Transcript.ToolCall] = [:]
-        var toolCallOrder: [String] = []
-        var toolArgumentBuffers: [String: String] = [:]
-        var toolCallsEntryID: String?
-        var currentContent: Content.PartiallyGenerated?
-        var currentRawContent: GeneratedContent?
-        var didEmitFinishedSnapshot = false
+  static func emptyRawContent<Content>(for type: Content.Type) -> GeneratedContent where Content: Generable {
+    if type == String.self {
+      return GeneratedContent("")
+    }
+    return GeneratedContent(properties: [:])
+  }
 
-        func currentText() -> String {
-          textOrder.map { accumulatedTextByID[$0] ?? "" }.joined()
-        }
+  static func responseTranscriptEntries(from response: ModelResponse) -> [Transcript.Entry] {
+    var entries = response.transcriptEntries
+    entries.append(contentsOf: response.reasoning.map(Transcript.Entry.reasoning))
+    if response.toolCalls.isEmpty == false {
+      entries.append(.toolCalls(.init(calls: response.toolCalls.map(\.call))))
+    }
+    return entries
+  }
 
-        func toolCallsEntry() -> Transcript.Entry? {
-          let calls = toolCallOrder.compactMap { toolCallsByID[$0] }
-          guard calls.isEmpty == false else { return nil }
-          let id = toolCallsEntryID ?? "tool-calls-\(calls[0].id)"
-          toolCallsEntryID = id
-          return .toolCalls(.init(id: id, calls: calls))
-        }
+  static func partialContent<Content>(
+    from rawContent: GeneratedContent?,
+    as type: Content.Type,
+  ) -> Content.PartiallyGenerated? where Content: Generable {
+    guard let rawContent else { return nil }
+    if type == String.self {
+      if case let .string(text) = rawContent.kind {
+        return (text as! Content).asPartiallyGenerated()
+      }
+      return (rawContent.jsonString as! Content).asPartiallyGenerated()
+    }
+    if let partial = try? Content(rawContent).asPartiallyGenerated() {
+      return partial
+    }
+    if case let .string(text) = rawContent.kind {
+      return partialStructuredGeneration(from: text, as: type)?.content
+    }
+    return nil
+  }
 
-        func makeSnapshot(transcriptEntries: [Transcript.Entry] = []) -> ResponseStream<Content>.Snapshot {
-          ResponseStream<Content>.Snapshot(
-            content: currentContent,
-            rawContent: currentRawContent,
-            transcript: self.transcript,
-            tokenUsage: self.tokenUsage,
-            responseMetadata: self.responseMetadata,
-            transcriptEntries: transcriptEntries,
-          )
-        }
-
-        func yieldSnapshot(_ snapshot: ResponseStream<Content>.Snapshot, force: Bool = false) {
-          let interval = options.minimumStreamingSnapshotInterval
-          let now = clock.now
-          if force || interval == nil || lastYield == nil || now - lastYield! >= interval! {
-            lastYield = now
-            pendingSnapshot = nil
-            continuation.yield(snapshot)
-          } else {
-            pendingSnapshot = snapshot
-          }
-        }
-
-        func updateContentFromText() {
-          let text = currentText()
-          if type == String.self {
-            currentRawContent = GeneratedContent(text)
-            currentContent = (text as! Content).asPartiallyGenerated()
-          } else if let partial = partialStructuredGeneration(from: text, as: type) {
-            currentRawContent = partial.rawContent
-            currentContent = partial.content
-          }
-        }
-
-        func recordAndYield(
-          entries: [Transcript.Entry] = [],
-          usage: TokenUsage? = nil,
-          metadata: ResponseMetadata? = nil,
-          force: Bool = false,
-        ) {
-          self.recordProviderEntries(entries)
-          self.recordTokenUsage(usage)
-          self.recordResponseMetadata(metadata)
-
-          if let rawContent = currentRawContent {
-            self.recordResponse(rawContent: rawContent, status: .inProgress)
-          }
-
-          let isMetadataOnlyUpdate = entries.isEmpty && (usage != nil || metadata != nil) && force == false
-          let snapshot = if isMetadataOnlyUpdate {
-            ResponseStream<Content>.Snapshot(
-              transcript: self.transcript,
-              tokenUsage: self.tokenUsage,
-              responseMetadata: self.responseMetadata,
-              transcriptEntries: entries,
-            )
-          } else {
-            makeSnapshot(transcriptEntries: entries)
-          }
-          if snapshot.rawContent != nil || entries.isEmpty == false || usage != nil || metadata != nil || lastSnapshot == nil {
-            if isMetadataOnlyUpdate == false {
-              lastSnapshot = snapshot
-            }
-            yieldSnapshot(snapshot, force: force)
-          }
-        }
-
-        do {
-          for try await event in events {
-            switch event {
-            case .streamStarted(let warnings):
-              let metadata = ResponseMetadata(warnings: warnings)
-              recordAndYield(metadata: metadata)
-
-            case .textStart(let id):
-              if accumulatedTextByID[id] == nil {
-                accumulatedTextByID[id] = ""
-                textOrder.append(id)
-              }
-              recordAndYield()
-
-            case .textDelta(let id, let delta):
-              if accumulatedTextByID[id] == nil {
-                accumulatedTextByID[id] = ""
-                textOrder.append(id)
-              }
-              accumulatedTextByID[id, default: ""] += delta
-              updateContentFromText()
-              recordAndYield()
-
-            case .textEnd:
-              recordAndYield()
-
-            case .structuredStart:
-              recordAndYield()
-
-            case .structuredDelta(_, let delta):
-              currentRawContent = delta
-              if let content = try? Content(delta) {
-                currentContent = content.asPartiallyGenerated()
-              }
-              recordAndYield()
-
-            case .structuredEnd:
-              recordAndYield()
-
-            case .reasoningStart(let id):
-              let reasoning = Transcript.Reasoning(id: id, summary: [], encryptedReasoning: nil, status: .inProgress)
-              reasoningByID[id] = reasoning
-              recordAndYield(entries: [.reasoning(reasoning)])
-
-            case .reasoningDelta(let id, let delta):
-              var reasoning = reasoningByID[id] ??
-                Transcript.Reasoning(id: id, summary: [], encryptedReasoning: nil, status: .inProgress)
-              let existing = reasoning.summary.first ?? ""
-              reasoning.summary = [existing + delta]
-              reasoning.status = .inProgress
-              reasoningByID[id] = reasoning
-              recordAndYield(entries: [.reasoning(reasoning)])
-
-            case .reasoningEnd(let id, let encryptedReasoning):
-              var reasoning = reasoningByID[id] ??
-                Transcript.Reasoning(id: id, summary: [], encryptedReasoning: nil, status: .completed)
-              reasoning.encryptedReasoning = encryptedReasoning
-              reasoning.status = .completed
-              reasoningByID[id] = reasoning
-              recordAndYield(entries: [.reasoning(reasoning)])
-
-            case .toolInputStart(let id, let callId, let toolName):
-              if toolCallsByID[id] == nil {
-                toolCallOrder.append(id)
-              }
-              toolArgumentBuffers[id] = ""
-              toolCallsByID[id] = Transcript.ToolCall(
-                id: id,
-                callId: callId ?? id,
-                toolName: toolName,
-                arguments: GeneratedContent(properties: [:]),
-                partialArguments: "",
-                status: .inProgress,
-              )
-              if let entry = toolCallsEntry() {
-                recordAndYield(entries: [entry])
-              }
-
-            case .toolInputDelta(let id, let delta):
-              toolArgumentBuffers[id, default: ""] += delta
-              if var call = toolCallsByID[id] {
-                call.partialArguments = toolArgumentBuffers[id]
-                call.status = .inProgress
-                toolCallsByID[id] = call
-              }
-              if let entry = toolCallsEntry() {
-                recordAndYield(entries: [entry])
-              }
-
-            case .toolInputEnd(let id, let arguments):
-              let parsedArguments = try arguments ?? GeneratedContent(json: toolArgumentBuffers[id] ?? "{}")
-              if var call = toolCallsByID[id] {
-                call.arguments = parsedArguments
-                call.partialArguments = nil
-                call.status = .completed
-                toolCallsByID[id] = call
-              }
-              if let entry = toolCallsEntry() {
-                recordAndYield(entries: [entry], force: true)
-              }
-
-            case .toolCall(let call):
-              if toolCallsByID[call.id] == nil {
-                toolCallOrder.append(call.id)
-              }
-              toolCallsByID[call.id] = call
-              if let entry = toolCallsEntry() {
-                recordAndYield(entries: [entry], force: true)
-              }
-
-            case .toolResult(let output):
-              recordAndYield(entries: [.toolOutput(output)], force: true)
-
-            case .responseMetadata(let metadata):
-              recordAndYield(metadata: metadata)
-
-            case .usage(let usage):
-              recordAndYield(usage: usage)
-
-            case .finished:
-              if let rawContent = currentRawContent {
-                self.recordResponse(rawContent: rawContent, status: .completed)
-              }
-              didEmitFinishedSnapshot = true
-              yieldSnapshot(makeSnapshot(), force: true)
-
-            case .raw:
-              recordAndYield()
-
-            case .failed(let error):
-              throw error
-            }
-          }
-
-          if didEmitFinishedSnapshot {
-            // The provider already emitted an explicit finish event and the final snapshot was forced above.
-          } else if let rawContent = currentRawContent {
-            self.recordResponse(rawContent: rawContent, status: .completed)
-            yieldSnapshot(makeSnapshot(), force: true)
-          } else if let pendingSnapshot {
-            yieldSnapshot(pendingSnapshot, force: true)
-          }
-
-          continuation.finish()
-        } catch {
-          continuation.finish(throwing: error)
-        }
+  func syncFromEngine() async {
+    let transcript = await engine.transcript
+    let tokenUsage = await engine.tokenUsage
+    let responseMetadata = await engine.responseMetadata
+    withMutation(keyPath: \.transcript) {
+      state.withLock {
+        $0.transcript = transcript
+        $0.tokenUsage = tokenUsage
+        $0.responseMetadata = responseMetadata
       }
     }
-
-    return ResponseStream(stream: relay)
   }
 
   func beginResponding() {
@@ -1212,7 +900,7 @@ private extension LanguageModelSession {
     sources: [SessionSchema.DecodedGrounding],
     schema: SessionSchema,
     prompt: Prompt,
-  ) throws -> Transcript.Prompt where SessionSchema: LanguageModelSessionSchema & GroundingSupportingSchema {
+  ) throws -> Transcript.Prompt where SessionSchema: TranscriptSchema & GroundingSupportingSchema {
     try Transcript.Prompt(
       input: input,
       sources: schema.encodeGrounding(sources),
@@ -1311,133 +999,7 @@ private extension LanguageModelSession {
     }
   }
 
-  func executeToolCallsSerially(
-    _ calls: [Transcript.ToolCall],
-    decisions: [ToolExecutionDecision],
-    delegate: (any ToolExecutionDelegate)?,
-  ) async throws -> [ToolExecutionResult] {
-    var results: [ToolExecutionResult] = []
-    results.reserveCapacity(calls.count)
 
-    for (index, call) in calls.enumerated() {
-      let result = try await executeToolCall(call, decision: decisions[index], delegate: delegate)
-      results.append(result)
-    }
-
-    return results
-  }
-
-  func executeToolCallsInParallel(
-    _ calls: [Transcript.ToolCall],
-    decisions: [ToolExecutionDecision],
-    delegate: (any ToolExecutionDelegate)?,
-  ) async throws -> [ToolExecutionResult] {
-    var indexedResults: [(Int, ToolExecutionResult)] = []
-    indexedResults.reserveCapacity(calls.count)
-
-    try await withThrowingTaskGroup(of: (Int, ToolExecutionResult).self) { group in
-      for (index, call) in calls.enumerated() {
-        let decision = decisions[index]
-        group.addTask {
-          let result = try await self.executeToolCall(call, decision: decision, delegate: delegate)
-          return (index, result)
-        }
-      }
-
-      for try await indexedResult in group {
-        indexedResults.append(indexedResult)
-      }
-    }
-
-    return indexedResults
-      .sorted { $0.0 < $1.0 }
-      .map(\.1)
-  }
-
-  func executeToolCall(
-    _ call: Transcript.ToolCall,
-    decision: ToolExecutionDecision,
-    delegate: (any ToolExecutionDelegate)?,
-  ) async throws -> ToolExecutionResult {
-    switch decision {
-    case .stop:
-      return ToolExecutionResult(call: call, output: makeToolOutput(for: call, segment: .text(.init(content: ""))))
-
-    case .provideOutput(let segments):
-      let output = makeToolOutput(for: call, segment: segments.first ?? .text(.init(content: "")))
-      await delegate?.didExecuteToolCall(call, output: output, in: self)
-      return ToolExecutionResult(call: call, output: output)
-
-    case .execute:
-      guard let tool = tools.first(where: { $0.name == call.toolName }) else {
-        return try await handleMissingTool(call, delegate: delegate)
-      }
-
-      var attempt = 0
-      while true {
-        attempt += 1
-
-        do {
-          let segments = try await tool.makeOutputSegments(from: call.arguments)
-          let output = makeToolOutput(for: call, toolName: tool.name, segment: segments.first ?? .text(.init(content: "")))
-          await delegate?.didExecuteToolCall(call, output: output, in: self)
-          return ToolExecutionResult(call: call, output: output)
-        } catch is CancellationError {
-          throw CancellationError()
-        } catch {
-          await delegate?.didFailToolCall(call, error: error, in: self)
-
-          if attempt < toolExecutionPolicy.retryPolicy.maximumAttempts {
-            continue
-          }
-
-          switch toolExecutionPolicy.failureBehavior {
-          case .throwError:
-            throw ToolCallError(tool: tool, underlyingError: error)
-          case .recordErrorOutput:
-            let output = makeToolOutput(for: call, toolName: tool.name, segment: .text(.init(content: error.localizedDescription)))
-            await delegate?.didExecuteToolCall(call, output: output, in: self)
-            return ToolExecutionResult(call: call, output: output)
-          }
-        }
-      }
-    }
-  }
-
-  func handleMissingTool(
-    _ call: Transcript.ToolCall,
-    delegate: (any ToolExecutionDelegate)?,
-  ) async throws -> ToolExecutionResult {
-    let error = MissingToolError(toolName: call.toolName)
-
-    switch toolExecutionPolicy.missingToolBehavior {
-    case .recordErrorOutput:
-      let output = makeToolOutput(
-        for: call,
-        segment: .text(.init(content: "Tool not found: \(call.toolName)")),
-      )
-      await delegate?.didExecuteToolCall(call, output: output, in: self)
-      return ToolExecutionResult(call: call, output: output)
-
-    case .throwError:
-      await delegate?.didFailToolCall(call, error: error, in: self)
-      throw ToolCallError(toolName: call.toolName, underlyingError: error)
-    }
-  }
-
-  func makeToolOutput(
-    for call: Transcript.ToolCall,
-    toolName: String? = nil,
-    segment: Transcript.Segment,
-  ) -> Transcript.ToolOutput {
-    Transcript.ToolOutput(
-      id: call.id,
-      callId: call.callId,
-      toolName: toolName ?? call.toolName,
-      segment: segment,
-      status: .completed,
-    )
-  }
 }
 
 private struct State: Sendable {

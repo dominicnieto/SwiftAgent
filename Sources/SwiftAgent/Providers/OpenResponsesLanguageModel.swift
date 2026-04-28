@@ -413,447 +413,193 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
         self.httpClient = httpClient ?? Self.makeDefaultHTTPClient(baseURL: baseURL, tokenProvider: tokenProvider)
     }
 
-    public func respond<Content>(
-        within session: LanguageModelSession,
-        to prompt: Prompt,
-        generating type: Content.Type,
-        includeSchemaInPrompt: Bool,
-        options: GenerationOptions
-    ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
-        let tools: [OpenResponsesTool]? =
-            session.tools.isEmpty ? nil : session.tools.map { convertToolToOpenResponsesFormat($0) }
-        return try await respondWithOpenResponses(
-            messages: session.transcript.toOpenResponsesMessages(),
-            tools: tools,
-            generating: type,
-            options: options,
-            session: session
+    public func respond(to request: ModelRequest) async throws -> ModelResponse {
+        let messages = openResponsesMessages(from: request)
+        let tools = request.tools.map(openResponsesToolDefinition)
+        let body = try OpenResponsesAPI.createRequestBody(
+            model: model,
+            messages: messages,
+            tools: tools.isEmpty ? nil : tools,
+            structuredOutput: request.structuredOutput,
+            toolChoice: request.toolChoice,
+            options: request.generationOptions,
+            stream: false
+        )
+
+        let httpResponse: HTTPClientDecodedResponse<OpenResponsesAPI.Response> = try await httpClient.sendResponse(
+            path: "responses",
+            method: .post,
+            queryItems: nil,
+            headers: nil,
+            body: body,
+            responseType: OpenResponsesAPI.Response.self
+        )
+        let response = httpResponse.body
+        let metadata = ResponseMetadata
+            .providerHTTPMetadata(
+                requestID: httpResponse.requestID,
+                headers: httpResponse.headers,
+                providerName: "Open Responses"
+            )
+            .merging(response.responseMetadata(providerName: "Open Responses", defaultModelID: model))
+        let toolCalls = try modelToolCalls(from: extractToolCallsFromOutput(response.output))
+        let reasoning = reasoningEntries(from: response.output)
+        let content = try openResponsesContent(from: response.output, outputText: response.outputText, structuredOutput: request.structuredOutput)
+        let continuation = openResponsesContinuation(
+            output: response.output,
+            responseID: response.id,
+            modelID: response.model ?? model
+        )
+
+        return ModelResponse(
+            content: content,
+            toolCalls: toolCalls,
+            reasoning: reasoning,
+            finishReason: toolCalls.isEmpty ? .completed : .toolCalls,
+            tokenUsage: response.usage?.tokenUsage,
+            responseMetadata: metadata,
+            continuation: continuation,
+            rawProviderOutput: response.output.map(JSONValue.array)
         )
     }
 
-    public func streamResponse<Content>(
-        within session: LanguageModelSession,
-        to prompt: Prompt,
-        generating type: Content.Type,
-        includeSchemaInPrompt: Bool,
-        options: GenerationOptions
-    ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable {
-        let tools: [OpenResponsesTool]? =
-            session.tools.isEmpty ? nil : session.tools.map { convertToolToOpenResponsesFormat($0) }
-        let stream: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> = .init {
-            continuation in
-            let task = Task { @Sendable in
+    public func streamResponse(to request: ModelRequest) -> AsyncThrowingStream<ModelStreamEvent, any Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
                 do {
-                    var messages = session.transcript.toOpenResponsesMessages()
-
-                    while true {
-                        let params = try OpenResponsesAPI.createRequestBody(
-                            model: model,
-                            messages: messages,
-                            tools: tools,
-                            generating: type,
-                            options: options,
-                            stream: true
-                        )
-                        let events = httpClient.decodedEventStream(
-                            path: "responses",
-                            body: params,
-                            as: OpenResponsesStreamEvent.self
-                        )
-                        var accumulatedText = ""
-                        var streamingToolCalls: [String: StreamingOpenResponsesToolCall] = [:]
-                        var continuationItems = OpenResponsesContinuationItemBuffer()
-                        for try await event in events {
-                            switch event {
-                            case .outputTextDelta(let delta):
-                                accumulatedText += delta
-                                var raw: GeneratedContent
-                                let content: Content.PartiallyGenerated?
-                                if type == String.self {
-                                    raw = GeneratedContent(accumulatedText)
-                                    content = (accumulatedText as! Content).asPartiallyGenerated()
-                                } else {
-                                    if let partial = partialStructuredGeneration(from: accumulatedText, as: type) {
-                                        raw = partial.rawContent
-                                        content = partial.content
-                                    } else {
-                                        raw = GeneratedContent(accumulatedText)
-                                        content = nil
-                                    }
-                                }
-                                if let content {
-                                    continuation.yield(.init(content: content, rawContent: raw))
-                                }
-                            case .outputItemAdded(let item):
-                                continuationItems.record(item)
-                                switch item.type {
-                                case "function_call":
-                                    if let name = item.name {
-                                        streamingToolCalls[item.id] = StreamingOpenResponsesToolCall(
-                                            id: item.id,
-                                            callId: item.callID ?? item.id,
-                                            name: name,
-                                            arguments: item.arguments ?? ""
-                                        )
-                                    }
-                                case "reasoning":
-                                    let reasoning = Transcript.Reasoning(
-                                        id: item.id,
-                                        summary: item.summaryText,
-                                        encryptedReasoning: item.encryptedContent,
-                                        status: .inProgress
-                                    )
-                                    continuation.yield(.init(transcriptEntries: [.reasoning(reasoning)]))
-                                default:
-                                    break
-                                }
-                            case .functionCallArgumentsDelta(let itemID, let delta):
-                                streamingToolCalls[itemID]?.arguments += delta
-                            case .functionCallArgumentsDone(let itemID, let arguments):
-                                streamingToolCalls[itemID]?.arguments = arguments
-                                continuationItems.updateFunctionCallArguments(itemID: itemID, arguments: arguments)
-                            case .completed(let response):
-                                if let usage = response?.usage?.tokenUsage {
-                                    continuation.yield(.init(tokenUsage: usage))
-                                }
-                                if let metadata = response?.responseMetadata(
-                                    providerName: "Open Responses",
-                                    defaultModelID: model
-                                ) {
-                                    continuation.yield(.init(responseMetadata: metadata))
-                                }
-                            case .failed:
-                                continuation.finish(throwing: OpenResponsesLanguageModelError.streamFailed)
-                                return
-                            case .ignored:
-                                break
-                            }
-                        }
-
-                        let calls = try streamingToolCalls.values
-                            .sorted { $0.id < $1.id }
-                            .map { try $0.transcriptToolCall() }
-
-                        guard !calls.isEmpty else {
-                            continuation.finish()
-                            return
-                        }
-
-                        switch try await session.executeToolCalls(calls, recordTranscript: false) {
-                        case .stop(let calls):
-                            continuation.yield(.init(transcriptEntries: [.toolCalls(.init(calls: calls))]))
-                            continuation.finish()
-                            return
-
-                        case .outputs(let results):
-                            continuation.yield(.init(transcriptEntries: [.toolCalls(.init(calls: calls))]))
-                            continuation.yield(.init(transcriptEntries: results.map { .toolOutput($0.output) }))
-
-                            let continuationRawItems = continuationItems.rawItems()
-                            let continuedCallIDs = continuationRawItems.functionCallIDs()
-                            for item in continuationRawItems {
-                                messages.append(OpenResponsesMessage(role: .raw(rawContent: item), content: .text("")))
-                            }
-
-                            for call in calls where !continuedCallIDs.contains(call.callId) {
-                                messages.append(OpenResponsesMessage(
-                                    role: .raw(rawContent: .object([
-                                        "type": .string("function_call"),
-                                        "id": .string(call.id),
-                                        "call_id": .string(call.callId),
-                                        "name": .string(call.toolName),
-                                        "arguments": .string(call.arguments.jsonString),
-                                    ])),
-                                    content: .text("")
-                                ))
-                            }
-
-                            for result in results {
-                                messages.append(OpenResponsesMessage(
-                                    role: .tool(id: result.call.callId),
-                                    content: .text(openResponsesConvertSegmentsToToolContentString(result.output.segments))
-                                ))
-                            }
-                        }
-                    }
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
-        return LanguageModelSession.ResponseStream(stream: stream)
-    }
-
-    public func streamEvents<Content>(
-        within session: LanguageModelSession,
-        to prompt: Prompt,
-        generating type: Content.Type,
-        includeSchemaInPrompt: Bool,
-        options: GenerationOptions
-    ) -> AsyncThrowingStream<LanguageModelStreamEvent, any Error> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
-        let tools: [OpenResponsesTool]? =
-            session.tools.isEmpty ? nil : session.tools.map { convertToolToOpenResponsesFormat($0) }
-
-        return AsyncThrowingStream { continuation in
-            let task = Task { @Sendable in
-                do {
-                    var messages = session.transcript.toOpenResponsesMessages()
-
-                    while true {
-                        let params = try OpenResponsesAPI.createRequestBody(
-                            model: model,
-                            messages: messages,
-                            tools: tools,
-                            generating: type,
-                            options: options,
-                            stream: true
-                        )
-                        let eventStream = try await httpClient.decodedEventStreamResponse(
-                            path: "responses",
-                            body: params,
-                            as: OpenResponsesStreamEvent.self
-                        )
-                        continuation.yield(LanguageModelStreamEvent.responseMetadata(ResponseMetadata.providerHTTPMetadata(
-                            requestID: eventStream.requestID,
-                            headers: eventStream.headers,
-                            providerName: "Open Responses",
-                            modelID: model
-                        )))
-                        var streamingToolCalls: [String: StreamingOpenResponsesToolCall] = [:]
-                        var continuationItems = OpenResponsesContinuationItemBuffer()
-
-                        for try await event in eventStream.events {
-                            switch event {
-                            case .outputTextDelta(let delta):
-                                continuation.yield(.textDelta(id: "open-responses-text", delta: delta))
-
-                            case .outputItemAdded(let item):
-                                continuationItems.record(item)
-                                switch item.type {
-                                case "function_call":
-                                    if let name = item.name {
-                                        streamingToolCalls[item.id] = StreamingOpenResponsesToolCall(
-                                            id: item.id,
-                                            callId: item.callID ?? item.id,
-                                            name: name,
-                                            arguments: item.arguments ?? ""
-                                        )
-                                        continuation.yield(.toolInputStart(
-                                            id: item.id,
-                                            callId: item.callID ?? item.id,
-                                            toolName: name
-                                        ))
-                                        if let arguments = item.arguments, arguments.isEmpty == false {
-                                            continuation.yield(.toolInputDelta(id: item.id, delta: arguments))
-                                        }
-                                    }
-                                case "reasoning":
-                                    continuation.yield(.reasoningStart(id: item.id))
-                                    for summary in item.summaryText {
-                                        continuation.yield(.reasoningDelta(id: item.id, delta: summary))
-                                    }
-                                    if let encryptedContent = item.encryptedContent {
-                                        continuation.yield(.reasoningEnd(id: item.id, encryptedReasoning: encryptedContent))
-                                    }
-                                default:
-                                    break
-                                }
-
-                            case .functionCallArgumentsDelta(let itemID, let delta):
-                                streamingToolCalls[itemID]?.arguments += delta
-                                continuation.yield(.toolInputDelta(id: itemID, delta: delta))
-
-                            case .functionCallArgumentsDone(let itemID, let arguments):
-                                streamingToolCalls[itemID]?.arguments = arguments
-                                continuationItems.updateFunctionCallArguments(itemID: itemID, arguments: arguments)
-                                continuation.yield(.toolInputEnd(
-                                    id: itemID,
-                                    arguments: arguments.isEmpty ? GeneratedContent(properties: [:]) : try GeneratedContent(json: arguments)
-                                ))
-
-                            case .completed(let response):
-                                if let usage = response?.usage?.tokenUsage {
-                                    continuation.yield(.usage(usage))
-                                }
-                                if let metadata = response?.responseMetadata(
-                                    providerName: "Open Responses",
-                                    defaultModelID: model
-                                ) {
-                                    continuation.yield(.responseMetadata(metadata))
-                                }
-
-                            case .failed:
-                                continuation.yield(.failed(.init(code: "stream_failed", message: "Open Responses stream failed")))
-                                continuation.finish()
-                                return
-
-                            case .ignored:
-                                break
-                            }
-                        }
-
-                        let calls = try streamingToolCalls.values
-                            .sorted { $0.id < $1.id }
-                            .map { try $0.transcriptToolCall() }
-
-                        guard calls.isEmpty == false else {
-                            continuation.yield(.finished(.completed))
-                            continuation.finish()
-                            return
-                        }
-
-                        switch try await session.executeToolCalls(calls, recordTranscript: false) {
-                        case .stop:
-                            continuation.yield(.finished(.toolCalls))
-                            continuation.finish()
-                            return
-
-                        case .outputs(let results):
-                            for result in results {
-                                continuation.yield(.toolResult(result.output))
-                            }
-
-                            let continuationRawItems = continuationItems.rawItems()
-                            let continuedCallIDs = continuationRawItems.functionCallIDs()
-                            for item in continuationRawItems {
-                                messages.append(OpenResponsesMessage(role: .raw(rawContent: item), content: .text("")))
-                            }
-
-                            for call in calls where !continuedCallIDs.contains(call.callId) {
-                                messages.append(OpenResponsesMessage(
-                                    role: .raw(rawContent: .object([
-                                        "type": .string("function_call"),
-                                        "id": .string(call.id),
-                                        "call_id": .string(call.callId),
-                                        "name": .string(call.toolName),
-                                        "arguments": .string(call.arguments.jsonString),
-                                    ])),
-                                    content: .text("")
-                                ))
-                            }
-
-                            for result in results {
-                                messages.append(OpenResponsesMessage(
-                                    role: .tool(id: result.call.callId),
-                                    content: .text(openResponsesConvertSegmentsToToolContentString(result.output.segments))
-                                ))
-                            }
-                        }
-                    }
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
-    }
-
-    /// Sends a non-streaming request to the Open Responses API and returns the parsed response.
-    private func respondWithOpenResponses<Content>(
-        messages: [OpenResponsesMessage],
-        tools: [OpenResponsesTool]?,
-        generating type: Content.Type,
-        options: GenerationOptions,
-        session: LanguageModelSession
-    ) async throws -> LanguageModelSession.Response<Content> where Content: Generable {
-        var entries: [Transcript.Entry] = []
-        var text = ""
-        var lastOutput: [JSONValue]?
-        var lastMetadata: ResponseMetadata?
-        var lastTokenUsage: TokenUsage?
-        var messages = messages
-        while true {
-            let params = try OpenResponsesAPI.createRequestBody(
-                model: model,
-                messages: messages,
-                tools: tools,
-                generating: type,
-                options: options,
-                stream: false
-            )
-            let httpResponse: HTTPClientDecodedResponse<OpenResponsesAPI.Response> = try await httpClient.sendResponse(
-                path: "responses",
-                method: .post,
-                queryItems: nil,
-                headers: nil,
-                body: params,
-                responseType: OpenResponsesAPI.Response.self
-            )
-            let resp = httpResponse.body
-
-            lastMetadata = ResponseMetadata
-                .providerHTTPMetadata(
-                    requestID: httpResponse.requestID,
-                    headers: httpResponse.headers,
-                    providerName: "Open Responses"
-                )
-                .merging(resp.responseMetadata(providerName: "Open Responses", defaultModelID: model))
-            lastTokenUsage = resp.usage?.tokenUsage
-            let toolCalls = extractToolCallsFromOutput(resp.output)
-            lastOutput = resp.output
-            if !toolCalls.isEmpty {
-                if let output = resp.output {
-                    for item in output {
-                        messages.append(OpenResponsesMessage(role: .raw(rawContent: item), content: .text("")))
-                    }
-                }
-                let resolution = try await resolveToolCalls(toolCalls, session: session)
-                switch resolution {
-                case .stop(let calls):
-                    if !calls.isEmpty {
-                        entries.append(.toolCalls(Transcript.ToolCalls(calls)))
-                    }
-                    let empty = try emptyResponseContent(for: type)
-                    return LanguageModelSession.Response(
-                        content: empty.content,
-                        rawContent: empty.rawContent,
-                        transcriptEntries: entries,
-                        tokenUsage: lastTokenUsage,
-                        responseMetadata: lastMetadata
+                    let messages = openResponsesMessages(from: request)
+                    let tools = request.tools.map(openResponsesToolDefinition)
+                    let body = try OpenResponsesAPI.createRequestBody(
+                        model: model,
+                        messages: messages,
+                        tools: tools.isEmpty ? nil : tools,
+                        structuredOutput: request.structuredOutput,
+                        toolChoice: request.toolChoice,
+                        options: request.generationOptions,
+                        stream: true
                     )
-                case .invocations(let invocations):
-                    if !invocations.isEmpty {
-                        entries.append(.toolCalls(Transcript.ToolCalls(invocations.map { $0.call })))
-                        for inv in invocations {
-                            entries.append(.toolOutput(inv.output))
-                            messages.append(
-                                OpenResponsesMessage(
-                                    role: .tool(id: inv.call.callId),
-                                    content: .text(openResponsesConvertSegmentsToToolContentString(inv.output.segments))
-                                )
-                            )
+                    let eventStream = try await httpClient.decodedEventStreamResponse(
+                        path: "responses",
+                        body: body,
+                        as: OpenResponsesStreamEvent.self
+                    )
+                    continuation.yield(.started(ResponseMetadata.providerHTTPMetadata(
+                        requestID: eventStream.requestID,
+                        headers: eventStream.headers,
+                        providerName: "Open Responses",
+                        modelID: model
+                    )))
+
+                    var accumulatedText = ""
+                    var streamingToolCalls: [String: StreamingOpenResponsesToolCall] = [:]
+                    var continuationItems = OpenResponsesContinuationItemBuffer()
+                    var completedResponseID: String?
+                    var completedModelID: String?
+
+                    for try await event in eventStream.events {
+                        switch event {
+                        case .outputTextDelta(let delta):
+                            accumulatedText += delta
+                            if request.structuredOutput != nil, let content = try? GeneratedContent(json: accumulatedText) {
+                                continuation.yield(.structuredDelta(id: "open-responses-structured", delta: content))
+                            } else {
+                                continuation.yield(.textDelta(id: "open-responses-text", delta: delta))
+                            }
+
+                        case .outputItemAdded(let item):
+                            continuationItems.record(item)
+                            switch item.type {
+                            case "function_call":
+                                if let name = item.name {
+                                    streamingToolCalls[item.id] = StreamingOpenResponsesToolCall(
+                                        id: item.id,
+                                        callId: item.callID ?? item.id,
+                                        name: name,
+                                        arguments: item.arguments ?? ""
+                                    )
+                                    continuation.yield(.toolInputStarted(.init(
+                                        id: item.id,
+                                        callId: item.callID ?? item.id,
+                                        toolName: name
+                                    )))
+                                    if let arguments = item.arguments, arguments.isEmpty == false {
+                                        continuation.yield(.toolInputDelta(id: item.id, delta: arguments))
+                                    }
+                                }
+                            case "reasoning":
+                                continuation.yield(.reasoningStarted(id: item.id, metadata: nil))
+                                for summary in item.summaryText {
+                                    continuation.yield(.reasoningDelta(id: item.id, delta: summary))
+                                }
+                                continuation.yield(.reasoningCompleted(Transcript.Reasoning(
+                                    id: item.id,
+                                    summary: item.summaryText,
+                                    encryptedReasoning: item.encryptedContent,
+                                    status: .completed
+                                )))
+                            default:
+                                break
+                            }
+
+                        case .functionCallArgumentsDelta(let itemID, let delta):
+                            streamingToolCalls[itemID]?.arguments += delta
+                            continuation.yield(.toolInputDelta(id: itemID, delta: delta))
+
+                        case .functionCallArgumentsDone(let itemID, let arguments):
+                            streamingToolCalls[itemID]?.arguments = arguments
+                            continuationItems.updateFunctionCallArguments(itemID: itemID, arguments: arguments)
+                            continuation.yield(.toolInputCompleted(id: itemID))
+
+                        case .completed(let response):
+                            completedResponseID = response?.id
+                            completedModelID = response?.model
+                            if let usage = response?.usage?.tokenUsage {
+                                continuation.yield(.usage(usage))
+                            }
+                            if let metadata = response?.responseMetadata(
+                                providerName: "Open Responses",
+                                defaultModelID: model
+                            ) {
+                                continuation.yield(.metadata(metadata))
+                            }
+
+                        case .failed:
+                            continuation.yield(.failed(.init(
+                                code: "stream_failed",
+                                message: "Open Responses stream failed"
+                            )))
+                            continuation.finish()
+                            return
+
+                        case .ignored:
+                            break
                         }
-                        continue
                     }
+
+                    let rawItems = continuationItems.rawItems()
+                    let providerContinuation = openResponsesContinuation(
+                        output: rawItems.isEmpty ? nil : rawItems,
+                        responseID: completedResponseID ?? UUID().uuidString,
+                        modelID: completedModelID ?? model
+                    )
+                    let calls = try streamingToolCalls.values
+                        .sorted { $0.id < $1.id }
+                        .map { ModelToolCall(call: try $0.transcriptToolCall(), kind: .local) }
+                    if calls.isEmpty == false {
+                        continuation.yield(.toolCallsCompleted(calls, continuation: providerContinuation))
+                    }
+                    continuation.yield(.completed(.init(
+                        finishReason: calls.isEmpty ? .completed : .toolCalls,
+                        continuation: providerContinuation
+                    )))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
                 }
             }
 
-            text = resp.outputText ?? extractTextFromOutput(resp.output) ?? ""
-            break
+            continuation.onTermination = { _ in task.cancel() }
         }
-
-        if type == String.self {
-            return LanguageModelSession.Response(
-                content: text as! Content,
-                rawContent: GeneratedContent(text),
-                transcriptEntries: entries,
-                tokenUsage: lastTokenUsage,
-                responseMetadata: lastMetadata
-            )
-        }
-        if let jsonString = extractJSONFromOutput(lastOutput) {
-            let generatedContent = try GeneratedContent(json: jsonString)
-            let content = try type.init(generatedContent)
-            return LanguageModelSession.Response(
-                content: content,
-                rawContent: generatedContent,
-                transcriptEntries: entries,
-                tokenUsage: lastTokenUsage,
-                responseMetadata: lastMetadata
-            )
-        }
-        throw OpenResponsesLanguageModelError.noResponseGenerated
     }
 
     /// Produces empty content and raw content for the given type (used when tool execution stops the response).
@@ -871,6 +617,41 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
 // MARK: - API Request / Response
 
 private enum OpenResponsesAPI {
+    static func createRequestBody(
+        model: String,
+        messages: [OpenResponsesMessage],
+        tools: [OpenResponsesTool]?,
+        structuredOutput: StructuredOutputRequest?,
+        toolChoice: ToolChoice?,
+        options: GenerationOptions,
+        stream: Bool
+    ) throws -> JSONValue {
+        var body = try createBaseRequestBody(
+            model: model,
+            messages: messages,
+            tools: tools,
+            options: options,
+            stream: stream
+        )
+
+        if let structuredOutput {
+            let schemaValue = try schemaValue(from: structuredOutput.format)
+            body["text"] = .object([
+                "format": .object([
+                    "type": .string("json_schema"),
+                    "name": .string("response_schema"),
+                    "strict": .bool(true),
+                    "schema": schemaValue,
+                ])
+            ])
+        }
+        if let toolChoice {
+            body["tool_choice"] = openResponsesToolChoiceJSON(toolChoice)
+        }
+
+        return .object(body)
+    }
+
     static func createRequestBody<Content: Generable>(
         model: String,
         messages: [OpenResponsesMessage],
@@ -879,6 +660,36 @@ private enum OpenResponsesAPI {
         options: GenerationOptions,
         stream: Bool
     ) throws -> JSONValue {
+        var body = try createBaseRequestBody(
+            model: model,
+            messages: messages,
+            tools: tools,
+            options: options,
+            stream: stream
+        )
+
+        if type != String.self {
+            let schemaValue = try type.generationSchema.toJSONValueForOpenResponsesStrictMode()
+            body["text"] = .object([
+                "format": .object([
+                    "type": .string("json_schema"),
+                    "name": .string("response_schema"),
+                    "strict": .bool(true),
+                    "schema": schemaValue,
+                ])
+            ])
+        }
+
+        return .object(body)
+    }
+
+    private static func createBaseRequestBody(
+        model: String,
+        messages: [OpenResponsesMessage],
+        tools: [OpenResponsesTool]?,
+        options: GenerationOptions,
+        stream: Bool
+    ) throws -> [String: JSONValue] {
         var body: [String: JSONValue] = [
             "model": .string(model),
             "stream": .bool(stream),
@@ -960,18 +771,6 @@ private enum OpenResponsesAPI {
             body["tools"] = .array(tools.map { $0.jsonValue })
         }
 
-        if type != String.self {
-            let schemaValue = try type.generationSchema.toJSONValueForOpenResponsesStrictMode()
-            body["text"] = .object([
-                "format": .object([
-                    "type": .string("json_schema"),
-                    "name": .string("response_schema"),
-                    "strict": .bool(true),
-                    "schema": schemaValue,
-                ])
-            ])
-        }
-
         if let temp = options.temperature { body["temperature"] = .double(temp) }
         if let max = options.maximumResponseTokens { body["max_output_tokens"] = .int(max) }
 
@@ -1007,7 +806,16 @@ private enum OpenResponsesAPI {
                 for (k, v) in extra { body[k] = v }
             }
         }
-        return .object(body)
+        return body
+    }
+
+    private static func schemaValue(from format: ResponseFormat) throws -> JSONValue {
+        switch format {
+        case .text:
+            return .object([:])
+        case .jsonSchema(_, let schema, _), .generatedContent(_, let schema, _):
+            return try schema.toJSONValueForOpenResponsesStrictMode()
+        }
     }
 
     struct Response: Decodable, Sendable {
@@ -1061,6 +869,19 @@ private func openResponsesToolChoiceJSON(_ choice: OpenResponsesLanguageModel.Cu
     }
 }
 
+private func openResponsesToolChoiceJSON(_ choice: ToolChoice) -> JSONValue {
+    switch choice {
+    case .automatic:
+        .string("auto")
+    case .none:
+        .string("none")
+    case .required:
+        .string("required")
+    case .named(let name):
+        .object(["type": .string("function"), "name": .string(name)])
+    }
+}
+
 // MARK: - Transcript → Open Responses
 
 private struct OpenResponsesMessage: Sendable {
@@ -1082,6 +903,77 @@ private struct OpenResponsesMessage: Sendable {
 private enum OpenResponsesBlock: Sendable {
     case text(String)
     case imageURL(String)
+}
+
+private func openResponsesMessages(from request: ModelRequest) -> [OpenResponsesMessage] {
+    var list: [OpenResponsesMessage] = []
+    if let instructions = request.instructions {
+        list.append(OpenResponsesMessage(role: .system, content: .text(instructions.description)))
+    }
+
+    let continuationItems = openResponsesContinuationItems(from: request.continuation)
+    let hasProviderContinuation = continuationItems.isEmpty == false
+
+    for message in request.messages {
+        switch message.role {
+        case .system:
+            list.append(OpenResponsesMessage(
+                role: .system,
+                content: .blocks(openResponsesConvertSegmentsToBlocks(message.segments))
+            ))
+        case .user:
+            list.append(OpenResponsesMessage(
+                role: .user,
+                content: .blocks(openResponsesConvertSegmentsToBlocks(message.segments))
+            ))
+        case .assistant:
+            if hasProviderContinuation,
+                message.providerMetadata["tool_calls"] != nil
+            {
+                continue
+            }
+            list.append(OpenResponsesMessage(
+                role: .assistant,
+                content: .blocks(openResponsesConvertSegmentsToBlocks(message.segments))
+            ))
+        case .tool:
+            guard case let .string(callID)? = message.providerMetadata["call_id"] else {
+                continue
+            }
+            list.append(OpenResponsesMessage(
+                role: .tool(id: callID),
+                content: .blocks(openResponsesConvertSegmentsToBlocks(message.segments))
+            ))
+        case .providerDefined:
+            break
+        }
+    }
+
+    if hasProviderContinuation {
+        var merged: [OpenResponsesMessage] = []
+        for item in continuationItems {
+            merged.append(OpenResponsesMessage(role: .raw(rawContent: item), content: .text("")))
+        }
+        merged.append(contentsOf: list.filter { message in
+            if case .tool = message.role { return true }
+            if case .user = message.role { return true }
+            if case .system = message.role { return true }
+            return false
+        })
+        return merged
+    }
+
+    return list
+}
+
+private func openResponsesContinuationItems(from continuation: ProviderContinuation?) -> [JSONValue] {
+    guard let continuation,
+        continuation.providerName == "Open Responses" || continuation.providerName == "OpenAI"
+    else { return [] }
+    guard case let .object(payload) = continuation.payload,
+        case let .array(items)? = payload["output"]
+    else { return [] }
+    return items
 }
 
 extension Transcript {
@@ -1218,6 +1110,95 @@ private func convertToolToOpenResponsesFormat(_ tool: any Tool) -> OpenResponses
     )
 }
 
+private func openResponsesToolDefinition(_ definition: ToolDefinition) -> OpenResponsesTool {
+    let parameters = definition.schema.withResolvedRoot()
+        .flatMap { try? JSONValue($0) }
+        ?? (try? JSONValue(definition.schema))
+    return OpenResponsesTool(
+        name: definition.name,
+        description: definition.description ?? "",
+        parameters: parameters
+    )
+}
+
+private func openResponsesContent(
+    from output: [JSONValue]?,
+    outputText: String?,
+    structuredOutput: StructuredOutputRequest?
+) throws -> GeneratedContent? {
+    if structuredOutput != nil {
+        if let jsonString = extractJSONFromOutput(output) ?? outputText {
+            return try GeneratedContent(json: jsonString)
+        }
+        return nil
+    }
+    return GeneratedContent(outputText ?? extractTextFromOutput(output) ?? "")
+}
+
+private func openResponsesContinuation(output: [JSONValue]?, responseID: String, modelID: String?) -> ProviderContinuation? {
+    guard let output, output.isEmpty == false else { return nil }
+    return ProviderContinuation(
+        providerName: "Open Responses",
+        modelID: modelID,
+        turnID: responseID,
+        payload: .object(["output": .array(output)])
+    )
+}
+
+private func reasoningEntries(from output: [JSONValue]?) -> [Transcript.Reasoning] {
+    guard let output else { return [] }
+    return output.compactMap { item in
+        guard case let .object(object) = item,
+            object.jsonString(forKey: "type") == "reasoning",
+            let id = object.jsonString(forKey: "id")
+        else { return nil }
+        return Transcript.Reasoning(
+            id: id,
+            summary: openResponsesReasoningSummary(from: object["summary"]),
+            encryptedReasoning: object.jsonString(forKey: "encrypted_content"),
+            status: .completed
+        )
+    }
+}
+
+private func openResponsesReasoningSummary(from value: JSONValue?) -> [String] {
+    guard let value else { return [] }
+    switch value {
+    case .string(let text):
+        return [text]
+    case .array(let values):
+        return values.compactMap { value in
+            if case let .string(text) = value {
+                return text
+            }
+            if case let .object(object) = value,
+                case let .string(text)? = object["text"]
+            {
+                return text
+            }
+            return nil
+        }
+    default:
+        return []
+    }
+}
+
+private func modelToolCalls(from toolCalls: [OpenResponsesToolCall]) throws -> [ModelToolCall] {
+    try toolCalls.map { call in
+        let arguments = try call.arguments.map(GeneratedContent.init(json:)) ?? GeneratedContent(properties: [:])
+        return ModelToolCall(
+            call: Transcript.ToolCall(
+                id: call.id,
+                callId: call.callId,
+                toolName: call.name,
+                arguments: arguments,
+                status: .completed
+            ),
+            kind: .local
+        )
+    }
+}
+
 // MARK: - Tool call extraction and resolution
 
 private struct OpenResponsesToolCall: Sendable {
@@ -1339,16 +1320,6 @@ private func extractJSONFromOutput(_ output: [JSONValue]?) -> String? {
     return nil
 }
 
-private struct OpenResponsesToolInvocationResult: Sendable {
-    let call: Transcript.ToolCall
-    let output: Transcript.ToolOutput
-}
-
-private enum OpenResponsesToolResolutionOutcome: Sendable {
-    case stop(calls: [Transcript.ToolCall])
-    case invocations([OpenResponsesToolInvocationResult])
-}
-
 private struct StreamingOpenResponsesToolCall: Sendable {
     var id: String
     var callId: String
@@ -1363,32 +1334,6 @@ private struct StreamingOpenResponsesToolCall: Sendable {
             arguments: arguments.isEmpty ? GeneratedContent(properties: [:]) : GeneratedContent(json: arguments),
             status: .completed
         )
-    }
-}
-
-private func resolveToolCalls(
-    _ toolCalls: [OpenResponsesToolCall],
-    session: LanguageModelSession
-) async throws -> OpenResponsesToolResolutionOutcome {
-    if toolCalls.isEmpty { return .invocations([]) }
-    var transcriptCalls: [Transcript.ToolCall] = []
-    for c in toolCalls {
-        let args = (c.arguments.flatMap { try? GeneratedContent(json: $0) } ?? GeneratedContent(properties: [:]))
-        transcriptCalls.append(Transcript.ToolCall(
-            id: c.id,
-            callId: c.callId,
-            toolName: c.name,
-            arguments: args,
-            status: .completed
-        ))
-    }
-    guard !transcriptCalls.isEmpty else { return .invocations([]) }
-
-    switch try await session.executeToolCalls(transcriptCalls, recordTranscript: false) {
-    case .stop(let calls):
-        return .stop(calls: calls)
-    case .outputs(let results):
-        return .invocations(results.map { OpenResponsesToolInvocationResult(call: $0.call, output: $0.output) })
     }
 }
 

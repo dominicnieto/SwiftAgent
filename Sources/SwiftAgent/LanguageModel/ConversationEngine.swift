@@ -564,6 +564,7 @@ package struct ModelEventReducer: Sendable {
 
 /// A transcript-derived snapshot emitted while the shared engine reduces a model stream.
 package struct ConversationStreamSnapshot: Sendable, Equatable {
+  package var modelEvent: ModelStreamEvent?
   package var transcript: Transcript
   package var rawContent: GeneratedContent?
   package var transcriptEntries: [Transcript.Entry]
@@ -573,6 +574,7 @@ package struct ConversationStreamSnapshot: Sendable, Equatable {
   package var continuation: ProviderContinuation?
 
   package init(
+    modelEvent: ModelStreamEvent? = nil,
     transcript: Transcript,
     rawContent: GeneratedContent? = nil,
     transcriptEntries: [Transcript.Entry] = [],
@@ -581,6 +583,7 @@ package struct ConversationStreamSnapshot: Sendable, Equatable {
     completion: ModelTurnCompletion? = nil,
     continuation: ProviderContinuation? = nil,
   ) {
+    self.modelEvent = modelEvent
     self.transcript = transcript
     self.rawContent = rawContent
     self.transcriptEntries = transcriptEntries
@@ -713,7 +716,7 @@ package actor ConversationEngine {
             try Task.checkCancellation()
             let reduction = try reducer.reduce(event)
             try Task.checkCancellation()
-            let snapshot = await self.apply(reduction)
+            let snapshot = await self.apply(reduction, event: event)
             try Task.checkCancellation()
             if case .terminated = continuation.yield(snapshot) {
               return
@@ -744,7 +747,7 @@ package actor ConversationEngine {
   }
 
   @discardableResult
-  private func apply(_ reduction: ModelEventReduction) -> ConversationStreamSnapshot {
+  private func apply(_ reduction: ModelEventReduction, event: ModelStreamEvent? = nil) -> ConversationStreamSnapshot {
     recorder.recordEntries(reduction.transcriptEntries, to: &state)
     if let rawContent = reduction.rawContent, let status = reduction.responseStatus {
       recorder.recordResponse(rawContent: rawContent, status: status, to: &state)
@@ -756,6 +759,7 @@ package actor ConversationEngine {
       in: &state,
     )
     return ConversationStreamSnapshot(
+      modelEvent: event,
       transcript: state.transcript,
       rawContent: reduction.rawContent,
       transcriptEntries: reduction.transcriptEntries,

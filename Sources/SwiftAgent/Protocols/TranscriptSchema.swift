@@ -10,7 +10,7 @@ public protocol GroundingSupportingSchema {}
 /// for a session. In typical apps you don't conform to this protocol manually—annotate a type with
 /// the ``SessionSchema`` macro and the compiler will synthesize the required metadata and helper
 /// wrappers for you.
-public protocol LanguageModelSessionSchema {
+public protocol TranscriptSchema {
   /// Your app's type that represents a resolved grounding item emitted by the transcript resolver.
   associatedtype DecodedGrounding: SwiftAgent.DecodedGrounding
 
@@ -32,7 +32,7 @@ public protocol LanguageModelSessionSchema {
   static func structuredOutputs() -> [any (SwiftAgent.DecodableStructuredOutput<DecodedStructuredOutput>).Type]
 }
 
-public extension LanguageModelSessionSchema {
+public extension TranscriptSchema {
   func transcriptResolver() -> TranscriptResolver<Self> {
     TranscriptResolver(for: self)
   }
@@ -43,14 +43,14 @@ public extension LanguageModelSessionSchema {
   }
 }
 
-package extension LanguageModelSessionSchema {
+package extension TranscriptSchema {
   nonisolated func encodeGrounding(_ grounding: [DecodedGrounding]) throws -> Data {
     try JSONEncoder().encode(grounding)
   }
 }
 
 /// A default transcript resolver that can be used when no custom resolver is provided. It is empty.
-public struct NoSchema: LanguageModelSessionSchema {
+public struct NoSchema: TranscriptSchema {
   public let tools: [any DecodableTool<DecodedToolRun>] = []
   public static func structuredOutputs() -> [any DecodableStructuredOutput<DecodedStructuredOutput>.Type] {
     []

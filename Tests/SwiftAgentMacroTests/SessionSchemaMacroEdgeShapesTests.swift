@@ -82,7 +82,7 @@ struct SessionSchemaMacroEdgeShapesTests {
         }
       }
 
-      extension SessionSchema: LanguageModelSessionSchema {
+      extension SessionSchema: TranscriptSchema {
       }
       """
     }
@@ -179,7 +179,7 @@ struct SessionSchemaMacroEdgeShapesTests {
         }
       }
 
-      extension SessionSchema: LanguageModelSessionSchema {
+      extension SessionSchema: TranscriptSchema {
       }
       """
     }
@@ -291,7 +291,7 @@ struct SessionSchemaMacroEdgeShapesTests {
         }
       }
 
-      extension SessionSchema: LanguageModelSessionSchema {
+      extension SessionSchema: TranscriptSchema {
       }
       """
     }

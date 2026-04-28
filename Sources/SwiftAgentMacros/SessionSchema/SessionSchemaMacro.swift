@@ -5,7 +5,7 @@ import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
 
-/// Member macro that synthesizes boilerplate required by `LanguageModelSessionSchema`
+/// Member macro that synthesizes boilerplate required by `TranscriptSchema`
 /// conformances, including tool wrappers and decoding helpers.
 public struct SessionSchemaMacro: MemberMacro {
   public static func expansion(

@@ -27,13 +27,13 @@ struct CityExplorerSchema {
 func planCopenhagenWeekend() async throws {
   let schema = CityExplorerSchema()
   let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
-  let session = LanguageModelSession(
+  let session = AgentSession(
     model: model,
-    tools: [schema.cityFacts, schema.reservation],
+    schema: schema,
     instructions: "Design cinematic weekends. Call tools for local intel and reservations.",
   )
 
-  let response = try await session.respond(
+  let response = try await session.run(
     to: Prompt {
       PromptTag("context") {
         "Travel date: \(Date(timeIntervalSinceNow: 86_400))"
@@ -461,9 +461,9 @@ struct SessionSchema {
 
 let sessionSchema = SessionSchema()
 let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
-let session = LanguageModelSession(
+let session = AgentSession(
   model: model,
-  tools: [sessionSchema.weatherTool, sessionSchema.calculatorTool],
+  schema: sessionSchema,
   instructions: "You are a helpful assistant.",
 )
 ```
@@ -488,13 +488,13 @@ struct SessionSchema {
 
 let sessionSchema = SessionSchema()
 let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
-let session = LanguageModelSession(
+let session = AgentSession(
   model: model,
-  tools: [sessionSchema.weatherTool],
+  schema: sessionSchema,
   instructions: "You are a helpful assistant.",
 )
 
-// let response = try await session.respond(to: "What's the weather like in San Francisco?")
+// let response = try await session.run(to: "What's the weather like in San Francisco?")
 // ...
 
 for entry in try sessionSchema.resolve(session.transcript) {
@@ -534,7 +534,7 @@ let sessionSchema = SessionSchema()
 let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
 let session = LanguageModelSession(
   model: model,
-  tools: [sessionSchema.weatherTool],
+  schema: sessionSchema,
   instructions: "You are a helpful assistant.",
 )
 
@@ -581,7 +581,7 @@ let sessionSchema = SessionSchema()
 let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
 let session = LanguageModelSession(
   model: model,
-  tools: [sessionSchema.weatherTool],
+  schema: sessionSchema,
   instructions: "You are a helpful assistant.",
 )
 
@@ -637,7 +637,7 @@ let sessionSchema = SessionSchema()
 let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
 let session = LanguageModelSession(
   model: model,
-  tools: [sessionSchema.weatherTool],
+  schema: sessionSchema,
   instructions: "You are a helpful assistant.",
 )
 
@@ -674,7 +674,7 @@ let sessionSchema = SessionSchema()
 let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
 let session = LanguageModelSession(
   model: model,
-  tools: [sessionSchema.weatherTool],
+  schema: sessionSchema,
   instructions: "You are a helpful assistant.",
 )
 
@@ -864,7 +864,7 @@ let configuration = SimulationConfiguration(defaultGenerations: [
 let model = SimulationLanguageModel(configuration: configuration)
 let session = LanguageModelSession(
   model: model,
-  tools: sessionSchema.tools,
+  schema: sessionSchema,
   instructions: "You are a helpful assistant."
 )
 

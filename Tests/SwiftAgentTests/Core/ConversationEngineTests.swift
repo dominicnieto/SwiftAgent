@@ -399,36 +399,7 @@ private final class ConversationEngineMockProvider: LanguageModel, @unchecked Se
     }
   }
 
-  func respond<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) async throws -> LanguageModelSession.Response<Content> where Content: Generable & Sendable {
-    _ = session
-    _ = prompt
-    _ = type
-    _ = includeSchemaInPrompt
-    _ = options
-    throw LanguageModelContractError.sessionTurnNotImplemented(modelType: String(reflecting: Self.self))
-  }
 
-  func streamResponse<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) -> sending LanguageModelSession.ResponseStream<Content>
-    where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
-    _ = session
-    _ = prompt
-    _ = type
-    _ = includeSchemaInPrompt
-    _ = options
-    return LanguageModelSession.ResponseStream(stream: AsyncThrowingStream { $0.finish() })
-  }
 }
 
 private struct LookupTool: Tool {
@@ -482,34 +453,5 @@ private final class CancellationTrackingProvider: LanguageModel, @unchecked Send
     Issue.record("Expected provider stream to be cancelled")
   }
 
-  func respond<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) async throws -> LanguageModelSession.Response<Content> where Content: Generable & Sendable {
-    _ = session
-    _ = prompt
-    _ = type
-    _ = includeSchemaInPrompt
-    _ = options
-    throw LanguageModelContractError.sessionTurnNotImplemented(modelType: String(reflecting: Self.self))
-  }
 
-  func streamResponse<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) -> sending LanguageModelSession.ResponseStream<Content>
-    where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
-    _ = session
-    _ = prompt
-    _ = type
-    _ = includeSchemaInPrompt
-    _ = options
-    return LanguageModelSession.ResponseStream(stream: AsyncThrowingStream { $0.finish() })
-  }
 }
