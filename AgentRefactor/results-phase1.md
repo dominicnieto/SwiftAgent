@@ -18,7 +18,6 @@ Completed on 2026-04-27.
   - `ModelResponse`
   - `ModelToolCall`
   - `ModelTurnCompletion`
-  - `ProviderContinuation`
   - `ModelPrewarmRequest`
   - `FeedbackAttachmentRequest`
 - Added provider-neutral tool and output request types:
@@ -83,11 +82,14 @@ Formatter note:
 
 ## Notes For Phase 2
 
-- `ProviderContinuation` is currently public because the public `LanguageModel` protocol exposes public `ModelRequest`, `ModelResponse`, and `ModelStreamEvent` values that carry continuations. Phase 2 should make an explicit API ownership decision before expanding usage:
-  - If third-party provider authoring is public API, keep the neutral model-turn types public and document `ProviderContinuation` as advanced provider-authoring state.
-  - If providers are internal to SwiftAgent, make the neutral provider-turn contract package-scoped so `ProviderContinuation` can also be package/internal.
-  - If apps need to carry continuation state but not inspect it, introduce an opaque public wrapper around provider-native continuation payloads.
+- Fork update: `ProviderContinuation` was removed after this phase. Public `LanguageModel` remains the provider/model backend API, and provider-native state is preserved through `providerMetadata` on model/transcript values.
 - The old `LanguageModelSession`-shaped provider methods still exist and remain the path used by current providers and `LanguageModelSession`. They are isolated as compatibility surface for later phases rather than removed in Phase 1.
 - `LanguageModelStreamEvent` remains in place for existing session streaming. `ModelStreamEvent` is the new provider-neutral event type that Phase 2's reducer should target.
-- `ModelRequest.messages`, `ModelAttachment`, and `StructuredOutputRequest.includeSchemaInPrompt` are intentionally provider-neutral and do not yet define provider-specific serialization policy. Phase 2's `ModelRequestBuilder` should decide how transcript prompt entries, schema prompt injection, groundings, image segments, and provider continuations become these values.
+- `ModelRequest.messages`, `ModelAttachment`, and `StructuredOutputRequest.includeSchemaInPrompt` are intentionally provider-neutral and do not define provider-specific serialization policy. Phase 2's `ModelRequestBuilder` decides how transcript prompt entries, schema prompt injection, groundings, image segments, and provider metadata become these values.
 - The neutral `ToolDefinition` and completed `ModelToolCall` distinguish `.local` from `.providerDefined`, but execution policy still lives in the existing session/provider paths until `AgentSession` and the tool execution engine are built.
+
+## 2026-04-29 Verification Update
+
+- Phase 1 remains complete.
+- Current source no longer contains `ProviderContinuation`.
+- Current `ModelRequest`, `ModelResponse`, and `ModelStreamEvent` match the forked metadata-based design.

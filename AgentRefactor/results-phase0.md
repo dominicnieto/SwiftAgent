@@ -81,10 +81,17 @@ Gap found:
 - Structured streaming works in current Responses stream paths through partial JSON decoding, but capability flags only advertise `.structuredStreaming` for Anthropic.
 - `SimulationLanguageModel` is best treated as a deterministic provider for tests/previews, not as an agent loop. It can emit reasoning/tool transcript entries from configured generations but does not exercise provider-native continuation.
 
+## 2026-04-29 Fork Verification Update
+
+- Phases 1-7 are complete in the forked architecture.
+- The final fork did not keep `ProviderContinuation`; provider-native continuity is preserved through `providerMetadata` on model/transcript values and raw provider output.
+- `AgentSession` now owns `LanguageModelSession`, and `LanguageModelSession` owns `ConversationEngine`.
+- The original Phase 0 finding remains correct at the concept level: provider-native state must be preserved. The implementation mechanism changed from a separate continuation object to metadata-bearing public model/transcript records.
+
 ## Risks And Notes
 
-- Phase 1 should not design `ProviderContinuation` around public transcript entries. Public transcript lacks enough provider-native state for Responses reasoning/function calls and Anthropic thinking/tool-use signatures.
-- Moving tool execution out of providers will require replay test rewrites. The preserved assertions should move from "provider executes tools through main session policy" to "provider emits tool calls; `AgentSession` executes tools and sends provider continuation."
+- Phase 1 should preserve provider-native state without relying on plain text transcript content. The completed fork does this through `providerMetadata` and raw provider output rather than `ProviderContinuation`.
+- Moving tool execution out of providers required replay test rewrites. The preserved assertion is now "provider emits tool calls; `AgentSession` executes local tools and continues through `LanguageModelSession`."
 - `LanguageModelSession` may still need an API for tool definitions/manual tool-call inspection, but it must not continue to own tool execution policy or delegates.
 - Agent streaming needs to preserve richer provider events than current response snapshots: text deltas, structured deltas, reasoning, partial tool inputs, completed calls, tool outputs, usage, metadata, finish, raw events, and errors.
 - Token usage aggregation currently happens through session state across provider-owned loops. After the refactor, aggregation should live in `ConversationEngine`/`AgentSession`.
@@ -98,10 +105,10 @@ Gap found:
   - response format,
   - generation options,
   - attachments/images,
-  - optional `ProviderContinuation`.
+  - provider metadata on model messages/attachments where needed.
 - Define `ModelResponse` so providers can return final content, transcript entries, tool calls, reasoning, finish reason, usage, metadata, raw provider output, and next continuation without executing tools.
-- Define stream events before migrating providers. The current `LanguageModelStreamEvent` is close, but Phase 1 should add explicit completion/continuation semantics and avoid session-specific naming.
-- Keep `ProviderContinuation` package/internal initially. Include provider name, model ID, turn ID, and opaque `JSONValue` payload.
-- Add mock-provider tests for text, structured output, streaming deltas, tool-call completion, and opaque continuation before migrating real providers.
+- Define stream events before migrating providers. The current `LanguageModelStreamEvent` is close, but Phase 1 should add explicit completion semantics and avoid session-specific naming.
+- Do not add `ProviderContinuation` in the forked architecture; keep provider-native state in `providerMetadata`.
+- Add mock-provider tests for text, structured output, streaming deltas, tool-call completion, and metadata preservation before migrating real providers.
 - Treat current provider capability flags as data to preserve, not as the only source of truth. Some current flags are incomplete or variant-sensitive.
 - Keep Phase 1 provider migration minimal. The plan's "new protocol compiles with a mock provider" exit criterion is the right boundary.

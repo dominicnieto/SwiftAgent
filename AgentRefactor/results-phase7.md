@@ -38,3 +38,10 @@ Phase 7 aligned schema and macro naming with the new runtime split between direc
 ## Notes For Phase 8
 
 - README and example app documentation still need the broader conceptual rewrite called out in Phase 8.
+
+## 2026-04-29 Verification Update
+
+- Phase 7 remains complete.
+- Current schema protocol is `TranscriptSchema`.
+- `LanguageModelSessionSchema` is absent from source and tests.
+- Phase 8 should start from the current architecture docs, not the original `ProviderContinuation` plan.

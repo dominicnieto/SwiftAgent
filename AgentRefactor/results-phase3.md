@@ -9,7 +9,7 @@ Phase 3 migrated the first real provider end to end through the neutral model-tu
 ## Completed
 
 - Implemented the neutral `LanguageModel` turn contract with `ModelRequest`, `ModelResponse`, and `ModelStreamEvent`.
-- Added `ProviderContinuation` and used it to preserve provider-native Responses output items across tool turns.
+- Preserved provider-native Responses output items/IDs across tool turns through provider metadata and raw provider output.
 - Migrated Open Responses request building, response parsing, stream parsing, tool-call parsing, reasoning, usage, and metadata into the neutral turn types.
 - Routed Open Responses continuation turns through `ConversationEngine` instead of a session-shaped provider API.
 - Updated replay coverage for text, structured output, streaming, reasoning, malformed streamed tool arguments, tool-call continuation, and final answer after tool output.
@@ -17,7 +17,7 @@ Phase 3 migrated the first real provider end to end through the neutral model-tu
 ## Exit Criteria
 
 - One real provider passes text, structured output, streaming, reasoning, and tool continuation tests through the new engine.
-- Provider continuation state is stored as opaque provider-owned state, not reconstructed from public transcript.
+- Provider-native state is preserved as provider-owned metadata, not reconstructed from plain transcript text.
 
 ## Validation
 
@@ -32,3 +32,8 @@ Phase 3 migrated the first real provider end to end through the neutral model-tu
 
 - `LanguageModelSession` needed to become a direct conversation API only.
 - Tool execution needed to move out of `LanguageModelSession` and into `AgentSession`.
+
+## 2026-04-29 Verification Update
+
+- Phase 3 remains complete.
+- `OpenResponsesLanguageModel` is migrated under the neutral `LanguageModel` contract and now lives at `Sources/SwiftAgent/Providers/OpenResponses/OpenResponsesLanguageModel.swift`.

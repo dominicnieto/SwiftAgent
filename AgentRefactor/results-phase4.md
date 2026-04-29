@@ -38,3 +38,9 @@ Phase 4 rebuilt `LanguageModelSession` on top of `ConversationEngine` as a direc
 ## Notes For Phase 5
 
 - Agent loops, retries, local tool execution, and tool lifecycle streaming belong in `AgentSession`.
+
+## 2026-04-29 Verification Update
+
+- Phase 4 remains complete.
+- `LanguageModelSession` owns `ConversationEngine`, exposes direct model APIs, and does not execute local tools.
+- Explicit `respond(with toolOutputs:)` and `streamResponse(with toolOutputs:)` APIs exist for app-managed tool continuation.

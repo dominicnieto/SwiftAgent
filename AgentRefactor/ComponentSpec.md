@@ -1,597 +1,176 @@
 # SwiftAgent Refactor Component Spec
 
+Last verified: 2026-04-29.
+
 ## Design Principles
 
-1. The agent loop lives in one runtime, not inside every provider.
-2. Providers parse and serialize provider protocols; they do not execute tools.
-3. Public transcript and provider-native continuation state are separate.
-4. Streaming and non-streaming share the same turn model.
-5. `LanguageModelSession` is a stateful conversation API, not an agent.
-6. `AgentSession` is the explicit tool/task runtime.
-7. Current schema, structured output, prompt builder, transcript, and streaming state features should continue through the public transcript model.
+1. `LanguageModel` is the public lowest-level provider/model backend.
+2. `LanguageModelSession` is the public stateful low-level inference session.
+3. `AgentSession` is the public high-level agent/tool-loop runtime.
+4. Providers parse and serialize provider protocols; they do not execute local SwiftAgent tools.
+5. Provider-native state is preserved through `providerMetadata`, not a separate `ProviderContinuation`.
+6. Streaming and non-streaming share the same neutral model-turn contract.
+7. `@SessionSchema` resolves transcript data from either public session type.
 
 ## Component 1: LanguageModel
 
-### Purpose
+Purpose: one provider turn at a time.
 
-Raw provider/model adapter. A `LanguageModel` performs one model turn at a time.
-
-### Required API Shape
+Required shape:
 
 ```swift
 public protocol LanguageModel: Sendable {
-  associatedtype UnavailableReason: Sendable = Never
+  associatedtype UnavailableReason: Sendable
   associatedtype CustomGenerationOptions: SwiftAgent.CustomGenerationOptions = Never
 
   var availability: Availability<UnavailableReason> { get }
   var capabilities: LanguageModelCapabilities { get }
 
   func respond(to request: ModelRequest) async throws -> ModelResponse
-
-  func streamResponse(
-    to request: ModelRequest
-  ) -> AsyncThrowingStream<ModelStreamEvent, any Error>
+  func streamResponse(to request: ModelRequest) -> AsyncThrowingStream<ModelStreamEvent, any Error>
 
   func prewarm(for request: ModelPrewarmRequest)
-
   func logFeedbackAttachment(_ request: FeedbackAttachmentRequest) -> Data
 }
 ```
 
-The final names can change, but providers should receive a neutral `ModelRequest`, not a `LanguageModelSession`.
+`ModelRequest` contains messages, instructions, tools, tool choice, structured output request, generation options, and attachments. It does not contain a continuation object.
 
-### Required Data Types
+Provider-specific request reconstruction uses:
 
-```swift
-public struct ModelRequest: Sendable {
-  public var messages: [ModelMessage]
-  public var instructions: Instructions?
-  public var tools: [ToolDefinition]
-  public var toolChoice: ToolChoice?
-  public var structuredOutput: StructuredOutputRequest?
-  public var generationOptions: GenerationOptions
-  public var continuation: ProviderContinuation?
-  public var attachments: [ModelAttachment]
-}
-```
+- `ModelMessage.providerMetadata`
+- `Transcript.*.providerMetadata`
+- `ModelAttachment.providerMetadata`
+- `ResponseMetadata.providerMetadata`
+- provider-specific custom generation options
 
-```swift
-public struct StructuredOutputRequest: Sendable, Equatable {
-  public var format: ResponseFormat
-  public var includeSchemaInPrompt: Bool
-}
-```
+## Component 2: Model Turn Types
 
-`includeSchemaInPrompt` is request-building policy, not provider wire-format identity.
-`ModelRequestBuilder` should use it to decide whether schema instructions are injected into
-prompt messages before the provider serializes the neutral request. This preserves the current
-`LanguageModelSession.respond(... includeSchemaInPrompt:)` behavior while moving prompt construction
-out of providers.
+Required public types:
 
-```swift
-public enum ToolChoice: Sendable, Equatable {
-  case automatic
-  case none
-  case required
-  case named(String)
-}
-```
+- `ModelRequest`
+- `ModelMessage`
+- `ModelAttachment`
+- `ToolChoice`
+- `ToolDefinition`
+- `ToolDefinitionKind`
+- `StructuredOutputRequest`
+- `ResponseFormat`
+- `ModelResponse`
+- `ModelToolCall`
+- `ModelTurnCompletion`
+- `ModelStreamEvent`
+- `ToolInputStart`
+- `ToolCallPartial`
+- `ModelSource`
+- `ModelFile`
 
-`ToolChoice` should be provider-neutral and usable by both:
+Important constraints:
 
-- `LanguageModelSession`, when the caller wants manual tool-call inspection.
-- `AgentSession`, when the agent loop should allow, require, suppress, or force a specific tool call.
+- `ModelResponse` returns content, transcript entries, tool calls, reasoning, finish reason, usage, metadata, and raw provider output.
+- `ModelStreamEvent` exposes typed lifecycle events for text, structured output, reasoning, tool input, completed tool calls, provider tool results, sources/files, usage, metadata, completion, failure, warnings, and raw diagnostics.
+- `ModelToolCall.kind` distinguishes `.local` from `.providerDefined`.
+- `AgentSession` executes only `.local` tool calls.
 
-```swift
-public struct ToolDefinition: Sendable {
-  public var name: String
-  public var description: String?
-  public var schema: GenerationSchema
-  public var kind: ToolDefinitionKind
-  public var providerMetadata: JSONValue?
-}
+## Component 3: ConversationEngine
 
-public enum ToolDefinitionKind: Sendable, Equatable {
-  case local
-  case providerDefined
-}
-```
+Purpose: package-internal state machine owned by `LanguageModelSession`.
 
-Local tools are executed by `AgentSession` through SwiftAgent's tool execution runtime. Provider-defined tools are executed server-side by the model provider when the provider supports them. Providers may serialize, parse, and emit provider-defined tool calls/results, but they must not execute local SwiftAgent tools.
+Responsibilities:
 
-```swift
-public struct ModelResponse: Sendable {
-  public var content: GeneratedContent?
-  public var transcriptEntries: [Transcript.Entry]
-  public var toolCalls: [ModelToolCall]
-  public var reasoning: [Transcript.Reasoning]
-  public var finishReason: FinishReason
-  public var tokenUsage: TokenUsage?
-  public var responseMetadata: ResponseMetadata?
-  public var continuation: ProviderContinuation?
-  public var rawProviderOutput: JSONValue?
-}
-```
+- Store public `Transcript`.
+- Build `ModelRequest` from transcript, prompts, tool outputs, tools, active tool filters, structured output requests, images, and generation options.
+- Apply `ModelResponse`.
+- Reduce `ModelStreamEvent`.
+- Accumulate `TokenUsage`.
+- Accumulate latest `ResponseMetadata`.
+- Produce runtime stream snapshots.
+- Preserve prompt groundings for `@SessionSchema`.
 
-```swift
-public struct ModelToolCall: Sendable, Equatable {
-  public var call: Transcript.ToolCall
-  public var kind: ToolDefinitionKind
-  public var providerMetadata: [String: JSONValue]
-}
-```
+It does not own:
 
-Completed tool calls must preserve `ToolDefinitionKind`. `AgentSession` executes `.local`
-tool calls through SwiftAgent's tool runtime, but must not execute `.providerDefined` calls
-that were handled by provider/server-side tools.
+- Local tool execution.
+- Agent loop stop policy.
+- Provider wire formats.
+- A separate provider continuation store.
 
-```swift
-public enum ModelStreamEvent: Sendable, Equatable {
-  case started(ResponseMetadata?)
-  case warnings([ModelWarning])
-  case textStarted(id: String, metadata: ResponseMetadata?)
-  case textDelta(id: String, delta: String)
-  case textCompleted(id: String, metadata: ResponseMetadata?)
-  case structuredDelta(id: String, delta: GeneratedContent)
-  case reasoningStarted(id: String, metadata: ResponseMetadata?)
-  case reasoningDelta(id: String, delta: String)
-  case reasoningCompleted(Transcript.Reasoning)
-  case toolInputStarted(ToolInputStart)
-  case toolInputDelta(id: String, delta: String)
-  case toolInputCompleted(id: String)
-  case toolCallPartial(ToolCallPartial)
-  case toolCallsCompleted([ModelToolCall], continuation: ProviderContinuation?)
-  case providerToolResult(Transcript.ToolOutput)
-  case source(ModelSource)
-  case file(ModelFile)
-  case usage(TokenUsage)
-  case metadata(ResponseMetadata)
-  case completed(ModelTurnCompletion)
-  case failed(LanguageModelStreamError)
-  case raw(JSONValue)
-}
-```
+## Component 4: LanguageModelSession
 
-This stream taxonomy is intentionally richer than simple text snapshots. It follows the production-tested shape used by Vercel/Swift AI SDK stream parts: explicit start/delta/end events for text, reasoning, and tool input; complete tool calls/results; warnings; source/file events; finish; raw; and error events. SwiftAgent should adapt names to its own types, but keep the same lifecycle coverage so chat UI, approvals, diagnostics, and provider-defined tools can be layered on later.
+Purpose: public direct model/session API.
 
-```swift
-public struct ModelTurnCompletion: Sendable, Equatable {
-  public var finishReason: FinishReason
-  public var continuation: ProviderContinuation?
-}
-```
+Required behavior:
 
-### ProviderContinuation
+- Own a private `ConversationEngine`.
+- Expose transcript, token usage, response metadata, and `isResponding`.
+- Provide `respond(...)` and `streamResponse(...)`.
+- Provide `respond(with toolOutputs:)` and `streamResponse(with toolOutputs:)`.
+- Register tools for model-visible tool schemas without executing them.
+- Support structured output, prompt builder, images, groundings, and schema overloads.
+- Expose public response snapshots for direct UI use.
+- Expose package-only runtime hooks for `AgentSession`.
 
-`ProviderContinuation` is the key missing abstraction.
+Must not:
 
-```swift
-package struct ProviderContinuation: Sendable, Codable, Equatable {
-  package var providerName: String
-  package var modelID: String?
-  package var turnID: String
-  package var payload: JSONValue
-}
-```
+- Execute local tools.
+- Loop after tool calls.
+- Own retry/approval/missing-tool policy.
 
-`ProviderContinuation` should stay package/internal if all supported providers live inside SwiftAgent.
-This is an API ownership decision, not a hard correctness rule. Before Phase 2 expands usage,
-choose one of these directions:
+## Component 5: AgentSession
 
-- Public provider-authoring API: keep `LanguageModel`, `ModelRequest`, `ModelResponse`,
-  `ModelStreamEvent`, and `ProviderContinuation` public. Document `ProviderContinuation` as
-  advanced provider-authoring state, not as app-facing transcript data.
-- Internal provider API: make the neutral provider-turn contract package-scoped so
-  `ProviderContinuation` can also remain package/internal.
-- Opaque public state: keep request/response types public, but expose a public opaque wrapper
-  for continuation state so apps can carry it without inspecting provider-native payloads.
+Purpose: public high-level runtime for automatic tool execution.
 
-The runtime stores it but does not interpret it.
+Required behavior:
 
-Examples:
+- Own a `LanguageModelSession`.
+- Execute local tool calls.
+- Never execute provider-defined/server-side tool calls.
+- Enforce max iterations.
+- Preserve `ToolRunRejection` recovery.
+- Preserve existing tool execution policy behavior.
+- Expose typed final output and per-step history.
+- Stream model lifecycle, tool lifecycle, partial content, and final events.
+- Aggregate token usage and response metadata through its underlying session.
 
-- OpenAI Responses stores raw response output items.
-- Chat Completions stores assistant tool-call message state.
-- Anthropic stores assistant content blocks required for tool result continuation.
+Current implementation deliberately does not add `AgentRuntime` or an agent protocol. Concrete `AgentSession` is enough for phase 8 and for basic future orchestration with multiple sessions.
 
-### Provider Requirements
+## Component 6: Provider Requirements
 
-Every provider must implement:
+Every provider should:
 
-- Plain request serialization.
-- Tool definition serialization.
-- Provider-defined tool serialization.
-- Tool call parsing.
-- Tool output continuation serialization.
-- Streaming parser into `ModelStreamEvent`.
-- Provider continuation creation.
-- Provider continuation consumption.
-- Usage and response metadata normalization.
-- Structured output request support when capability is advertised.
+- Serialize `ModelRequest`.
+- Parse `ModelResponse`.
+- Parse `ModelStreamEvent`.
+- Serialize local tool definitions.
+- Serialize provider-defined tool definitions where supported.
+- Parse local and provider-defined tool calls distinctly.
+- Serialize tool outputs for continuation turns.
+- Preserve provider metadata needed by later turns.
+- Normalize usage, finish reasons, response metadata, errors, and warnings.
 
 Providers must not:
 
 - Call `Tool.call`.
-- Own max iteration loops.
-- Mutate a public session transcript directly.
-- Reconstruct continuation context from public transcript when provider-native state exists.
+- Own max-iteration loops.
+- Mutate public session transcript directly.
+- Depend on `LanguageModelSession`.
 
-Providers may emit provider-executed tool calls/results when a provider-defined server-side tool runs. Those events must be marked distinctly from local SwiftAgent tools so `AgentSession` does not try to execute them again.
+## Component 7: Provider Feature Matrices
 
-## Component 2: ConversationEngine and Shared Components
+Provider parity is tracked beside provider implementations:
 
-### Purpose
+- `Sources/SwiftAgent/Providers/OpenAI/FEATURE_PARITY.md`
+- `Sources/SwiftAgent/Providers/OpenResponses/FEATURE_PARITY.md`
+- `Sources/SwiftAgent/Providers/Anthropic/FEATURE_PARITY.md`
+- `Sources/SimulatedSession/Simulation/FEATURE_PARITY.md`
 
-Internal shared state machine used by `LanguageModelSession` and `AgentSession`.
+These matrices are phase-8/phase-9 inputs. They document provider-doc and AI SDK gaps; they are not all phase-7 completion requirements.
 
-### Required Responsibilities
+## Explicit Non-Goals Before Phase 8
 
-- Store public `Transcript`.
-- Store provider continuations keyed by turn/tool-call scope.
-- Build `ModelRequest`.
-- Apply `ModelResponse`.
-- Reduce `ModelStreamEvent`.
-- Track `TokenUsage`.
-- Track latest `ResponseMetadata`.
-- Provide typed structured output snapshots.
-- Handle prompt entries and image attachments.
-- Preserve prompt groundings for `@SessionSchema`.
-
-### API Shape
-
-```swift
-package final class ConversationEngine: Sendable {
-  package var transcript: Transcript { get }
-  package var tokenUsage: TokenUsage? { get }
-  package var responseMetadata: ResponseMetadata? { get }
-
-  package init(
-    model: any LanguageModel,
-    instructions: Instructions?
-  )
-
-  package func makeRequest(
-    prompt: Prompt?,
-    tools: [any Tool],
-    toolChoice: ToolChoice?,
-    activeToolNames: Set<String>?,
-    structuredOutput: StructuredOutputRequest?,
-    options: GenerationOptions,
-    continuation: ProviderContinuation?
-  ) throws -> ModelRequest
-
-  package func apply(_ response: ModelResponse) throws -> ConversationUpdate
-
-  package func reduce(_ event: ModelStreamEvent) throws -> ConversationUpdate
-
-  package func appendToolOutputs(
-    _ outputs: [Transcript.ToolOutput],
-    after continuation: ProviderContinuation?
-  ) throws -> ProviderContinuation?
-}
-```
-
-### Shared Helper Types
-
-Required helpers:
-
-- `ModelRequestBuilder`
-- `ProviderContinuationStore`
-- `TranscriptRecorder`
-- `ModelEventReducer`
-- `StructuredOutputAccumulator`
-- `PartialToolCallAccumulator`
-- `TokenUsageAccumulator`
-- `ResponseMetadataAccumulator`
-- `ToolDefinitionBuilder`
-- `AgentStopPolicy`
-
-### Transcript Rules
-
-The transcript stays provider-neutral.
-
-Allowed public transcript entries:
-
-- instructions
-- prompt
-- reasoning summary
-- tool calls
-- tool outputs
-- response
-
-Provider-native raw state must not be forced into public transcript entries. It belongs in `ProviderContinuationStore`.
-
-## Component 3: LanguageModelSession
-
-### Purpose
-
-Stateful conversation API for direct LLM calls.
-
-### API Shape
-
-```swift
-@Observable
-public final class LanguageModelSession: @unchecked Sendable {
-  public var isResponding: Bool { get }
-  public var transcript: Transcript { get }
-  public var tokenUsage: TokenUsage? { get }
-  public var responseMetadata: ResponseMetadata? { get }
-
-  public init(
-    model: any LanguageModel,
-    instructions: Instructions? = nil
-  )
-
-  public func respond(
-    to prompt: Prompt,
-    options: GenerationOptions
-  ) async throws -> LanguageModelSession.Response<String>
-
-  public func respond<Content: Generable & Sendable>(
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions
-  ) async throws -> LanguageModelSession.Response<Content>
-
-  public func streamResponse<Content>(
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions
-  ) -> LanguageModelSession.ResponseStream<Content>
-    where Content: Generable & Sendable,
-          Content.PartiallyGenerated: Sendable
-}
-```
-
-### Tool Call Policy
-
-`LanguageModelSession` should not automatically execute tools.
-
-Allowed:
-
-- Pass tool definitions for model planning or manual tool-call inspection.
-- Return parsed tool calls in `Response`.
-- Record model-emitted tool calls in the transcript.
-
-Not allowed:
-
-- Execute tools.
-- Continue a tool loop.
-- Own max tool rounds.
-
-If an app needs automatic tool execution, use `AgentSession`.
-
-### Existing Feature Continuity
-
-The following README features should continue to work through `LanguageModelSession`:
-
-- Basic text responses.
-- Structured responses with `@Generable`.
-- Prompt builder.
-- Images/attachments where provider supports them.
-- Transcript access.
-- Token usage.
-- Response metadata.
-- Reasoning summaries.
-- Streaming text.
-- Streaming structured output.
-- `@SessionSchema` transcript resolution for prompts, groundings, structured outputs, and manually returned tool calls.
-
-Tool execution examples should move from `LanguageModelSession` to `AgentSession`.
-
-## Component 4: AgentSession
-
-### Purpose
-
-Single-agent task runtime with a central tool loop.
-
-### API Shape
-
-```swift
-@Observable
-public final class AgentSession: @unchecked Sendable {
-  public var isRunning: Bool { get }
-  public var transcript: Transcript { get }
-  public var tokenUsage: TokenUsage? { get }
-  public var responseMetadata: ResponseMetadata? { get }
-
-  public init(
-    model: any LanguageModel,
-    tools: [any Tool] = [],
-    instructions: Instructions? = nil,
-    configuration: AgentConfiguration = .default
-  )
-
-  public func run(
-    _ input: String,
-    options: GenerationOptions
-  ) async throws -> AgentResult<String>
-
-  public func run<Content: Generable & Sendable>(
-    _ input: String,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions
-  ) async throws -> AgentResult<Content>
-
-  public func stream<Content>(
-    _ input: String,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions
-  ) -> AsyncThrowingStream<AgentEvent<Content>, any Error>
-    where Content: Generable & Sendable,
-          Content.PartiallyGenerated: Sendable
-}
-```
-
-### AgentConfiguration
-
-```swift
-public struct AgentConfiguration: Sendable, Equatable {
-  public var maxIterations: Int
-  public var toolExecutionPolicy: ToolExecutionPolicy
-  public var stopOnToolError: Bool
-}
-```
-
-Initial scope should include only:
-
-- `maxIterations`: prevents runaway model/tool loops.
-- `toolExecutionPolicy`: reuses the existing automatic/delegate/stop behavior.
-- `stopOnToolError`: controls whether failed tools abort the run or are returned to the model as recoverable output.
-
-Streaming throttling such as `minimumStreamingSnapshotInterval` should remain in `GenerationOptions` unless agent streaming later needs a separate event-throttling policy.
-
-Initial scope should not include memory, handoffs, approvals, retries, or guardrails, but the config should leave room for them.
-
-The public configuration starts with `maxIterations`, but the loop should be implemented through an internal stop-policy evaluator rather than scattering `iteration < maxIterations` checks throughout the runtime. This keeps richer stop conditions possible later without rewriting the loop. Vercel/Swift AI SDK models this as `stopWhen` conditions such as `stepCountIs` and `hasToolCall`; SwiftAgent should start with only max-iteration protection and keep a public richer stop-condition API for a future phase.
-
-### Sendability and State Isolation
-
-`AgentSession` should use the same concurrency pattern as `LanguageModelSession`: `@unchecked Sendable` plus locked mutable state.
-
-Rules:
-
-- Store mutable observable state inside a locked state container.
-- Do not hold locks across `await`.
-- Snapshot state before async model/tool work.
-- Re-enter the lock only to publish durable state changes.
-- Keep high-frequency stream events out of locked observable state unless they are also durable session state.
-
-### Observation Model
-
-`AgentSession` should be `@Observable`, but observable state should stay durable and low-frequency. High-frequency chat activity should be delivered through `stream(...)`.
-
-Observable properties:
-
-```swift
-public var isRunning: Bool { get }
-public var transcript: Transcript { get }
-public var tokenUsage: TokenUsage? { get }
-public var responseMetadata: ResponseMetadata? { get }
-public var currentIteration: Int { get }
-public var currentToolCalls: [Transcript.ToolCall] { get }
-public var currentToolOutputs: [Transcript.ToolOutput] { get }
-public var latestError: Error? { get }
-```
-
-Optional/debug-only:
-
-```swift
-public var latestEvent: AgentEventSummary? { get }
-```
-
-`latestEvent` should not be the primary chat UI delivery mechanism because agent events are transient and can be emitted faster than observation-driven UI state should model. Chat UI should consume `AgentSession.stream(...)` and append/render events explicitly.
-
-If added, `latestEvent` should be documented as a debugging and diagnostics aid, not as the main event stream. Practical uses:
-
-- A debug inspector showing the last agent event.
-- Logging or breakpoint-oriented diagnostics while developing providers/tools.
-- A lightweight status label such as "Calling weather tool..." when the exact full event history does not matter.
-
-### AgentResult
-
-```swift
-public struct AgentResult<Content: Sendable>: Sendable {
-  public var content: Content
-  public var rawContent: GeneratedContent
-  public var transcript: Transcript
-  public var steps: [AgentStepResult]
-  public var toolCalls: [Transcript.ToolCall]
-  public var toolOutputs: [Transcript.ToolOutput]
-  public var tokenUsage: TokenUsage?
-  public var responseMetadata: ResponseMetadata?
-  public var iterationCount: Int
-}
-```
-
-### AgentStepResult
-
-```swift
-public struct AgentStepResult: Sendable {
-  public var index: Int
-  public var transcriptEntries: [Transcript.Entry]
-  public var toolCalls: [Transcript.ToolCall]
-  public var toolOutputs: [Transcript.ToolOutput]
-  public var tokenUsage: TokenUsage?
-  public var responseMetadata: ResponseMetadata?
-  public var finishReason: FinishReason
-}
-```
-
-`AgentStepResult` makes each model/tool iteration inspectable. This mirrors the production-tested `steps` model in Vercel/Swift AI SDK and is useful for debugging, activity timelines, usage accounting, approval flows, and future orchestration.
-
-### AgentEvent
-
-```swift
-public enum AgentEvent<Content>: Sendable
-where Content: Generable & Sendable,
-      Content.PartiallyGenerated: Sendable {
-  case started
-  case iterationStarted(Int)
-  case modelEvent(ModelStreamEvent)
-  case partialContent(Content.PartiallyGenerated)
-  case toolInputStarted(Transcript.ToolCall)
-  case toolInputDelta(id: String, delta: String)
-  case toolInputCompleted(Transcript.ToolCall)
-  case toolCallStarted(Transcript.ToolCall)
-  case toolApprovalRequested(Transcript.ToolCall)
-  case toolExecutionStarted(Transcript.ToolCall)
-  case toolOutputDelta(Transcript.ToolOutput)
-  case toolCallCompleted(Transcript.ToolCall)
-  case toolOutput(Transcript.ToolOutput)
-  case toolExecutionFailed(Transcript.ToolCall, Error)
-  case iterationCompleted(AgentStepResult)
-  case completed(AgentResult<Content>)
-  case failed(Error)
-}
-```
-
-`AgentEvent` should mirror `LanguageModelSession.ResponseStream`: streamed content must be `Generable`, and its partial representation must be `Sendable`.
-
-This covers both normal text and structured output:
-
-- `String` conforms to `Generable`, and its partial representation is another `String`.
-- A macro-generated structured type conforms to `Generable`, and its partial representation is the macro-generated draft type.
-
-Agent events should also preserve tool lifecycle boundaries. The refactor does not build the full approval workflow yet, but it should expose enough event shape for a UI to later show streamed tool arguments, present approval sheets, show tool execution progress, and distinguish local tool execution from provider-executed tool results.
-
-### Loop Contract
-
-Agent loop:
-
-```text
-1. Build initial prompt.
-2. Request model turn with tools.
-3. Apply streamed or complete model response.
-4. If no tool calls, finish.
-5. Execute tool calls.
-6. Append tool outputs.
-7. Continue model turn with provider continuation state.
-8. Repeat until final response or max iterations.
-```
-
-### Existing Feature Continuity
-
-The following current README features should move to or also work with `AgentSession`:
-
-- Tool execution.
-- Tool run rejection and recoverable tool errors.
-- Streaming while the agent thinks, calls tools, and produces final output.
-- Typed tool run resolution via `@SessionSchema`.
-- Structured final output.
-- Transcript access.
-- Token usage aggregation across iterations.
-- Provider metadata for latest turn and possibly per-turn metadata later.
-
-`@SessionSchema` should continue to resolve `AgentSession.transcript` because the transcript shape remains shared.
-
-## Resolved Decisions
-
-1. `LanguageModelSession` may accept tool schemas for manual tool-call inspection, but it must not execute tools automatically.
-2. `ProviderContinuation` should be package/internal while all providers live in SwiftAgent.
-3. Rename the schema protocol to a runtime-neutral name. Current preference: `TranscriptSchema`.
-4. `AgentSession` should use `run` and `stream`, not `respond` and `streamResponse`, because it may perform multiple model/tool iterations before producing a final result.
+- Multi-agent orchestration.
+- Handoffs.
+- Memory/retrieval.
+- Approval UI.
+- New external providers.
+- Full OpenAI/Anthropic hosted-tool parity.
+- Full provider-doc parity.

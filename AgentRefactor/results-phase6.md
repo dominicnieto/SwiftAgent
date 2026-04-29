@@ -34,3 +34,14 @@ Phase 6 migrated the remaining providers and deterministic simulation provider t
 ## Notes For Phase 7
 
 - Schema naming and macro output still needed to be runtime-neutral and explicitly verified against both public session APIs.
+
+## 2026-04-29 Verification Update
+
+- Phase 6 remains complete.
+- Providers now live in provider-specific folders:
+  - `Sources/SwiftAgent/Providers/OpenAI/`
+  - `Sources/SwiftAgent/Providers/OpenResponses/`
+  - `Sources/SwiftAgent/Providers/Anthropic/`
+  - `Sources/SwiftAgent/Providers/Shared/`
+  - `Sources/SimulatedSession/Simulation/`
+- Provider feature/parity matrices were added beside the provider implementations for phase-8/phase-9 follow-up.

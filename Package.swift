@@ -49,6 +49,11 @@ let package = Package(
           condition: .when(traits: ["AsyncHTTPClient"]),
         ),
       ],
+      exclude: [
+        "Providers/Anthropic/FEATURE_PARITY.md",
+        "Providers/OpenAI/FEATURE_PARITY.md",
+        "Providers/OpenResponses/FEATURE_PARITY.md",
+      ],
       swiftSettings: [
         .define("SWIFTAGENT_ASYNC_HTTP_CLIENT", .when(traits: ["AsyncHTTPClient"])),
       ],
@@ -57,6 +62,9 @@ let package = Package(
       name: "SimulatedSession",
       dependencies: [
         "SwiftAgent",
+      ],
+      exclude: [
+        "Simulation/FEATURE_PARITY.md",
       ],
     ),
     .target(

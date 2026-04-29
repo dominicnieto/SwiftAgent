@@ -48,3 +48,9 @@ Phase 5 added `AgentSession` as the owner of agent loops, local tool execution, 
 ## Notes For Phase 6
 
 - Remaining providers needed to be migrated to the same neutral contract without session dependencies or provider-owned tool execution.
+
+## 2026-04-29 Verification Update
+
+- Phase 5 remains complete.
+- `AgentSession` now owns a `LanguageModelSession` and uses package-level LMS runtime hooks instead of sharing `ConversationEngine` directly.
+- Streaming and non-streaming agent loops still execute local tools and preserve per-step history.

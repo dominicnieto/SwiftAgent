@@ -1,6 +1,14 @@
 # README Feature Matrix
 
-Phase 0 mapping of current README examples and feature claims to the refactor target APIs.
+Last verified: 2026-04-29.
+
+Phase 8 should use this as the README rewrite map. Phases 1-7 are complete in the forked architecture:
+
+```text
+AgentSession -> LanguageModelSession -> ConversationEngine -> LanguageModel
+```
+
+Provider-specific continuity is preserved through `providerMetadata`, not `ProviderContinuation`.
 
 ## Feature Ownership
 
@@ -25,7 +33,7 @@ Phase 0 mapping of current README examples and feature claims to the refactor ta
 | Streaming Structured Outputs | Structured streaming with tools on `LanguageModelSession` | Both | Keep direct structured streaming for `LanguageModelSession`; move tool-backed structured final output streaming to `AgentSession`. |
 | Streaming State Helpers | Tool run projections and structured output snapshots | Both, with tool helpers primarily `AgentSession` | Tool-run helpers remain relevant to `AgentSession` transcripts. Structured output helpers remain shared transcript concepts. |
 | Proxy Servers | Proxy setup with `OpenResponsesLanguageModel` and `LanguageModelSession` | `LanguageModelSession`, also usable by `AgentSession` | Keep direct example. Add that the same model/HTTP client can be passed to `AgentSession`. |
-| Per-turn Authorization | Per-call token with `respond`/`streamResponse` | Both | Keep for direct model calls. Agent loops need clear semantics for one turn token across multiple continuation requests. |
+| Per-turn Authorization | Per-call token with `respond`/`streamResponse` | Both | Keep for direct model calls. Agent loops should document that options/auth apply to each model turn in the loop. |
 | Simulated Session | `SimulationLanguageModel` with `LanguageModelSession` and configured tool run | Simulated provider plus both sessions | Keep deterministic direct simulation. Add Phase 6 decision: use simulation as a provider for engine tests and `AgentSession` scenarios. |
 | Logging | Logs describe agent start/tool calls/finish | `AgentSession` for tool loop logs; providers/session for direct calls | Split direct model-call logs from agent tool-loop logs. |
 | Recording HTTP Fixtures | Recorder example uses `LanguageModelSession` | Both | Keep direct fixture recording on `LanguageModelSession`; add `AgentSession` scenarios for streaming tool calls after Phase 5. |
@@ -70,3 +78,12 @@ Phase 0 mapping of current README examples and feature claims to the refactor ta
 | Image input | Both should pass attachments through `ModelRequest` when the provider supports images. |
 | Token usage and response metadata | Direct sessions expose latest/cumulative usage; agents aggregate across iterations and expose latest/per-run metadata. |
 | Reasoning summaries | Providers parse reasoning; the engine records it; both sessions can expose it through transcript/events. |
+
+## Additional README Requirements From Fork
+
+| Required section | Content |
+| --- | --- |
+| `LanguageModel` | Explain direct one-turn model backend use. Mention that manual multi-turn use must preserve `providerMetadata` for provider-native fidelity. |
+| Provider metadata | Explain that metadata is not normal app UI content, but it is part of the durable model/transcript state when callers manually manage turns. |
+| OpenAI `store` | Explain SwiftAgent omits `store` unless set; OpenAI Responses stores by default; `store: false` may require encrypted reasoning metadata for full reasoning continuity. |
+| Provider feature gaps | Link to provider `FEATURE_PARITY.md` files rather than claiming full OpenAI/Anthropic parity. |

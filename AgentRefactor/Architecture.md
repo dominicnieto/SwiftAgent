@@ -1,182 +1,120 @@
 # SwiftAgent Refactor Architecture
 
+Last verified: 2026-04-29.
+
 ## Goal
 
-Create a foundation where provider adapters are cheap to add, streaming and non-streaming tool use share one runtime path, and future agent features such as memory and handoffs can be added without moving provider responsibilities again.
+Create a public stack where apps can use one model backend directly, wrap it in a stateful low-level session, or run a high-level agent loop without providers owning tools or loops.
 
-This refactor does not build memory, handoffs, or new providers. It designs the seams so those features can be added later without reworking the core runtime.
-
-## Architecture Chart
-
-```mermaid
-flowchart TB
-  App[App Code]
-
-  subgraph PublicAPIs[Public APIs]
-    LMS[LanguageModelSession\nstateful model conversation]
-    AS[AgentSession\nsingle-agent task runtime]
-  end
-
-  subgraph SharedRuntime[Shared Runtime]
-    CE[ConversationEngine\ntranscript + provider state + request building]
-    TE[ToolExecutionEngine\ntool validation + execution + policy]
-    ER[EventReducer\nmodel events -> transcript/events/snapshots]
-  end
-
-  subgraph ProviderLayer[Provider Layer]
-    LM[LanguageModel\nprovider/model adapter protocol]
-    PC[ProviderContinuation\nopaque provider-native turn state]
-    TR[Transport\nHTTP/SSE/auth/retry]
-  end
-
-  subgraph SchemaLayer[Typed Schema Layer]
-    SS[@SessionSchema\ntranscript resolver metadata]
-    GEN[@Generable / StructuredOutput]
-  end
-
-  App --> LMS
-  App --> AS
-
-  LMS --> CE
-  AS --> CE
-  AS --> TE
-  AS --> ER
-  LMS --> ER
-
-  CE --> LM
-  LM --> PC
-  LM --> TR
-
-  SS --> CE
-  GEN --> LM
-  GEN --> TE
-```
-
-## Future Orchestration Boundary
-
-This refactor does not build multi-agent orchestration. The architecture should still keep room for it by treating `AgentSession` as one agent runtime, not the whole agent system.
-
-Future orchestration should likely live above `AgentSession`:
+Current stack:
 
 ```text
-AgentOrchestrator / AgentSystem
-  owns multiple AgentSession instances
-  routes handoffs
-  coordinates shared session/memory state
-  merges/cancels event streams
-  applies workflow policy
+AgentSession
+  -> LanguageModelSession
+  -> ConversationEngine
+  -> LanguageModel
 ```
 
-Early handoffs may be represented as provider-neutral tools inside `AgentSession`, but this refactor does not decide or build that behavior. Provider adapters must not know about handoffs or multi-agent routing.
+`ProviderContinuation` is intentionally not part of this fork. Provider-specific state is preserved as `providerMetadata` on model messages, transcript entries, tool calls, reasoning entries, response metadata, attachments, sources, and files.
 
-## Responsibility Split
+## Public Layers
 
 ### LanguageModel
 
-Provider adapter. It talks to one model provider and translates between SwiftAgent's neutral request/response model and provider wire formats.
+Lowest public model backend interface. It performs one provider turn at a time.
 
 Owns:
 
-- Request serialization.
-- Response parsing.
-- Stream event parsing.
-- Tool schema serialization.
-- Provider-defined tool serialization.
-- Tool call parsing.
-- Tool output serialization.
-- Provider-native continuation state preservation.
-- Provider metadata, usage, warnings, rate limits.
+- Provider request serialization.
+- Provider response parsing.
+- Provider stream parsing.
+- Provider tool schema serialization.
+- Provider-specific metadata preservation.
+- Usage, finish reason, warnings, HTTP metadata, and raw provider diagnostics.
 
 Does not own:
 
 - Local SwiftAgent tool execution.
-- Agent loop.
+- Agent loops.
 - Max iterations.
-- Memory.
-- Handoffs.
-- Transcript mutation policy beyond returning events/results.
-
-### ConversationEngine
-
-Shared internal runtime used by both `LanguageModelSession` and `AgentSession`.
-
-Owns:
-
-- Public transcript state.
-- Provider continuation state store.
-- Building `ModelRequest` from transcript, prompt, options, tools, and continuation state.
-- Reducing `ModelResponse` and `ModelStreamEvent` into transcript updates.
-- Accumulating token usage and response metadata.
-- Mapping structured output snapshots.
-- Keeping provider-native state separate from public transcript.
-
-Does not own:
-
-- Tool execution decisions.
-- Autonomous loop stop/continue policy.
-- Memory retrieval.
-- Handoffs.
+- Handoffs, routing, memory, approvals, or retries.
+- Public transcript mutation.
 
 ### LanguageModelSession
 
-Stateful model conversation. It is for direct LLM calls with conversation history and transcript support.
+Public stateful low-level session around a `LanguageModel`.
 
 Owns:
 
-- A `ConversationEngine`.
-- Simple `respond` and `streamResponse` APIs.
-- Instructions and conversation state.
-- Structured output convenience APIs.
-- Public transcript access.
-- Observation state such as `isResponding`, `transcript`, `tokenUsage`, and `responseMetadata`.
+- A private `ConversationEngine`.
+- Transcript, token usage, response metadata, and observation state.
+- Direct `respond` and `streamResponse` APIs.
+- Explicit tool-output continuation APIs:
+  - `respond(with toolOutputs:)`
+  - `streamResponse(with toolOutputs:)`
+- Structured output, image, prompt, grounding, and schema convenience APIs.
 
 Does not own:
 
-- Automatic tool execution.
-- Agent loop.
-- Tool retries/approvals/max tool rounds.
-- Memory/handoff orchestration.
+- Automatic local tool execution.
+- Agent loop policy.
+- Tool retries, missing-tool policy, or approvals.
 
-Tool schemas may be passed to a `LanguageModelSession` request when the caller wants the model to produce tool calls, but the session should return those calls rather than execute them automatically.
+Tool definitions may be registered so the model can emit tool calls. App code using `LanguageModelSession` must inspect tool calls and provide tool outputs explicitly.
 
 ### AgentSession
 
-Single-agent runtime. It is for task execution with tools.
+Public high-level single-agent runtime.
 
 Owns:
 
-- A `ConversationEngine`.
-- Registered tools.
+- A `LanguageModelSession`.
+- Registered local tools.
 - Tool execution policy.
-- Tool loop.
-- Max iterations.
-- Agent result metadata.
+- Non-streaming and streaming model/tool loops.
+- Max-iteration protection.
+- Per-step history.
 - Agent event stream.
-- Stop/cancel/error behavior.
-- Per-step result history.
-- Local tool lifecycle events.
-- Active-tool filtering when building each model turn.
-
-Future integration considerations:
-
-- Memory.
-- Handoffs.
-- Guardrails.
-- Tool approvals.
-- Multi-agent orchestration.
-
-These are not implementation targets for this refactor. The only requirement is that this refactor should not put provider, tool-loop, or transcript responsibilities in places that would block those features later.
+- Durable observable state.
 
 Does not own:
 
 - Provider wire formats.
 - Provider request serialization.
 - Provider stream parsing.
-- Provider-defined server-side tool execution.
+- Provider-defined/server-side tool execution.
+
+Future handoffs/routing/orchestration should live above `AgentSession` by coordinating multiple `AgentSession` instances or by adding explicit orchestration types later.
+
+## Internal Runtime
+
+### ConversationEngine
+
+Package-internal actor owned by `LanguageModelSession`.
+
+Owns:
+
+- Public transcript state.
+- Request building from transcript, prompt, tool outputs, tools, structured output, images, and options.
+- Reduction of `ModelResponse` and `ModelStreamEvent` into transcript updates.
+- Token usage and response metadata accumulation.
+- Streaming snapshots for both public session streaming and agent runtime hooks.
+
+It does not store a separate continuation object. Provider-specific continuity data remains attached to the transcript/model parts that providers need to reconstruct their next request.
+
+### Runtime Hooks
+
+`AgentSession` depends on package-level hooks exposed by `LanguageModelSession`, not on `ConversationEngine` directly:
+
+- `modelResponseForRuntime(...)`
+- `modelStreamForRuntime(...)`
+- `applyRuntimeResponse(...)`
+
+This keeps `ConversationEngine` behind `LanguageModelSession` while still letting the agent runtime use lower-level turn events.
 
 ## Data Flow
 
-### Direct Model Conversation
+### Direct Model Turn
 
 ```text
 App
@@ -184,57 +122,58 @@ App
   -> ConversationEngine builds ModelRequest
   -> LanguageModel sends provider request
   -> LanguageModel returns ModelResponse
-  -> ConversationEngine records transcript/usage/metadata/provider state
+  -> ConversationEngine records transcript/usage/metadata
   -> LanguageModelSession returns response
+```
+
+### Manual Tool Continuation With LanguageModelSession
+
+```text
+App
+  -> LanguageModelSession.respond
+  -> model returns tool calls
+  -> app executes or rejects tools
+  -> app calls respond(with toolOutputs:)
+  -> ConversationEngine records tool outputs and builds next ModelRequest
+  -> LanguageModel serializes provider-native tool output shape using providerMetadata
 ```
 
 ### Agent Tool Loop
 
 ```text
 App
-  -> AgentSession.run
-  -> ConversationEngine builds ModelRequest with tool definitions
-  -> LanguageModel returns ModelResponse with tool calls and provider continuation state
-  -> AgentSession executes tools through ToolExecutionEngine
-  -> ConversationEngine builds continuation ModelRequest with tool outputs + provider continuation
-  -> LanguageModel continues provider request
-  -> repeat until final answer or stop condition
+  -> AgentSession.run or AgentSession.stream
+  -> AgentSession calls LanguageModelSession runtime hook for one model turn
+  -> model returns text/reasoning/tool calls/events
+  -> AgentSession executes local tool calls
+  -> AgentSession passes tool outputs back through LanguageModelSession
+  -> repeat until final answer, max iterations, cancellation, or error
 ```
 
-### Streaming Agent Tool Loop
+## Provider State Model
 
-```text
-App
-  -> AgentSession.stream
-  -> ConversationEngine builds ModelRequest
-  -> LanguageModel streams ModelStreamEvent values
-  -> EventReducer emits AgentEvent values and updates transcript
-  -> when tool calls complete:
-       AgentSession executes tools
-       ConversationEngine builds continuation request
-       LanguageModel starts next stream
-  -> repeat until final answer or stop condition
-```
-
-## Provider Continuation State
-
-The public transcript is not enough to continue every provider correctly. Provider continuation state must be stored explicitly.
+The public transcript is still the durable conversation record, but provider-native fields are preserved inside `providerMetadata`.
 
 Examples:
 
-- OpenAI Responses: raw output items such as `reasoning` and `function_call`.
-- OpenAI Chat Completions: assistant message with `tool_calls`.
-- Anthropic: assistant content blocks such as `thinking`, `tool_use`, and signatures.
+- OpenAI Responses: `response_id`, `item_id`, `call_id`, raw response items, encrypted reasoning content.
+- OpenAI Chat Completions: assistant tool-call message metadata and tool call IDs.
+- Anthropic: `tool_use_id`, thinking signatures, assistant content block metadata.
 
-The runtime should treat this state as opaque. The provider creates it, the `ConversationEngine` stores it, and the provider consumes it on continuation.
+Rules:
+
+- Provider metadata is part of the public model/transcript data shape because direct `LanguageModel` and `LanguageModelSession` use must preserve provider fidelity.
+- Normal app code usually does not need to inspect provider metadata.
+- Providers must keep basic text/tool loops working when possible, but advanced provider-native features can degrade if caller-created transcript/model messages omit required provider metadata.
+- `ProviderContinuation` must not be reintroduced unless the public API design is reopened deliberately.
 
 ## Session Schema Compatibility
 
-`@SessionSchema` should continue to work with both `LanguageModelSession` and `AgentSession` because it resolves the public `Transcript`, not a specific runtime type.
+`@SessionSchema` resolves shared `Transcript` values and works with both public session APIs.
 
-Refactor direction:
+Current schema layer:
 
-- Keep schema macros focused on transcript decoding.
-- Keep `@Tool`, `@Grounding`, and `@StructuredOutput` mapped to transcript entries.
-- Rename protocol internals from `LanguageModelSessionSchema` to a runtime-neutral name such as `TranscriptSchema` during the refactor.
-- Do not require schema macros to know whether the transcript came from direct conversation or an agent run.
+- Public macro remains `@SessionSchema`.
+- Runtime-neutral protocol is `TranscriptSchema`.
+- `LanguageModelSessionSchema` is removed.
+- Groundings, tool calls, tool outputs, reasoning, and structured output resolve from transcript entries, not from a specific session runtime.

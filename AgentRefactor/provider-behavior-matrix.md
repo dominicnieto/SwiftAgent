@@ -1,41 +1,80 @@
 # Provider Behavior Matrix
 
-Phase 0 inventory for the current provider/API variants before the `LanguageModel` turn-contract refactor.
+Last verified: 2026-04-29.
 
-## Current Provider/API Variants
+This matrix tracks the current fork after phases 1-7. Detailed provider-doc and AI SDK parity gaps now live beside each provider implementation:
 
-| Provider/API variant | Current type | Current API path | Notes |
+- `Sources/SwiftAgent/Providers/OpenAI/FEATURE_PARITY.md`
+- `Sources/SwiftAgent/Providers/OpenResponses/FEATURE_PARITY.md`
+- `Sources/SwiftAgent/Providers/Anthropic/FEATURE_PARITY.md`
+- `Sources/SimulatedSession/Simulation/FEATURE_PARITY.md`
+
+## Provider/API Variants
+
+| Provider/API variant | Type | API path | Notes |
 | --- | --- | --- | --- |
-| OpenAI Chat Completions | `OpenAILanguageModel(apiVariant: .chatCompletions)` | `POST chat/completions` | Default `OpenAILanguageModel` variant. Uses chat messages and assistant `tool_calls` for tool continuation. |
-| OpenAI Responses | `OpenAILanguageModel(apiVariant: .responses)` | `POST responses` | OpenAI official Responses API path inside `OpenAILanguageModel`. Preserves raw response output items for tool/reasoning continuation. |
-| Open Responses compatible API | `OpenResponsesLanguageModel` | `POST responses` at configurable `baseURL` | Intended for Open Responses compatible providers such as OpenAI-compatible gateways. Has its own custom options and provider metadata name. |
-| Anthropic Messages | `AnthropicLanguageModel` | `POST v1/messages` | Anthropic Messages API with tool use, image blocks, structured output, and extended thinking support. |
-| Simulated session provider | `SimulationLanguageModel` in `SimulatedSession` target | In-process deterministic simulation | No network transport. Produces configured transcript entries and final content for tests, previews, and examples. |
+| OpenAI Chat Completions | `OpenAILanguageModel(apiVariant: .chatCompletions)` | `POST chat/completions` | Default `OpenAILanguageModel` variant. Basic streaming text, local function tools, structured output, image input. |
+| OpenAI Responses | `OpenAILanguageModel(apiVariant: .responses)` | `POST responses` | Official OpenAI Responses API path. Supports Responses text, structured output, local tool calls, streamed tool arguments, reasoning entries, encrypted reasoning when returned. |
+| Open Responses compatible API | `OpenResponsesLanguageModel` | `POST responses` at configurable `baseURL` | Responses-shaped compatible endpoint. Provider variability is tracked in its feature parity matrix. |
+| Anthropic Messages | `AnthropicLanguageModel` | `POST v1/messages` | Anthropic Messages API with text, image input, local tools, streamed tool JSON, structured output, thinking/signature support. |
+| Simulated provider | `SimulationLanguageModel` in `SimulatedSession` | In-process deterministic model | Test/preview provider. No external provider-doc parity target. |
 
-## Behavior Matrix
+## Current Behavior
 
-| Behavior | OpenAI Chat Completions | OpenAI Responses | Open Responses compatible | Anthropic Messages | SimulatedSession |
+| Behavior | OpenAI Chat | OpenAI Responses | Open Responses | Anthropic | Simulation |
 | --- | --- | --- | --- | --- | --- |
-| Text generation | Yes. Parses first chat choice content. | Yes. Parses `output_text` or text output items. | Yes. Parses `output_text` or text output items. | Yes. Joins text content blocks. | Yes. Uses `.textResponse`. |
-| Structured output | Yes. Sends `response_format: json_schema`; decodes assistant content JSON. | Yes. Sends Responses `text.format` JSON schema; decodes JSON output item. | Yes. Sends Open Responses `text.format` JSON schema; decodes JSON output item. | Yes. Sends `output_config.format` JSON schema; decodes text as JSON. | Yes. Uses `.structuredResponse`. |
-| Image input | Yes. Serializes transcript image segments as Chat Completions image blocks. | Yes. Serializes image blocks as Responses `input_image`. | Yes. Serializes image blocks as Open Responses `input_image`. | Yes. Serializes image URL and base64 image blocks. | No current image-input simulation path. |
-| Tool definition serialization | Yes. Converts session tools to OpenAI `tools` function schema. | Yes. Converts session tools to Responses function schema. | Yes. Converts session tools to Open Responses function schema. | Yes. Converts session tools to Anthropic tool schema. | Not provider-native. Configured `.toolRun` entries use `MockableTool`. |
-| Tool calling | Yes. Provider owns the non-streaming tool loop through `resolveToolCalls`. | Yes. Provider owns the non-streaming tool loop through `resolveToolCalls`. | Yes. Provider owns the non-streaming tool loop through `resolveToolCalls`. | Yes. Provider owns the non-streaming tool loop through `resolveToolUses`. | Yes, simulated only. It records tool call/output entries from configured mocks. |
-| Streaming text | Yes. Streams chat delta content. | Yes. Streams `response.output_text.delta`. | Yes. Streams `response.output_text.delta`. | Yes. Streams text deltas. | Yes. Streams configured generations as snapshots. |
-| Streaming structured output | Partial. The stream path runs the partial JSON decoder when `Content != String`, but the provider does not advertise `structuredStreaming`. | Yes in current behavior through accumulated text plus partial JSON decoding; not advertised via a dedicated capability flag. | Yes in current behavior through accumulated text plus partial JSON decoding; not advertised via a dedicated capability flag. | Yes and advertised with `.structuredStreaming`. | Partial. Snapshot stream can emit raw structured generations, but not provider-style JSON deltas. |
-| Streaming tool calls | No current chat stream tool-call assembly. Capability flags omit `.toolCallStreaming` for this variant. | Yes. Streams function-call item start, argument deltas, argument completion, tool output, and continuation. | Yes. Streams function-call item start, argument deltas, argument completion, tool output, and continuation. | Yes. Streams `tool_use` block start, input JSON deltas, block stop, tool output, and continuation. | No provider-native tool-call delta stream. |
-| Reasoning | No transcript reasoning summaries. Custom `reasoningEffort` can be sent for supported models, but no reasoning stream/entry is parsed. | Yes. Parses Responses reasoning output items, summaries, and encrypted reasoning. | Yes. Parses Open Responses reasoning output items, summaries, and encrypted reasoning. | Yes. Parses Anthropic thinking deltas and signature deltas into reasoning events/entries. | Partial. Can emit configured `.reasoning` transcript entries, but this is deterministic simulation, not provider reasoning. |
-| Continuation requirements | Requires assistant message containing `tool_calls`, followed by tool-role messages using tool call IDs. | Requires provider-native raw output items, especially `reasoning` and `function_call`, followed by `function_call_output`. | Requires provider-native raw output items, especially `reasoning` and `function_call`, followed by `function_call_output`. | Requires assistant content blocks, including `tool_use` and thinking/signature blocks when present, followed by user `tool_result` blocks. | Requires preserving configured generation queue across turns; no provider-native continuation payload. |
-| Usage support | Non-streaming usage supported. Streaming token usage is not currently normalized for chat streams. | Non-streaming and streaming usage supported. Session aggregates usage across tool-loop iterations. | Non-streaming and streaming usage supported. Session aggregates usage across tool-loop iterations. | Non-streaming and streaming usage supported. Session aggregates usage across tool-loop iterations. | Optional configured token usage supported. |
-| Metadata support | HTTP metadata, provider ID/model, rate-limit headers, and refusal/error mapping. | HTTP metadata, response ID/model, rate-limit headers, stream failure events, and provider errors. | HTTP metadata, response ID/model, rate-limit headers, stream failure events, and provider errors. | HTTP metadata, message ID/model, rate-limit headers, stream/message metadata, and provider errors. | Basic `providerName: "Simulation"` and `modelID: "simulated"`. |
+| Text generation | Yes | Yes | Yes | Yes | Yes |
+| Structured output | Yes | Yes | Yes | Yes | Yes |
+| Image input | Yes | Yes | Yes | Yes | No current image simulation path |
+| Local tool definitions | Yes | Yes | Yes | Yes | Mock tool runs |
+| Local tool calls | Non-streaming yes | Yes | Yes | Yes | Simulated |
+| Provider executes local tools | No | No | No | No | No |
+| `AgentSession` executes local tools | Yes | Yes | Yes | Yes | Yes |
+| Streaming text | Yes | Yes | Yes | Yes | Yes |
+| Streaming tool-call input | No for Chat | Yes | Yes when endpoint matches expected events | Yes | No provider-native delta simulation |
+| Reasoning/thinking | No parsed reasoning | Yes when returned | Yes when returned | Yes thinking/signature when returned | Configured reasoning entries |
+| Provider-defined/server tools | Not first-class | Not first-class | Not first-class | Not first-class | Not applicable |
+| Usage | Non-streaming | Non-streaming and streaming | Non-streaming and streaming | Non-streaming and streaming | Configured usage |
+| HTTP/provider metadata | Yes | Yes | Yes | Yes | Basic provider/model metadata |
 
-## Current Responsibility Issues
+## Provider State Model
 
-| Issue | Current state | Refactor implication |
-| --- | --- | --- |
-| Providers depend on `LanguageModelSession` | `LanguageModel.respond` and streaming methods receive `within session: LanguageModelSession`. | Phase 1 should replace this with neutral `ModelRequest` input. |
-| Providers execute tools | OpenAI, Open Responses, and Anthropic providers call session tool execution APIs and own loop continuation. | Tool execution and loop policy must move to `AgentSession` and shared tool execution components. |
-| Provider continuation is reconstructed from transcript/message arrays | Responses variants append raw output items into message arrays; Anthropic appends assistant content and tool result messages. | Phase 1/2 need explicit `ProviderContinuation` so provider-native state stays out of public transcript. |
-| Capability reporting is variant-sensitive but type conformance is broader | `OpenAILanguageModel` conforms to streaming tool-call protocols, but `.chatCompletions` does not advertise or implement streaming tool-call assembly. | Phase 1 should keep explicit capability flags authoritative for selected API variant. |
-| `structuredStreaming` capability is uneven | Anthropic advertises it; Responses variants stream partial structured output but do not set the flag. | Phase 1 should decide whether partial structured decoding is a provider capability, engine capability, or both. |
-| Anthropic continuation is not flagged as response continuation | Anthropic requires provider-native assistant content blocks for tool continuation, but capabilities omit `.responseContinuation`. | Phase 1 should not rely only on current capability flags to discover continuation needs. |
+The old plan described a separate `ProviderContinuation` object. That is no longer the architecture.
+
+Current rule:
+
+- Provider-specific state is preserved through `providerMetadata` and raw provider output on model/transcript values.
+- Providers reconstruct their native follow-up request from neutral messages, transcript entries, tool outputs, and provider metadata.
+- `LanguageModelSession` and `AgentSession` both use the same transcript/provider-metadata path.
+
+Examples:
+
+| Provider | Provider metadata currently used for |
+| --- | --- |
+| OpenAI Chat | Assistant message/tool call metadata, `call_id`/tool IDs. |
+| OpenAI Responses | `response_id`, `item_id`, `call_id`, encrypted reasoning content, raw output item metadata. |
+| Open Responses | Responses-style `item_id`, `call_id`, encrypted reasoning content, raw output item metadata. |
+| Anthropic | `tool_use_id`, thinking signatures, content-block metadata. |
+| Simulation | Minimal provider/model identity and configured transcript entries. |
+
+## Remaining Provider Gaps
+
+These are not blockers for phases 1-7, but they are phase-8/phase-9 documentation and hardening inputs:
+
+- OpenAI first-class `previous_response_id`, `conversation`, and `include`.
+- OpenAI automatic `reasoning.encrypted_content` include when `store: false` and reasoning continuity needs it.
+- OpenAI hosted tools: web search, file search, code interpreter, citations, annotations, logprobs.
+- Anthropic server tools, containers, context management, redacted thinking, and hosted web/search/code/memory features.
+- More request-body and stream replay tests for provider-specific metadata preservation.
+
+## Responsibility Checks
+
+| Check | Current status |
+| --- | --- |
+| Providers implement neutral `LanguageModel` turn API | Complete |
+| Providers depend on `LanguageModelSession` | No |
+| Providers execute local tools | No |
+| `LanguageModelSession` executes local tools | No |
+| `AgentSession` owns local tool execution loop | Yes |
+| `AgentSession` owns `LanguageModelSession` rather than `ConversationEngine` directly | Yes |
+| `@SessionSchema` works from both public sessions | Yes |

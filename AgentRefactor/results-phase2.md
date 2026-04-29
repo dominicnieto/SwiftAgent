@@ -15,7 +15,6 @@ Completed on 2026-04-27.
 - Added shared engine infrastructure in `Sources/SwiftAgent/LanguageModel/ConversationEngine.swift`:
   - `ConversationEngine`
   - `ConversationState`
-  - `ProviderContinuationStore`
   - `ModelRequestBuilder`
   - `TranscriptRecorder`
   - `ModelEventReducer`
@@ -26,9 +25,9 @@ Completed on 2026-04-27.
 - Kept the new runtime package-scoped, actor-isolated, and additive. Existing `LanguageModelSession` and provider paths still use the Phase 1 compatibility surface until later migration phases.
 - Implemented model request building from the public transcript, instructions, filtered local tool definitions, structured output policy, attachments, and opaque continuation state.
 - Preserved prompt entries and prompt grounding payloads through the engine-produced transcript.
-- Preserved provider-native continuation state in `ProviderContinuationStore` and passed stored state into later requests without reconstructing it from public transcript entries.
-- Implemented non-streaming response application into transcript, token usage, response metadata, tool calls, reasoning, and continuation state.
-- Implemented stream-event reduction for text deltas, structured deltas, reasoning entries, streamed tool-input lifecycle events, partial/completed tool calls, provider tool results, usage, metadata, completion, warnings, and continuation state.
+- Preserved provider-native state through transcript/model provider metadata and passed that metadata into later requests.
+- Implemented non-streaming response application into transcript, token usage, response metadata, tool calls, and reasoning.
+- Implemented stream-event reduction for text deltas, structured deltas, reasoning entries, streamed tool-input lifecycle events, partial/completed tool calls, provider tool results, usage, metadata, completion, and warnings.
 - Stream failures now terminate the engine stream with the provider error instead of being converted into response warnings.
 - Stream cancellation now cancels the engine's provider-draining task when the downstream consumer stops iterating.
 - `ConversationEngine` does not use `Locked` or `@unchecked Sendable`; mutable engine state is isolated by the actor.
@@ -42,7 +41,7 @@ Completed on 2026-04-27.
   - streamed tool-input lifecycle transcript updates,
   - streamed tool-input/completed-call reconciliation when event id and call id differ,
   - downstream cancellation propagation,
-  - opaque continuation preservation through a mock tool turn,
+  - provider metadata preservation through a mock tool turn,
   - transcript resolver compatibility for engine-produced grounded prompts.
 
 ## Verification
@@ -84,9 +83,13 @@ Result:
 ## Notes For Phase 3
 
 - The engine currently uses the neutral `LanguageModel.respond(to:)` and `LanguageModel.streamResponse(to:)` APIs. Real providers are still on the legacy session-shaped methods until Phase 3 migrates the first provider.
-- `ProviderContinuation` remains public from Phase 1 because the public neutral turn types expose it. Phase 3 should keep using it as provider-authoring state and avoid projecting provider-native payloads into transcript entries.
-- `ModelRequestBuilder` intentionally carries both public transcript messages and opaque continuation. Providers migrating in Phase 3 should prefer `request.continuation` whenever present and should not derive Responses/Anthropic continuation payloads from `request.messages`.
+- Fork update: `ProviderContinuation` was removed. `ModelRequestBuilder` carries public transcript messages and provider metadata. Providers migrating in Phase 3 should preserve needed Responses/Anthropic payload details in metadata-bearing model/transcript values.
 - The request builder serializes transcript tool calls into neutral message metadata as a bridge for later provider migration. The provider-specific wire formats should still be implemented inside providers, not inside the engine.
 - `ModelEventReducer` stores streamed reasoning deltas but records reasoning transcript entries only from provider-completed reasoning events. If the first migrated provider needs synthesized reasoning entries from start/delta/end events, add that in the reducer with provider replay coverage.
-- Phase 3 should start with `OpenResponsesLanguageModel` as planned and validate that raw Responses output items are stored in `ProviderContinuation`, then consumed on tool continuation turns through `ConversationEngine`.
+- Phase 3 should start with `OpenResponsesLanguageModel` as planned and validate that raw Responses output items/IDs are preserved through provider metadata, then consumed on tool-output turns through `ConversationEngine`.
 - When `LanguageModelSession`/`AgentSession` migrate to the actor-isolated engine, keep any public synchronous observation state in the public session layer rather than adding locks back to the engine.
+
+## 2026-04-29 Verification Update
+
+- Phase 2 remains complete in the metadata-based fork.
+- Current `ConversationEngine` is package-internal, actor-isolated, and has no separate continuation store.
