@@ -77,7 +77,9 @@ func planCopenhagenWeekend() async throws {
   - [Access Transcripts](#access-transcripts)
   - [Access Token Usage](#access-token-usage)
   - [Prompt Builder](#prompt-builder)
+  - [Image Input](#image-input)
   - [Custom Generation Options](#custom-generation-options)
+  - [OpenAI Responses Store Behavior](#openai-responses-store-behavior)
 - [Session Schema](#session-schema)
   - [Tools](#tools)
   - [Structured Output Entries](#structured-output-entries)
@@ -91,15 +93,16 @@ func planCopenhagenWeekend() async throws {
 - [Logging](#logging)
 - [Recording HTTP Fixtures](#recording-http-fixtures)
 - [Development Status](#development-status)
+- [Provider Feature Parity](#provider-feature-parity)
 - [Example App](#example-app)
 - [License](#license)
 - [Acknowledgments](#acknowledgments)
 
 ## Features
 
-- **Zero-Setup Agent Loops** — Handle autonomous agent execution with just a few lines of code
-- **Native Tool Integration** — Use SwiftAgent `@Generable` structs as agent tools seamlessly
-- **Provider Agnostic** — The main session API supports multiple AI providers (OpenAI + Anthropic included, more coming)
+- **Zero-Setup Agent Loops** — Use `AgentSession` when you want SwiftAgent to execute tools and continue until the agent has a final answer
+- **Native Tool Integration** — Use SwiftAgent `@Generable` structs as local tools; inspect calls directly with `LanguageModelSession` or execute them automatically with `AgentSession`
+- **Provider Agnostic** — The public session APIs support multiple AI providers (OpenAI + Anthropic included, more coming)
 - **Apple-Native Design** — API inspired by FoundationModels for familiar, intuitive development
 - **Modern Swift** — Built with Swift 6, async/await, and latest concurrency features
 - **Rich Logging** — Comprehensive, human-readable logging for debugging and monitoring
@@ -355,12 +358,11 @@ struct WeatherReport {
 let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
 let session = LanguageModelSession(
   model: model,
-  tools: [WeatherTool()],
   instructions: "You are a helpful assistant.",
 )
 
 let response = try await session.respond(
-  to: Prompt("What's the weather like in San Francisco?"),
+  to: Prompt("Create a concise weather report for San Francisco."),
   generating: WeatherReport.self,
 )
 
@@ -374,7 +376,7 @@ The response body is now a fully typed `WeatherReport`. SwiftAgent validates the
 
 ### Access Transcripts
 
-Every `LanguageModelSession` maintains a running transcript that records instructions, prompts, reasoning steps, tool calls, tool outputs, and responses. Iterate over it to drive custom analytics, persistence, or UI updates:
+Every `LanguageModelSession` maintains a running transcript that records instructions, prompts, reasoning steps, tool calls, explicit tool outputs, and responses. `AgentSession` exposes the same transcript shape after it executes tools and continues the loop. Iterate over either transcript to drive custom analytics, persistence, or UI updates:
 
 ```swift
 import SwiftAgent
@@ -404,7 +406,7 @@ for entry in session.transcript {
 ```
 
 > [!NOTE]
-> `LanguageModelSession` is `@Observable`, so SwiftUI and other Observation-based UI can track `isResponding`, `transcript`, `tokenUsage`, and provider metadata directly. The session remains thread-safe by publishing Observation changes around its internal locked state instead of exposing mutable transcript storage.
+> `LanguageModelSession` and `AgentSession` are `@Observable`, so SwiftUI and other Observation-based UI can track response state, transcripts, token usage, and provider metadata directly. Both keep mutable runtime state behind internal synchronization instead of exposing writable transcript storage.
 
 ### Access Token Usage
 
@@ -430,6 +432,14 @@ print(session.tokenUsage?.totalTokens ?? 0)
 
 > Note: Each individual response also includes token usage information on `LanguageModelSession.Response`.
 
+`AgentSession` exposes aggregated usage for the full run, including every model turn needed to execute tools:
+
+```swift
+let result = try await agent.run(to: "Plan with current weather.")
+print(result.tokenUsage?.totalTokens ?? 0)
+print(agent.tokenUsage?.totalTokens ?? 0)
+```
+
 ### Prompt Builder
 
 Build rich prompts inline with the `Prompt` builder DSL. Tags group related context, keep instructions readable, and mirror the structure providers expect when you want to mix prose with metadata.
@@ -451,6 +461,25 @@ print(response.content)
 ```
 
 Under the hood SwiftAgent converts the builder result into the exact wire format required by the provider, so you can focus on intent instead of string concatenation.
+
+### Image Input
+
+`LanguageModelSession` also supports multimodal prompts when the provider accepts images. Attach one image or several images to a direct response request; the session records the image segments in the transcript so follow-up turns can preserve provider metadata.
+
+```swift
+let image = Transcript.ImageSegment(
+  source: .url(URL(string: "https://example.com/receipt.jpg")!)
+)
+
+let response = try await session.respond(
+  to: "Read the total and merchant name from this receipt.",
+  image: image,
+)
+
+print(response.content)
+```
+
+Use the same model with `AgentSession` when image analysis should be part of a larger tool-using workflow.
 
 ### Custom Generation Options
 
@@ -506,11 +535,24 @@ let response = try await session.respond(
 print(response.content)
 ```
 
+### OpenAI Responses Store Behavior
+
+SwiftAgent does not send `store` to OpenAI Responses unless you set it in provider options. OpenAI's Responses API stores responses by default, so omitting `store` keeps OpenAI's default behavior. Set `store: false` when you need an explicit no-store request:
+
+```swift
+options[custom: OpenAILanguageModel.self] = .init(
+  reasoning: .init(effort: .low, summary: "auto"),
+  store: false,
+)
+```
+
+For reasoning models, no-store continuity can require encrypted reasoning metadata. SwiftAgent preserves provider metadata it receives, including encrypted reasoning payloads, but it does not yet automatically request every provider-specific include needed for full stateless reasoning continuity. See the OpenAI feature matrices linked below for current gaps.
+
 ## Session Schema
 
 Raw transcripts expose every event as `GeneratedContent`, which is flexible but awkward when you want to build UI or assertions.
 
-Create a schema using `@SessionSchema` to describe the tools, groundings, and structured outputs you expect. `LanguageModelSession` remains the runtime; the schema is the typed layer you use to resolve transcript entries into strongly typed cases that mirror your declarations.
+Create a schema using `@SessionSchema` to describe the tools, groundings, and structured outputs you expect. The schema is runtime-neutral: use it to resolve transcript entries from either `LanguageModelSession` or `AgentSession` into strongly typed cases that mirror your declarations.
 
 ```swift
 struct WeatherReportOutput: StructuredOutput {
@@ -603,7 +645,6 @@ import SwiftAgent
 
 @SessionSchema
 struct SessionSchema {
-  @Tool var weatherTool = WeatherTool()
   @StructuredOutput(WeatherReportOutput.self) var weatherReport
 }
 
@@ -616,7 +657,7 @@ let session = LanguageModelSession(
 )
 
 let response = try await session.respond(
-  to: Prompt("What's the weather like in San Francisco?"),
+  to: Prompt("Create a concise weather report for San Francisco."),
   generating: WeatherReportOutput.Schema.self,
 )
 
@@ -649,7 +690,6 @@ import SwiftAgent
 
 @SessionSchema
 struct SessionSchema {
-  @Tool var weatherTool = WeatherTool()
   @Grounding(Date.self) var currentDate
   @StructuredOutput(WeatherReportOutput.self) var weatherReport
 }
@@ -699,14 +739,17 @@ for entry in try sessionSchema.resolve(session.transcript) {
 
 ## Streaming Responses
 
-`streamResponse` emits snapshots while the agent thinks, calls tools, and crafts the final answer. SwiftAgent generates `PartiallyGenerated` companions for every `@Generable` type, turning each property into an optional so tokens can land as soon as they are decoded. SwiftAgent surfaces those partial values directly, then swaps in the fully realized type once the model finalizes the turn.
+`LanguageModelSession.streamResponse(...)` streams one direct model/session response. It emits snapshots while the provider returns reasoning, tool-call arguments, text, or structured content for that turn. It does not execute local tools; if the model emits tool calls, inspect them and explicitly continue with `streamResponse(with: toolOutputs)`.
+
+Use `AgentSession.stream(...)` when you want a full agent run. Agent streaming includes model events plus tool lifecycle events across loop iterations.
+
+SwiftAgent generates `PartiallyGenerated` companions for every `@Generable` type, turning each property into an optional so tokens can land as soon as they are decoded. SwiftAgent surfaces those partial values directly, then swaps in the fully realized type once the model finalizes the turn.
 
 ```swift
 import SwiftAgent
 
 @SessionSchema
 struct SessionSchema {
-  @Tool var weatherTool = WeatherTool()
   @StructuredOutput(WeatherReportOutput.self) var weatherReport
 }
 
@@ -718,11 +761,10 @@ let session = LanguageModelSession(
   instructions: "You are a helpful assistant.",
 )
 
-// Create a response
-let stream = session.streamResponse(to: "What's the weather like in San Francisco?")
+let stream = session.streamResponse(to: "Write a short note about Swift concurrency.")
 
 for try await snapshot in stream {
-  // Once the agent is sending the final response, the snapshot's content will start to populate
+  // Once the model is sending the response, the snapshot's content will start to populate
   if let content = snapshot.content {
     print(content)
   }
@@ -734,6 +776,31 @@ for try await snapshot in stream {
 
 Each snapshot contains the latest response fragment—if the model has started speaking—and the full transcript up to that point, giving you enough context to animate UI or log intermediate steps.
 
+For automatic tool execution, stream an `AgentSession` and handle agent events:
+
+```swift
+let agent = AgentSession(
+  model: model,
+  tools: [WeatherTool()],
+  instructions: "Use tools for current weather questions.",
+)
+
+for try await event in agent.stream(to: "What's the weather in Nashville?") {
+  switch event {
+  case let .modelEvent(modelEvent):
+    print("Model:", modelEvent)
+  case let .toolExecutionStarted(call):
+    print("Running:", call.toolName)
+  case let .toolOutput(output):
+    print("Tool output:", output)
+  case let .completed(result):
+    print(result.content)
+  default:
+    break
+  }
+}
+```
+
 ### Streaming Structured Outputs
 
 Structured streaming works the same way: SwiftAgent first yields partially generated objects whose properties fill in as tokens arrive, then delivers the final schema once generation completes.
@@ -743,7 +810,6 @@ import SwiftAgent
 
 @SessionSchema
 struct SessionSchema {
-  @Tool var weatherTool = WeatherTool()
   @StructuredOutput(WeatherReportOutput.self) var weatherReport
 }
 
@@ -755,14 +821,13 @@ let session = LanguageModelSession(
   instructions: "You are a helpful assistant.",
 )
 
-// Create a response
 let stream = session.streamResponse(
-  to: Prompt("What's the weather like in San Francisco?"),
+  to: Prompt("Create a concise weather report for San Francisco."),
   generating: WeatherReportOutput.Schema.self,
 )
 
 for try await snapshot in stream {
-  // Once the agent is sending the final response, the snapshot's content will start to populate
+  // Once the model is sending the final response, the snapshot's content will start to populate
   if let weatherReport = snapshot.content {
     print(weatherReport.condition ?? "Not received yet")
     print(weatherReport.humidity ?? "Not received yet")
@@ -802,7 +867,7 @@ for entry in try sessionSchema.resolve(session.transcript) {
 
 ## Streaming State Helpers
 
-SwiftAgent keeps SwiftUI views stable by exposing current projections of in-flight data. For tool runs, `currentArguments` always returns the partially generated variant of your argument type alongside an `isFinal` flag, so the view does not need to branch on enum states. When you need the fully validated payload reach for `finalArguments`, and if you want to respond to streaming transitions you can switch over `argumentsPhase`.
+SwiftAgent keeps SwiftUI views stable by exposing current projections of in-flight data. For agent-owned tool runs, stream `AgentSession` events and resolve `agent.transcript` with your schema. `currentArguments` always returns the partially generated variant of your argument type alongside an `isFinal` flag, so the view does not need to branch on enum states. When you need the fully validated payload reach for `finalArguments`, and if you want to respond to streaming transitions you can switch over `argumentsPhase`.
 
 ```swift
 struct WeatherToolRunView: View {
@@ -845,7 +910,7 @@ struct WeatherToolRunView: View {
 }
 ```
 
-Structured outputs follow the same pattern with `snapshot.currentContent`: you always receive a partially generated projection that updates in place, while `finalContent` and `contentPhase` give you access to the completed schema and the streaming status respectively. The Example App’s Agent Playground view leans on these helpers to render incremental suggestions without triggering SwiftUI identity churn.
+Structured outputs follow the same pattern with `snapshot.currentContent`: you always receive a partially generated projection that updates in place, while `finalContent` and `contentPhase` give you access to the completed schema and the streaming status respectively. The Example App’s playground views lean on these helpers to render incremental suggestions without triggering SwiftUI identity churn.
 
 ## Proxy Servers
 
@@ -882,6 +947,8 @@ SwiftAgent reuses the base URL you provide and appends the normal Responses API 
 
 Every request emitted by the SDK already matches the Responses API schema, so the proxy does not need to reshape payloads.
 
+The same proxied model can be passed to `AgentSession` when you want automatic tool execution. Per-turn authorization applies to each model turn the agent performs.
+
 ### Per-turn Authorization
 
 Protect the proxy with short-lived tokens instead of static API keys. Before each call to `respond` or `streamResponse`, ask your backend for a token that identifies the signed-in user and expires after one turn:
@@ -903,7 +970,7 @@ For quick prototypes you can still pass an API key directly to `OpenResponsesLan
 
 ## Simulated Session
 
-You can test and develop your agents without making API calls using the built-in simulation system. This is perfect for prototyping, testing, and developing UIs before integrating with live APIs.
+You can test direct sessions and agents without making API calls using the built-in simulation system. This is useful for prototyping, testing, and developing UIs before integrating with live APIs.
 
 ```swift
 import SwiftAgent
@@ -950,7 +1017,11 @@ let response = try await session.respond(to: "What's the weather like in San Fra
 print(response.content) // "It's a beautiful sunny day in San Francisco with 22.5°C!"
 ```
 
+Use the same `SimulationLanguageModel` with `AgentSession` when you want to exercise the high-level agent runtime in tests or previews.
+
 ## Logging
+
+Logging covers both direct provider/session calls and high-level agent runs. Direct `LanguageModelSession` calls log model requests and responses. `AgentSession` adds agent lifecycle, tool call, tool output, and completion events.
 
 ```swift
 // Enable comprehensive logging
@@ -1049,17 +1120,30 @@ Notes:
 - Streaming responses are recorded as raw `text/event-stream` payloads (may be partial if the consumer stops iterating early).
 - Enabling stream capture buffers stream bytes in memory; keep it enabled only for debugging/fixture recording.
 - Request headers may contain secrets; the recorder redacts common auth header fields before printing.
+- Recorder scenarios can exercise direct `LanguageModelSession` calls or full `AgentSession` runs; use agent scenarios when fixture coverage needs local tool execution and continuation loops.
 
 ## Development Status
 
 **Work in Progress**: SwiftAgent is under active development. APIs may change, and breaking updates are expected. Use in production with caution.
+
+## Provider Feature Parity
+
+SwiftAgent supports OpenAI, Anthropic, OpenAI-compatible Responses providers, and simulation through the shared `LanguageModel` contract. Provider APIs do not have identical feature surfaces, so the source tree keeps parity notes beside each implementation:
+
+- [OpenAI Chat Completions and Responses](Sources/SwiftAgent/Providers/OpenAI/FEATURE_PARITY.md)
+- [OpenAI-compatible Responses](Sources/SwiftAgent/Providers/OpenResponses/FEATURE_PARITY.md)
+- [Anthropic](Sources/SwiftAgent/Providers/Anthropic/FEATURE_PARITY.md)
+- [Simulation](Sources/SimulatedSession/Simulation/FEATURE_PARITY.md)
+
+Those matrices are the best place to check current gaps such as hosted/server-side tools, stored response continuation, encrypted reasoning metadata, and provider-specific request options.
 
 ## Example App
 
 SwiftAgent ships with a SwiftUI demo that showcases the SDK in action. Open the project at `Examples/Example App/ExampleApp` to explore an agent playground that:
 
 - Configures OpenAI and Anthropic language models with the bundled `SessionSchema`, calculator tool, weather tool, and a structured weather report output.
-- Streams responses while rendering prompts, reasoning summaries, tool runs, and final replies in a chat-style transcript UI.
+- Lets you switch between direct `LanguageModelSession` streaming and automatic `AgentSession` streaming.
+- Renders prompts, reasoning summaries, tool runs, and final replies in a chat-style transcript UI.
 - Demonstrates tool-specific views (calculator and weather) with live argument updates, results, and SwiftUI previews backed by `SimulationLanguageModel` scenarios.
 
 Use the app to experiment with SwiftAgent locally or as a starting point for integrating the SDK into your own SwiftUI experience.

@@ -4,6 +4,22 @@ import Foundation
 import Observation
 import SwiftAgent
 
+enum PlaygroundExecutionMode: String, CaseIterable, Hashable, Identifiable {
+  case languageModelSession
+  case agentSession
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .languageModelSession:
+      "LanguageModelSession"
+    case .agentSession:
+      "AgentSession"
+    }
+  }
+}
+
 @SessionSchema
 struct SessionSchema {
   @Tool var calculator = CalculatorTool()
