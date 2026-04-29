@@ -144,8 +144,7 @@ public enum AgentEvent<Content>: Sendable where Content: Generable & Sendable, C
 /// A single-agent runtime that owns local tool execution and model continuation loops.
 @Observable
 public final class AgentSession: @unchecked Sendable {
-  @ObservationIgnored private let model: any LanguageModel
-  @ObservationIgnored private let engine: ConversationEngine
+  @ObservationIgnored private let modelSession: LanguageModelSession
   @ObservationIgnored private let state: Locked<AgentState>
   @ObservationIgnored private let toolExecutionDelegateStorage = Locked<(any ToolExecutionDelegate)?>(nil)
 
@@ -219,11 +218,10 @@ public final class AgentSession: @unchecked Sendable {
     instructions: Instructions? = nil,
     configuration: AgentConfiguration = AgentConfiguration(),
   ) {
-    self.model = model
     self.tools = tools
     self.instructions = instructions
     self.configuration = configuration
-    engine = ConversationEngine(model: model, instructions: instructions, tools: tools)
+    modelSession = LanguageModelSession(model: model, tools: tools, instructions: instructions)
     state = Locked(AgentState(transcript: TranscriptRecorder().initialTranscript(instructions: instructions, tools: tools)))
   }
 
@@ -287,17 +285,20 @@ public final class AgentSession: @unchecked Sendable {
     let structuredOutput = structuredOutputRequest(for: type, includeSchemaInPrompt: includeSchemaInPrompt)
     var steps: [AgentStepResult] = []
     var response: ModelResponse?
+    var pendingToolOutputs: [Transcript.ToolOutput] = []
 
     do {
       for iteration in 1 ... configuration.maxIterations {
         setCurrentIteration(iteration)
-        let turnResponse = try await engine.respond(
+        let turnResponse = try await modelSession.modelResponseForRuntime(
           promptEntry: iteration == 1 ? promptEntry : nil,
+          toolOutputs: pendingToolOutputs,
           structuredOutput: structuredOutput,
           options: options,
         )
+        pendingToolOutputs = []
         response = turnResponse
-        await syncFromEngine()
+        syncFromModelSession()
 
         let localToolCalls = turnResponse.toolCalls
           .filter { $0.kind == .local }
@@ -329,11 +330,7 @@ public final class AgentSession: @unchecked Sendable {
           outputs = results.map(\.output)
         }
 
-        await engine.apply(ModelResponse(
-          transcriptEntries: outputs.map(Transcript.Entry.toolOutput),
-          finishReason: .completed,
-        ))
-        await syncFromEngine()
+        pendingToolOutputs = outputs
 
         steps.append(await stepResult(
           index: iteration,
@@ -460,6 +457,7 @@ public final class AgentSession: @unchecked Sendable {
           var latestRawContent: GeneratedContent?
           var latestToolCallsByID: [String: Transcript.ToolCall] = [:]
           var latestToolCallKindsByID: [String: ToolDefinitionKind] = [:]
+          var pendingToolOutputs: [Transcript.ToolOutput] = []
 
           for iteration in 1 ... configuration.maxIterations {
             setCurrentIteration(iteration)
@@ -471,11 +469,13 @@ public final class AgentSession: @unchecked Sendable {
             var iterationModelToolCallsByID: [String: ModelToolCall] = [:]
             var iterationModelToolCallOrder: [String] = []
 
-            let stream = await engine.streamResponse(
+            let stream = modelSession.modelStreamForRuntime(
               promptEntry: iteration == 1 ? promptEntry : nil,
+              toolOutputs: pendingToolOutputs,
               structuredOutput: structuredOutput,
               options: options,
             )
+            pendingToolOutputs = []
             for try await snapshot in stream {
               completedSnapshot = snapshot
               iterationEntries.append(contentsOf: snapshot.transcriptEntries)
@@ -483,7 +483,7 @@ public final class AgentSession: @unchecked Sendable {
               if let finishReason = snapshot.completion?.finishReason {
                 iterationFinishReason = finishReason
               }
-              await syncFromEngine()
+              syncFromModelSession()
               for entry in snapshot.transcriptEntries {
                 if case let .toolCalls(toolCalls) = entry {
                   for call in toolCalls.calls {
@@ -510,7 +510,7 @@ public final class AgentSession: @unchecked Sendable {
               }
             }
 
-            let transcriptToolCalls = await engine.transcript.entries.reversed().compactMap { entry -> [Transcript.ToolCall]? in
+            let transcriptToolCalls = modelSession.transcript.entries.reversed().compactMap { entry -> [Transcript.ToolCall]? in
               guard case let .toolCalls(toolCalls) = entry else { return nil }
               return toolCalls.calls
             }.first ?? []
@@ -571,11 +571,7 @@ public final class AgentSession: @unchecked Sendable {
 
             let outputs = results.map(\.output)
             iterationEntries.append(contentsOf: outputs.map(Transcript.Entry.toolOutput))
-            await engine.apply(ModelResponse(
-              transcriptEntries: outputs.map(Transcript.Entry.toolOutput),
-              finishReason: .completed,
-            ))
-            await syncFromEngine()
+            pendingToolOutputs = outputs
 
             let step = await stepResult(
               index: iteration,
@@ -876,7 +872,7 @@ private extension AgentSession {
         modelToolCallOrder: &modelToolCallOrder,
       )
 
-    case let .toolCallsCompleted(toolCalls, _):
+    case let .toolCallsCompleted(toolCalls):
       for toolCall in toolCalls {
         recordModelToolCall(
           toolCall,
@@ -944,7 +940,7 @@ private extension AgentSession {
       )
       continuation.yield(.toolInputStarted(call))
 
-    case let .toolCallsCompleted(calls, _):
+    case let .toolCallsCompleted(calls):
       for call in calls.map(\.call) {
         continuation.yield(.toolInputCompleted(call))
       }
@@ -989,11 +985,11 @@ private extension AgentSession {
       let decision = await delegate?.toolCallDecision(for: call, in: self) ?? .execute
       if case .stop = decision {
         if recordTranscript {
-          await engine.apply(ModelResponse(
+          await modelSession.applyRuntimeResponse(ModelResponse(
             transcriptEntries: [.toolCalls(.init(calls: calls))],
             finishReason: .completed,
           ))
-          await syncFromEngine()
+          syncFromModelSession()
         }
         return .stop(calls: calls)
       }
@@ -1001,11 +997,11 @@ private extension AgentSession {
     }
 
     if recordTranscript {
-      await engine.apply(ModelResponse(
+      await modelSession.applyRuntimeResponse(ModelResponse(
         transcriptEntries: [.toolCalls(.init(calls: calls))],
         finishReason: .completed,
       ))
-      await syncFromEngine()
+      syncFromModelSession()
     }
 
     let results: [ToolExecutionResult]
@@ -1024,11 +1020,11 @@ private extension AgentSession {
     setCurrentToolOutputs(outputs)
 
     if recordTranscript {
-      await engine.apply(ModelResponse(
+      await modelSession.applyRuntimeResponse(ModelResponse(
         transcriptEntries: outputs.map(Transcript.Entry.toolOutput),
         finishReason: .completed,
       ))
-      await syncFromEngine()
+      syncFromModelSession()
     }
 
     return .outputs(results)
@@ -1217,12 +1213,12 @@ private extension AgentSession {
     return AgentResult(
       content: content,
       rawContent: rawContent,
-      transcript: await engine.transcript,
+      transcript: modelSession.transcript,
       steps: steps,
       toolCalls: steps.flatMap(\.toolCalls),
       toolOutputs: steps.flatMap(\.toolOutputs),
-      tokenUsage: await engine.tokenUsage,
-      responseMetadata: await engine.responseMetadata,
+      tokenUsage: modelSession.tokenUsage,
+      responseMetadata: modelSession.responseMetadata,
       iterationCount: steps.count,
     )
   }
@@ -1263,8 +1259,8 @@ private extension AgentSession {
       transcriptEntries: transcriptEntries,
       toolCalls: toolCalls,
       toolOutputs: toolOutputs,
-      tokenUsage: await engine.tokenUsage,
-      responseMetadata: await engine.responseMetadata,
+      tokenUsage: modelSession.tokenUsage,
+      responseMetadata: modelSession.responseMetadata,
       finishReason: finishReason,
     )
   }
@@ -1372,10 +1368,10 @@ private extension AgentSession {
     }
   }
 
-  func syncFromEngine() async {
-    let transcript = await engine.transcript
-    let tokenUsage = await engine.tokenUsage
-    let responseMetadata = await engine.responseMetadata
+  func syncFromModelSession() {
+    let transcript = modelSession.transcript
+    let tokenUsage = modelSession.tokenUsage
+    let responseMetadata = modelSession.responseMetadata
     withMutation(keyPath: \.transcript) {
       state.withLock {
         $0.transcript = transcript

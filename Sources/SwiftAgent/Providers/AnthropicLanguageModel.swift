@@ -371,27 +371,25 @@ public struct AnthropicLanguageModel: EventStreamingLanguageModel, StreamingTool
                 callId: toolUse.id,
                 toolName: toolUse.name,
                 arguments: try toGeneratedContent(toolUse.input),
-                status: .completed
-            ))
+                status: .completed,
+                providerMetadata: anthropicProviderMetadata([
+                    "tool_use_id": .string(toolUse.id),
+                ])
+            ), providerMetadata: anthropicProviderMetadata([
+                "tool_use_id": .string(toolUse.id),
+            ]))
         }
         let text = message.content.compactMap { block -> String? in
             guard case let .text(text) = block else { return nil }
             return text.text
         }.joined()
         let content = try anthropicGeneratedContent(text: text, structuredOutput: request.structuredOutput)
-        let continuation = try anthropicContinuation(
-            content: message.content,
-            responseID: message.id,
-            modelID: message.model
-        )
-
         return ModelResponse(
             content: content,
             toolCalls: toolCalls,
             finishReason: toolCalls.isEmpty ? anthropicFinishReason(message.stopReason) : .toolCalls,
             tokenUsage: message.usage?.tokenUsage,
             responseMetadata: metadata,
-            continuation: continuation,
             rawProviderOutput: try? JSONValue(message.content)
         )
     }
@@ -428,16 +426,11 @@ public struct AnthropicLanguageModel: EventStreamingLanguageModel, StreamingTool
                     var currentTextByIndex: [Int: String] = [:]
                     var currentToolByIndex: [Int: StreamingAnthropicToolInput] = [:]
                     var thinkingByIndex: [Int: String] = [:]
-                    var contentBlocksByIndex: [Int: AnthropicContent] = [:]
-                    var messageID = UUID().uuidString
-                    var messageModel = model
                     var latestFinishReason: FinishReason = .completed
 
                     for try await event in stream.events {
                         switch event {
                         case .messageStart(let start):
-                            messageID = start.message.id
-                            messageModel = start.message.model
                             if let usage = start.message.usage?.tokenUsage {
                                 continuation.yield(.usage(usage))
                             }
@@ -491,8 +484,7 @@ public struct AnthropicLanguageModel: EventStreamingLanguageModel, StreamingTool
                             }
 
                         case .contentBlockStop(let stop):
-                            if let text = currentTextByIndex[stop.index] {
-                                contentBlocksByIndex[stop.index] = .text(AnthropicText(text: text))
+                            if currentTextByIndex[stop.index] != nil {
                                 continuation.yield(.textCompleted(id: "anthropic-text-\(stop.index)", metadata: nil))
                             }
                             if let tool = currentToolByIndex[stop.index] {
@@ -502,20 +494,16 @@ public struct AnthropicLanguageModel: EventStreamingLanguageModel, StreamingTool
                                     callId: tool.id,
                                     toolName: tool.name,
                                     arguments: arguments,
-                                    status: .completed
+                                    status: .completed,
+                                    providerMetadata: anthropicProviderMetadata([
+                                        "tool_use_id": .string(tool.id),
+                                    ])
                                 )
-                                contentBlocksByIndex[stop.index] = .toolUse(AnthropicToolUse(
-                                    id: tool.id,
-                                    name: tool.name,
-                                    input: try fromGeneratedContent(arguments)
-                                ))
                                 continuation.yield(.toolInputCompleted(id: tool.id))
-                                let providerContinuation = try anthropicContinuation(
-                                    content: contentBlocksByIndex.sorted { $0.key < $1.key }.map(\.value),
-                                    responseID: messageID,
-                                    modelID: messageModel
-                                )
-                                continuation.yield(.toolCallsCompleted([ModelToolCall(call: call)], continuation: providerContinuation))
+                                continuation.yield(.toolCallsCompleted([ModelToolCall(
+                                    call: call,
+                                    providerMetadata: call.providerMetadata
+                                )]))
                             }
 
                         case .messageDelta(let delta):
@@ -525,15 +513,7 @@ public struct AnthropicLanguageModel: EventStreamingLanguageModel, StreamingTool
                             latestFinishReason = anthropicFinishReason(delta.delta.stopReason)
 
                         case .messageStop:
-                            let providerContinuation = try anthropicContinuation(
-                                content: contentBlocksByIndex.sorted { $0.key < $1.key }.map(\.value),
-                                responseID: messageID,
-                                modelID: messageModel
-                            )
-                            continuation.yield(.completed(.init(
-                                finishReason: latestFinishReason,
-                                continuation: providerContinuation
-                            )))
+                            continuation.yield(.completed(.init(finishReason: latestFinishReason)))
                             continuation.finish()
                             return
 
@@ -720,29 +700,8 @@ private func anthropicFinishReason(_ stopReason: String?) -> FinishReason {
     return anthropicFinishReason(AnthropicMessageResponse.StopReason(rawValue: stopReason))
 }
 
-private func anthropicContinuation(
-    content: [AnthropicContent],
-    responseID: String,
-    modelID: String
-) throws -> ProviderContinuation? {
-    guard content.isEmpty == false else { return nil }
-    return ProviderContinuation(
-        providerName: "Anthropic",
-        modelID: modelID,
-        turnID: responseID,
-        payload: .object(["content": try JSONValue(content)])
-    )
-}
-
-private func anthropicContinuationContent(from continuation: ProviderContinuation?) -> [AnthropicContent] {
-    guard let continuation,
-        continuation.providerName == "Anthropic",
-        case let .object(payload) = continuation.payload,
-        let value = payload["content"],
-        let data = try? JSONEncoder().encode(value),
-        let content = try? JSONDecoder().decode([AnthropicContent].self, from: data)
-    else { return [] }
-    return content
+private func anthropicProviderMetadata(_ value: [String: JSONValue]) -> [String: JSONValue] {
+    ["anthropic": .object(value)]
 }
 
 private func anthropicSchemaValue(from format: ResponseFormat) throws -> JSONSchema {
@@ -838,7 +797,6 @@ extension Transcript {
 
 private func anthropicMessages(from request: ModelRequest) -> [AnthropicMessage] {
     var messages: [AnthropicMessage] = []
-    let continuationContent = anthropicContinuationContent(from: request.continuation)
 
     for message in request.messages {
         switch message.role {
@@ -847,9 +805,9 @@ private func anthropicMessages(from request: ModelRequest) -> [AnthropicMessage]
         case .user:
             messages.append(.init(role: .user, content: convertSegmentsToAnthropicContent(message.segments)))
         case .assistant:
-            if continuationContent.isEmpty == false,
-                message.providerMetadata["tool_calls"] != nil
-            {
+            let toolUseBlocks = anthropicToolUseBlocks(from: message.providerMetadata)
+            if toolUseBlocks.isEmpty == false {
+                messages.append(.init(role: .assistant, content: toolUseBlocks))
                 continue
             }
             let content = convertSegmentsToAnthropicContent(message.segments)
@@ -875,16 +833,28 @@ private func anthropicMessages(from request: ModelRequest) -> [AnthropicMessage]
         }
     }
 
-    if continuationContent.isEmpty == false {
-        var continued: [AnthropicMessage] = []
-        let leadingUserMessages = messages.filter { $0.role == .user && !$0.content.containsToolResult }
-        continued.append(contentsOf: leadingUserMessages)
-        continued.append(.init(role: .assistant, content: continuationContent))
-        continued.append(contentsOf: messages.filter { $0.role == .user && $0.content.containsToolResult })
-        return continued
-    }
-
     return messages
+}
+
+private func anthropicToolUseBlocks(from metadata: [String: JSONValue]) -> [AnthropicContent] {
+    guard case let .array(calls)? = metadata["tool_calls"] else { return [] }
+    return calls.compactMap { value -> AnthropicContent? in
+        guard case let .object(call) = value,
+            let callID = call.jsonString(forKey: "call_id") ?? call.jsonString(forKey: "id"),
+            let toolName = call.jsonString(forKey: "tool_name")
+        else { return nil }
+        let arguments = call.jsonString(forKey: "arguments")
+            .flatMap { try? GeneratedContent(json: $0) }
+            .flatMap { try? fromGeneratedContent($0) }
+        return .toolUse(AnthropicToolUse(id: callID, name: toolName, input: arguments))
+    }
+}
+
+private extension [String: JSONValue] {
+    func jsonString(forKey key: String) -> String? {
+        guard case .string(let value)? = self[key] else { return nil }
+        return value
+    }
 }
 
 private struct AnthropicTool: Codable, Sendable {

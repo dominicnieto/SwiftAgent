@@ -16,7 +16,7 @@ public enum ModelStreamEvent: Sendable, Equatable {
   case toolInputDelta(id: String, delta: String)
   case toolInputCompleted(id: String)
   case toolCallPartial(ToolCallPartial)
-  case toolCallsCompleted([ModelToolCall], continuation: ProviderContinuation?)
+  case toolCallsCompleted([ModelToolCall])
   case providerToolResult(Transcript.ToolOutput)
   case source(ModelSource)
   case file(ModelFile)
@@ -69,6 +69,8 @@ public struct ToolCallPartial: Sendable, Equatable, Codable {
   public var arguments: GeneratedContent?
   /// Whether SwiftAgent or the provider will execute this tool.
   public var kind: ToolDefinitionKind
+  /// Provider-specific metadata for diagnostics and later provider request reconstruction.
+  public var providerMetadata: [String: JSONValue]
 
   public init(
     id: String,
@@ -77,6 +79,7 @@ public struct ToolCallPartial: Sendable, Equatable, Codable {
     partialArguments: String,
     arguments: GeneratedContent? = nil,
     kind: ToolDefinitionKind = .local,
+    providerMetadata: [String: JSONValue] = [:],
   ) {
     self.id = id
     self.callId = callId
@@ -84,6 +87,7 @@ public struct ToolCallPartial: Sendable, Equatable, Codable {
     self.partialArguments = partialArguments
     self.arguments = arguments
     self.kind = kind
+    self.providerMetadata = providerMetadata
   }
 }
 

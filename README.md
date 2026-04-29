@@ -69,6 +69,7 @@ func planCopenhagenWeekend() async throws {
 
 - [Features](#features)
 - [Quick Start](#quick-start)
+  - [Public API Layers](#public-api-layers)
   - [Installation](#installation)
   - [Basic Usage](#basic-usage)
   - [Building Tools](#building-tools)
@@ -105,6 +106,82 @@ func planCopenhagenWeekend() async throws {
 - **Flexible Configuration** — Fine-tune generation options, tools, and provider-specific settings
 
 ## Quick Start
+
+### Public API Layers
+
+SwiftAgent exposes three public layers. Use the lowest layer that matches how much control you want.
+
+#### LanguageModel
+
+`LanguageModel` is the lowest-level model inference backend. It accepts a provider-neutral `ModelRequest` and returns one `ModelResponse`, or streams one turn as `ModelStreamEvent` values.
+
+Use this layer when you are building your own session, transcript, tool loop, or provider adapter:
+
+```swift
+let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
+let response = try await model.respond(to: ModelRequest(
+  messages: [
+    ModelMessage(
+      role: .user,
+      segments: [.text(.init(content: "Write one sentence about Swift concurrency."))]
+    )
+  ]
+))
+```
+
+When using `LanguageModel` directly across multiple turns, keep the full `ModelMessage`, `ModelResponse`, transcript part, and tool-call values instead of flattening them to plain strings. Providers store API bookkeeping in `providerMetadata`, such as response item IDs, encrypted reasoning payloads, citations, hosted tool references, container IDs, and native tool-call IDs. Basic text loops may still work without that metadata, but provider-specific continuity can degrade.
+
+#### LanguageModelSession
+
+`LanguageModelSession` is a stateful, low-level chat/session API around a `LanguageModel`. It owns transcript state, instructions, tools, schema tools, token usage, response metadata, and streaming snapshots.
+
+It sends tools to the model and records model-emitted tool calls, but it does not execute tools and it does not run an agent loop. After a response contains tool calls, app code can execute whichever tools it wants and explicitly continue with `respond(with: toolOutputs)` or `streamResponse(with: toolOutputs)`.
+
+```swift
+let session = LanguageModelSession(
+  model: model,
+  tools: [WeatherTool()],
+  instructions: "Use tools when current weather is needed."
+)
+
+let firstTurn = try await session.respond(to: "Weather in Nashville?")
+
+let toolOutputs = firstTurn.transcriptEntries.compactMap { entry -> Transcript.ToolOutput? in
+  guard case let .toolCalls(toolCalls) = entry,
+        let call = toolCalls.calls.first
+  else { return nil }
+
+  return Transcript.ToolOutput(
+    id: call.id,
+    callId: call.callId,
+    toolName: call.toolName,
+    segment: .text(.init(content: "72 F and clear")),
+    status: .completed
+  )
+}
+
+let finalTurn = try await session.respond(with: toolOutputs)
+print(finalTurn.content)
+```
+
+For streaming, use the same one-turn shape with `streamResponse(to:)` and continue through `streamResponse(with: toolOutputs)`.
+
+#### AgentSession
+
+`AgentSession` is the high-level agent runtime. It uses the same model/session primitives, but owns the loop: send a turn, inspect tool calls, execute registered local tools, append tool outputs, and repeat until the model produces a final answer or the configured limits are reached.
+
+Use `AgentSession` when you want SwiftAgent to execute tools and manage the full agent lifecycle:
+
+```swift
+let session = AgentSession(
+  model: model,
+  tools: [WeatherTool()],
+  instructions: "Answer with current weather when asked."
+)
+
+let response = try await session.run(to: "Weather in Nashville?")
+print(response.content)
+```
 
 ### Installation
 
@@ -166,7 +243,7 @@ print(response.content)
 
 ### Building Tools
 
-Create tools using SwiftAgent's `@Generable` macro for type-safe tool definitions. Tools expose argument and output types that SwiftAgent validates for you, so the model can call into Swift code and receive strongly typed results without manual JSON parsing.
+Create tools using SwiftAgent's `@Generable` macro for type-safe tool definitions. Tools expose argument and output types that SwiftAgent validates for you, so `AgentSession` can execute model-requested tools and return strongly typed results without manual JSON parsing.
 
 ```swift
 import SwiftAgent
@@ -201,19 +278,19 @@ struct WeatherTool: Tool {
 }
 
 let model = OpenResponsesLanguageModel(apiKey: "sk-...", model: "openai/gpt-5")
-let session = LanguageModelSession(
+let session = AgentSession(
   model: model,
   tools: [WeatherTool()],
   instructions: "You are a helpful assistant.",
 )
 
-let response = try await session.respond(to: "What's the weather like in San Francisco?")
+let response = try await session.run(to: "What's the weather like in San Francisco?")
 
 print(response.content)
 ```
 
 > [!NOTE]
-> `LanguageModelSession` takes tools as an array, for example `tools: [WeatherTool(), OtherTool()]`.
+> `LanguageModelSession` and `AgentSession` both take tools as an array, for example `tools: [WeatherTool(), OtherTool()]`. `LanguageModelSession` exposes tool calls for app-managed loops; `AgentSession` executes registered local tools automatically.
 
 #### Recoverable Tool Rejections
 

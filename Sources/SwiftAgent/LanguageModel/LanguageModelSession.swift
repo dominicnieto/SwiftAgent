@@ -120,11 +120,27 @@ public final class LanguageModelSession: @unchecked Sendable {
     includeSchemaInPrompt: Bool = true,
     options: GenerationOptions = GenerationOptions(),
   ) async throws -> Response<Content> where Content: Generable & Sendable {
+    try await respond(
+      promptEntry: promptEntry,
+      generating: type,
+      includeSchemaInPrompt: includeSchemaInPrompt,
+      options: options,
+    )
+  }
+
+  private func respond<Content>(
+    promptEntry: Transcript.Prompt? = nil,
+    toolOutputs: [Transcript.ToolOutput] = [],
+    generating type: Content.Type = Content.self,
+    includeSchemaInPrompt: Bool = true,
+    options: GenerationOptions = GenerationOptions(),
+  ) async throws -> Response<Content> where Content: Generable & Sendable {
     beginResponding()
     defer { endResponding() }
 
     let modelResponse = try await engine.respond(
       promptEntry: promptEntry,
+      toolOutputs: toolOutputs,
       structuredOutput: Self.structuredOutputRequest(for: type, includeSchemaInPrompt: includeSchemaInPrompt),
       options: options,
     )
@@ -165,6 +181,21 @@ public final class LanguageModelSession: @unchecked Sendable {
     includeSchemaInPrompt: Bool = true,
     options: GenerationOptions = GenerationOptions(),
   ) -> sending ResponseStream<Content> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
+    streamResponse(
+      promptEntry: promptEntry,
+      generating: type,
+      includeSchemaInPrompt: includeSchemaInPrompt,
+      options: options,
+    )
+  }
+
+  private func streamResponse<Content>(
+    promptEntry: Transcript.Prompt? = nil,
+    toolOutputs: [Transcript.ToolOutput] = [],
+    generating type: Content.Type = Content.self,
+    includeSchemaInPrompt: Bool = true,
+    options: GenerationOptions = GenerationOptions(),
+  ) -> sending ResponseStream<Content> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
     let relay = AsyncThrowingStream<ResponseStream<Content>.Snapshot, any Error> { continuation in
       Task {
         self.beginResponding()
@@ -173,6 +204,7 @@ public final class LanguageModelSession: @unchecked Sendable {
         do {
           let upstream = await self.engine.streamResponse(
             promptEntry: promptEntry,
+            toolOutputs: toolOutputs,
             structuredOutput: Self.structuredOutputRequest(for: type, includeSchemaInPrompt: includeSchemaInPrompt),
             options: options,
           )
@@ -224,6 +256,64 @@ public final class LanguageModelSession: @unchecked Sendable {
     return ResponseStream(stream: relay)
   }
 
+  /// Runs one raw model turn for higher-level runtime code built on this session.
+  package func modelResponseForRuntime(
+    promptEntry: Transcript.Prompt? = nil,
+    toolOutputs: [Transcript.ToolOutput] = [],
+    structuredOutput: StructuredOutputRequest? = nil,
+    options: GenerationOptions = GenerationOptions(),
+  ) async throws -> ModelResponse {
+    beginResponding()
+    defer { endResponding() }
+
+    let response = try await engine.respond(
+      promptEntry: promptEntry,
+      toolOutputs: toolOutputs,
+      structuredOutput: structuredOutput,
+      options: options,
+    )
+    await syncFromEngine()
+    return response
+  }
+
+  /// Streams one raw model turn for higher-level runtime code built on this session.
+  package func modelStreamForRuntime(
+    promptEntry: Transcript.Prompt? = nil,
+    toolOutputs: [Transcript.ToolOutput] = [],
+    structuredOutput: StructuredOutputRequest? = nil,
+    options: GenerationOptions = GenerationOptions(),
+  ) -> AsyncThrowingStream<ConversationStreamSnapshot, any Error> {
+    AsyncThrowingStream { continuation in
+      let task = Task {
+        beginResponding()
+        defer { endResponding() }
+
+        do {
+          let upstream = await engine.streamResponse(
+            promptEntry: promptEntry,
+            toolOutputs: toolOutputs,
+            structuredOutput: structuredOutput,
+            options: options,
+          )
+          for try await snapshot in upstream {
+            await syncFromEngine()
+            continuation.yield(snapshot)
+          }
+          continuation.finish()
+        } catch {
+          continuation.finish(throwing: error)
+        }
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Applies already-produced transcript entries for runtime-owned tool execution helpers.
+  package func applyRuntimeResponse(_ response: ModelResponse) async {
+    await engine.apply(response)
+    await syncFromEngine()
+  }
+
   /// Generates a complete string response.
   @discardableResult
   public func respond(
@@ -240,6 +330,31 @@ public final class LanguageModelSession: @unchecked Sendable {
     options: GenerationOptions = GenerationOptions(),
   ) async throws -> Response<String> {
     try await respond(to: Prompt(prompt), options: options)
+  }
+
+  /// Appends tool outputs and generates one complete follow-up response without executing additional tools.
+  @discardableResult
+  public func respond(
+    with toolOutputs: [Transcript.ToolOutput],
+    options: GenerationOptions = GenerationOptions(),
+  ) async throws -> Response<String> {
+    try await respond(with: toolOutputs, generating: String.self, includeSchemaInPrompt: true, options: options)
+  }
+
+  /// Appends tool outputs and generates one complete structured follow-up response without executing additional tools.
+  @discardableResult
+  public func respond<Content>(
+    with toolOutputs: [Transcript.ToolOutput],
+    generating type: Content.Type = Content.self,
+    includeSchemaInPrompt: Bool = true,
+    options: GenerationOptions = GenerationOptions(),
+  ) async throws -> Response<Content> where Content: Generable & Sendable {
+    try await respond(
+      toolOutputs: toolOutputs,
+      generating: type,
+      includeSchemaInPrompt: includeSchemaInPrompt,
+      options: options,
+    )
   }
 
   /// Generates a complete structured response from a plain prompt.
@@ -335,6 +450,29 @@ public final class LanguageModelSession: @unchecked Sendable {
     options: GenerationOptions = GenerationOptions(),
   ) -> sending ResponseStream<String> {
     streamResponse(to: Prompt(prompt), options: options)
+  }
+
+  /// Appends tool outputs and streams one follow-up response without executing additional tools.
+  public func streamResponse(
+    with toolOutputs: [Transcript.ToolOutput],
+    options: GenerationOptions = GenerationOptions(),
+  ) -> sending ResponseStream<String> {
+    streamResponse(with: toolOutputs, generating: String.self, includeSchemaInPrompt: true, options: options)
+  }
+
+  /// Appends tool outputs and streams one structured follow-up response without executing additional tools.
+  public func streamResponse<Content>(
+    with toolOutputs: [Transcript.ToolOutput],
+    generating type: Content.Type = Content.self,
+    includeSchemaInPrompt: Bool = true,
+    options: GenerationOptions = GenerationOptions(),
+  ) -> sending ResponseStream<Content> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
+    streamResponse(
+      toolOutputs: toolOutputs,
+      generating: type,
+      includeSchemaInPrompt: includeSchemaInPrompt,
+      options: options,
+    )
   }
 
   /// Streams a structured response from a plain prompt.

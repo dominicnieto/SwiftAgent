@@ -14,8 +14,6 @@ public struct ModelRequest: Sendable, Equatable, Codable {
   public var structuredOutput: StructuredOutputRequest?
   /// Sampling, limits, streaming cadence, and provider-specific options.
   public var generationOptions: GenerationOptions
-  /// Opaque provider-native state needed to continue a previous turn.
-  public var continuation: ProviderContinuation?
   /// Binary or URL-backed attachments that should be serialized by the provider.
   public var attachments: [ModelAttachment]
 
@@ -26,7 +24,6 @@ public struct ModelRequest: Sendable, Equatable, Codable {
     toolChoice: ToolChoice? = nil,
     structuredOutput: StructuredOutputRequest? = nil,
     generationOptions: GenerationOptions = GenerationOptions(),
-    continuation: ProviderContinuation? = nil,
     attachments: [ModelAttachment] = [],
   ) {
     self.messages = messages
@@ -35,7 +32,6 @@ public struct ModelRequest: Sendable, Equatable, Codable {
     self.toolChoice = toolChoice
     self.structuredOutput = structuredOutput
     self.generationOptions = generationOptions
-    self.continuation = continuation
     self.attachments = attachments
   }
 }
@@ -46,7 +42,7 @@ public struct ModelMessage: Sendable, Equatable, Codable {
   public var role: ModelMessageRole
   /// Content segments for the message.
   public var segments: [Transcript.Segment]
-  /// Provider-specific metadata that should stay out of the public transcript.
+  /// Provider-specific metadata preserved for later provider request reconstruction.
   public var providerMetadata: [String: JSONValue]
 
   public init(
@@ -202,7 +198,11 @@ public struct ModelToolCall: Sendable, Equatable, Codable, Identifiable {
     kind: ToolDefinitionKind = .local,
     providerMetadata: [String: JSONValue] = [:],
   ) {
-    self.call = call
+    var storedCall = call
+    if storedCall.providerMetadata.isEmpty, providerMetadata.isEmpty == false {
+      storedCall.providerMetadata = providerMetadata
+    }
+    self.call = storedCall
     self.kind = kind
     self.providerMetadata = providerMetadata
   }
@@ -224,8 +224,6 @@ public struct ModelResponse: Sendable, Equatable, Codable {
   public var tokenUsage: TokenUsage?
   /// Provider metadata reported for this turn.
   public var responseMetadata: ResponseMetadata?
-  /// Opaque provider-native state needed by a continuation turn.
-  public var continuation: ProviderContinuation?
   /// Raw provider output for diagnostics and tests.
   public var rawProviderOutput: JSONValue?
 
@@ -237,7 +235,6 @@ public struct ModelResponse: Sendable, Equatable, Codable {
     finishReason: FinishReason,
     tokenUsage: TokenUsage? = nil,
     responseMetadata: ResponseMetadata? = nil,
-    continuation: ProviderContinuation? = nil,
     rawProviderOutput: JSONValue? = nil,
   ) {
     self.content = content
@@ -247,32 +244,7 @@ public struct ModelResponse: Sendable, Equatable, Codable {
     self.finishReason = finishReason
     self.tokenUsage = tokenUsage
     self.responseMetadata = responseMetadata
-    self.continuation = continuation
     self.rawProviderOutput = rawProviderOutput
-  }
-}
-
-/// Opaque provider-native state required to continue a model turn.
-public struct ProviderContinuation: Sendable, Equatable, Codable {
-  /// Provider family that created the continuation.
-  public var providerName: String
-  /// Model identifier that created the continuation, if known.
-  public var modelID: String?
-  /// Provider turn or response identifier.
-  public var turnID: String
-  /// Provider-native payload. The runtime stores this value but does not interpret it.
-  public var payload: JSONValue
-
-  public init(
-    providerName: String,
-    modelID: String? = nil,
-    turnID: String,
-    payload: JSONValue,
-  ) {
-    self.providerName = providerName
-    self.modelID = modelID
-    self.turnID = turnID
-    self.payload = payload
   }
 }
 
@@ -280,12 +252,9 @@ public struct ProviderContinuation: Sendable, Equatable, Codable {
 public struct ModelTurnCompletion: Sendable, Equatable, Codable {
   /// Normalized finish reason.
   public var finishReason: FinishReason
-  /// Opaque state needed for any continuation turn.
-  public var continuation: ProviderContinuation?
 
-  public init(finishReason: FinishReason, continuation: ProviderContinuation? = nil) {
+  public init(finishReason: FinishReason) {
     self.finishReason = finishReason
-    self.continuation = continuation
   }
 }
 

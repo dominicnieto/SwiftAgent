@@ -442,15 +442,10 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
                 providerName: "Open Responses"
             )
             .merging(response.responseMetadata(providerName: "Open Responses", defaultModelID: model))
+            .merging(openResponsesOutputMetadata(output: response.output, responseID: response.id))
         let toolCalls = try modelToolCalls(from: extractToolCallsFromOutput(response.output))
         let reasoning = reasoningEntries(from: response.output)
         let content = try openResponsesContent(from: response.output, outputText: response.outputText, structuredOutput: request.structuredOutput)
-        let continuation = openResponsesContinuation(
-            output: response.output,
-            responseID: response.id,
-            modelID: response.model ?? model
-        )
-
         return ModelResponse(
             content: content,
             toolCalls: toolCalls,
@@ -458,7 +453,6 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
             finishReason: toolCalls.isEmpty ? .completed : .toolCalls,
             tokenUsage: response.usage?.tokenUsage,
             responseMetadata: metadata,
-            continuation: continuation,
             rawProviderOutput: response.output.map(JSONValue.array)
         )
     }
@@ -492,9 +486,6 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
 
                     var accumulatedText = ""
                     var streamingToolCalls: [String: StreamingOpenResponsesToolCall] = [:]
-                    var continuationItems = OpenResponsesContinuationItemBuffer()
-                    var completedResponseID: String?
-                    var completedModelID: String?
 
                     for try await event in eventStream.events {
                         switch event {
@@ -507,7 +498,6 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
                             }
 
                         case .outputItemAdded(let item):
-                            continuationItems.record(item)
                             switch item.type {
                             case "function_call":
                                 if let name = item.name {
@@ -535,7 +525,11 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
                                     id: item.id,
                                     summary: item.summaryText,
                                     encryptedReasoning: item.encryptedContent,
-                                    status: .completed
+                                    status: .completed,
+                                    providerMetadata: openResponsesProviderMetadata([
+                                        "item_id": .string(item.id),
+                                        "encrypted_content": item.encryptedContent.map(JSONValue.string) ?? .null,
+                                    ])
                                 )))
                             default:
                                 break
@@ -547,12 +541,9 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
 
                         case .functionCallArgumentsDone(let itemID, let arguments):
                             streamingToolCalls[itemID]?.arguments = arguments
-                            continuationItems.updateFunctionCallArguments(itemID: itemID, arguments: arguments)
                             continuation.yield(.toolInputCompleted(id: itemID))
 
                         case .completed(let response):
-                            completedResponseID = response?.id
-                            completedModelID = response?.model
                             if let usage = response?.usage?.tokenUsage {
                                 continuation.yield(.usage(usage))
                             }
@@ -576,21 +567,14 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
                         }
                     }
 
-                    let rawItems = continuationItems.rawItems()
-                    let providerContinuation = openResponsesContinuation(
-                        output: rawItems.isEmpty ? nil : rawItems,
-                        responseID: completedResponseID ?? UUID().uuidString,
-                        modelID: completedModelID ?? model
-                    )
                     let calls = try streamingToolCalls.values
                         .sorted { $0.id < $1.id }
                         .map { ModelToolCall(call: try $0.transcriptToolCall(), kind: .local) }
                     if calls.isEmpty == false {
-                        continuation.yield(.toolCallsCompleted(calls, continuation: providerContinuation))
+                        continuation.yield(.toolCallsCompleted(calls))
                     }
                     continuation.yield(.completed(.init(
-                        finishReason: calls.isEmpty ? .completed : .toolCalls,
-                        continuation: providerContinuation
+                        finishReason: calls.isEmpty ? .completed : .toolCalls
                     )))
                     continuation.finish()
                 } catch {
@@ -911,9 +895,6 @@ private func openResponsesMessages(from request: ModelRequest) -> [OpenResponses
         list.append(OpenResponsesMessage(role: .system, content: .text(instructions.description)))
     }
 
-    let continuationItems = openResponsesContinuationItems(from: request.continuation)
-    let hasProviderContinuation = continuationItems.isEmpty == false
-
     for message in request.messages {
         switch message.role {
         case .system:
@@ -927,9 +908,11 @@ private func openResponsesMessages(from request: ModelRequest) -> [OpenResponses
                 content: .blocks(openResponsesConvertSegmentsToBlocks(message.segments))
             ))
         case .assistant:
-            if hasProviderContinuation,
-                message.providerMetadata["tool_calls"] != nil
-            {
+            let rawToolCallItems = openResponsesToolCallItems(from: message.providerMetadata)
+            if rawToolCallItems.isEmpty == false {
+                list.append(contentsOf: rawToolCallItems.map {
+                    OpenResponsesMessage(role: .raw(rawContent: $0), content: .text(""))
+                })
                 continue
             }
             list.append(OpenResponsesMessage(
@@ -944,36 +927,48 @@ private func openResponsesMessages(from request: ModelRequest) -> [OpenResponses
                 role: .tool(id: callID),
                 content: .blocks(openResponsesConvertSegmentsToBlocks(message.segments))
             ))
-        case .providerDefined:
-            break
+        case let .providerDefined(kind):
+            if kind == "reasoning",
+               let reasoningItem = openResponsesReasoningItem(from: message.providerMetadata)
+            {
+                list.append(OpenResponsesMessage(role: .raw(rawContent: reasoningItem), content: .text("")))
+            }
         }
-    }
-
-    if hasProviderContinuation {
-        var merged: [OpenResponsesMessage] = []
-        for item in continuationItems {
-            merged.append(OpenResponsesMessage(role: .raw(rawContent: item), content: .text("")))
-        }
-        merged.append(contentsOf: list.filter { message in
-            if case .tool = message.role { return true }
-            if case .user = message.role { return true }
-            if case .system = message.role { return true }
-            return false
-        })
-        return merged
     }
 
     return list
 }
 
-private func openResponsesContinuationItems(from continuation: ProviderContinuation?) -> [JSONValue] {
-    guard let continuation,
-        continuation.providerName == "Open Responses" || continuation.providerName == "OpenAI"
-    else { return [] }
-    guard case let .object(payload) = continuation.payload,
-        case let .array(items)? = payload["output"]
-    else { return [] }
-    return items
+private func openResponsesToolCallItems(from metadata: [String: JSONValue]) -> [JSONValue] {
+    guard case let .array(calls)? = metadata["tool_calls"] else { return [] }
+    return calls.compactMap { value -> JSONValue? in
+        guard case let .object(call) = value,
+            let callID = call.jsonString(forKey: "call_id") ?? call.jsonString(forKey: "id"),
+            let toolName = call.jsonString(forKey: "tool_name")
+        else { return nil }
+        return .object([
+            "type": .string("function_call"),
+            "call_id": .string(callID),
+            "name": .string(toolName),
+            "arguments": .string(call.jsonString(forKey: "arguments") ?? "{}"),
+            "status": .string("completed"),
+        ])
+    }
+}
+
+private func openResponsesReasoningItem(from metadata: [String: JSONValue]) -> JSONValue? {
+    guard case let .object(openAI)? = metadata["openai"],
+        let itemID = openAI.jsonString(forKey: "item_id")
+    else { return nil }
+
+    var item: [String: JSONValue] = [
+        "type": .string("reasoning"),
+        "id": .string(itemID),
+    ]
+    if let encryptedContent = openAI["encrypted_content"], encryptedContent != .null {
+        item["encrypted_content"] = encryptedContent
+    }
+    return .object(item)
 }
 
 extension Transcript {
@@ -1135,16 +1130,6 @@ private func openResponsesContent(
     return GeneratedContent(outputText ?? extractTextFromOutput(output) ?? "")
 }
 
-private func openResponsesContinuation(output: [JSONValue]?, responseID: String, modelID: String?) -> ProviderContinuation? {
-    guard let output, output.isEmpty == false else { return nil }
-    return ProviderContinuation(
-        providerName: "Open Responses",
-        modelID: modelID,
-        turnID: responseID,
-        payload: .object(["output": .array(output)])
-    )
-}
-
 private func reasoningEntries(from output: [JSONValue]?) -> [Transcript.Reasoning] {
     guard let output else { return [] }
     return output.compactMap { item in
@@ -1156,7 +1141,11 @@ private func reasoningEntries(from output: [JSONValue]?) -> [Transcript.Reasonin
             id: id,
             summary: openResponsesReasoningSummary(from: object["summary"]),
             encryptedReasoning: object.jsonString(forKey: "encrypted_content"),
-            status: .completed
+            status: .completed,
+            providerMetadata: openResponsesProviderMetadata([
+                "item_id": .string(id),
+                "encrypted_content": object["encrypted_content"] ?? .null,
+            ])
         )
     }
 }
@@ -1186,17 +1175,37 @@ private func openResponsesReasoningSummary(from value: JSONValue?) -> [String] {
 private func modelToolCalls(from toolCalls: [OpenResponsesToolCall]) throws -> [ModelToolCall] {
     try toolCalls.map { call in
         let arguments = try call.arguments.map(GeneratedContent.init(json:)) ?? GeneratedContent(properties: [:])
+        let metadata = openResponsesProviderMetadata([
+            "item_id": .string(call.id),
+        ])
         return ModelToolCall(
             call: Transcript.ToolCall(
                 id: call.id,
                 callId: call.callId,
                 toolName: call.name,
                 arguments: arguments,
-                status: .completed
+                status: .completed,
+                providerMetadata: metadata
             ),
-            kind: .local
+            kind: .local,
+            providerMetadata: metadata
         )
     }
+}
+
+private func openResponsesProviderMetadata(_ value: [String: JSONValue]) -> [String: JSONValue] {
+    ["openai": .object(value)]
+}
+
+private func openResponsesOutputMetadata(output: [JSONValue]?, responseID: String?) -> ResponseMetadata {
+    var metadata: [String: JSONValue] = [:]
+    if let responseID {
+        metadata["response_id"] = .string(responseID)
+    }
+    if let output, output.isEmpty == false {
+        metadata["output"] = .array(output)
+    }
+    return ResponseMetadata(providerMetadata: openResponsesProviderMetadata(metadata))
 }
 
 // MARK: - Tool call extraction and resolution
@@ -1434,43 +1443,6 @@ private struct OpenResponsesOutputItem: Decodable, Sendable {
         case callID = "call_id"
         case encryptedContent = "encrypted_content"
         case summary
-    }
-}
-
-private struct OpenResponsesContinuationItemBuffer: Sendable {
-    private var orderedIDs: [String] = []
-    private var itemsByID: [String: JSONValue] = [:]
-
-    mutating func record(_ item: OpenResponsesOutputItem) {
-        if itemsByID[item.id] == nil {
-            orderedIDs.append(item.id)
-        }
-        itemsByID[item.id] = item.rawItem
-    }
-
-    mutating func updateFunctionCallArguments(itemID: String, arguments: String) {
-        guard case .object(var object)? = itemsByID[itemID],
-            object.jsonString(forKey: "type") == "function_call"
-        else { return }
-
-        object["arguments"] = .string(arguments)
-        object["status"] = .string("completed")
-        itemsByID[itemID] = .object(object)
-    }
-
-    func rawItems() -> [JSONValue] {
-        orderedIDs.compactMap { itemsByID[$0] }
-    }
-}
-
-private extension [JSONValue] {
-    func functionCallIDs() -> Set<String> {
-        Set(compactMap { value in
-            guard case .object(let object) = value,
-                object.jsonString(forKey: "type") == "function_call"
-            else { return nil }
-            return object.jsonString(forKey: "call_id")
-        })
     }
 }
 

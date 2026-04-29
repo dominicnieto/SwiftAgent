@@ -219,7 +219,7 @@ struct AgentSessionTests {
       status: .completed,
     )
     let provider = AgentSessionMockProvider(events: [
-      .toolCallsCompleted([ModelToolCall(call: serverToolCall, kind: .providerDefined)], continuation: nil),
+      .toolCallsCompleted([ModelToolCall(call: serverToolCall, kind: .providerDefined)]),
       .completed(.init(finishReason: .completed)),
     ])
     let session = AgentSession(model: provider, tools: [AgentLookupTool()])

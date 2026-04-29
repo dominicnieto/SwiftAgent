@@ -8,8 +8,6 @@ package struct ConversationState: Sendable, Equatable {
   package var tokenUsage: TokenUsage?
   /// Latest merged provider response metadata.
   package var responseMetadata: ResponseMetadata?
-  /// Opaque provider continuations preserved outside the public transcript.
-  package var continuationStore: ProviderContinuationStore
 
   package var responseEntryID: String
   package var responseSegmentID: String
@@ -18,14 +16,12 @@ package struct ConversationState: Sendable, Equatable {
     transcript: Transcript = Transcript(),
     tokenUsage: TokenUsage? = nil,
     responseMetadata: ResponseMetadata? = nil,
-    continuationStore: ProviderContinuationStore = ProviderContinuationStore(),
     responseEntryID: String = UUID().uuidString,
     responseSegmentID: String = UUID().uuidString,
   ) {
     self.transcript = transcript
     self.tokenUsage = tokenUsage
     self.responseMetadata = responseMetadata
-    self.continuationStore = continuationStore
     self.responseEntryID = responseEntryID
     self.responseSegmentID = responseSegmentID
   }
@@ -33,43 +29,6 @@ package struct ConversationState: Sendable, Equatable {
   package mutating func prepareResponseEntry() {
     responseEntryID = UUID().uuidString
     responseSegmentID = UUID().uuidString
-  }
-}
-
-/// Stores provider-native continuation state without interpreting or rebuilding it from transcript entries.
-package struct ProviderContinuationStore: Sendable, Equatable {
-  private var continuationsByTurnID: [String: ProviderContinuation]
-  private var latestTurnID: String?
-
-  package init(
-    continuationsByTurnID: [String: ProviderContinuation] = [:],
-    latestTurnID: String? = nil,
-  ) {
-    self.continuationsByTurnID = continuationsByTurnID
-    self.latestTurnID = latestTurnID
-  }
-
-  /// The most recently recorded continuation, if any.
-  package var latest: ProviderContinuation? {
-    guard let latestTurnID else { return nil }
-    return continuationsByTurnID[latestTurnID]
-  }
-
-  /// Records opaque provider state for later continuation turns.
-  package mutating func record(_ continuation: ProviderContinuation?) {
-    guard let continuation else { return }
-    continuationsByTurnID[continuation.turnID] = continuation
-    latestTurnID = continuation.turnID
-  }
-
-  /// Returns an explicit continuation when supplied, otherwise the latest stored provider-native state.
-  package func continuation(preferred explicitContinuation: ProviderContinuation?) -> ProviderContinuation? {
-    explicitContinuation ?? latest
-  }
-
-  /// Returns stored provider-native state for a specific provider turn.
-  package func continuation(forTurnID turnID: String) -> ProviderContinuation? {
-    continuationsByTurnID[turnID]
   }
 }
 
@@ -105,7 +64,7 @@ package struct ResponseMetadataAccumulator: Sendable, Equatable {
   }
 }
 
-/// Converts prompts, transcript entries, tools, and continuation state into a provider-neutral turn request.
+/// Converts prompts, transcript entries, tools, and provider metadata into a provider-neutral turn request.
 package struct ModelRequestBuilder: Sendable {
   package var instructions: Instructions?
 
@@ -120,7 +79,6 @@ package struct ModelRequestBuilder: Sendable {
     activeToolNames: Set<String>?,
     structuredOutput: StructuredOutputRequest?,
     options: GenerationOptions,
-    continuation: ProviderContinuation?,
   ) -> ModelRequest {
     let filteredTools = tools.filter { tool in
       activeToolNames?.contains(tool.name) ?? true
@@ -134,7 +92,6 @@ package struct ModelRequestBuilder: Sendable {
       toolChoice: toolChoice,
       structuredOutput: structuredOutput,
       generationOptions: options,
-      continuation: continuation,
       attachments: attachments(from: transcript),
     )
   }
@@ -159,7 +116,11 @@ package struct ModelRequestBuilder: Sendable {
           ),
         )
       case let .response(response):
-        ModelMessage(role: .assistant, segments: response.segments)
+        ModelMessage(
+          role: .assistant,
+          segments: response.segments,
+          providerMetadata: response.providerMetadata,
+        )
       case let .toolCalls(toolCalls):
         ModelMessage(
           role: .assistant,
@@ -173,9 +134,16 @@ package struct ModelRequestBuilder: Sendable {
           providerMetadata: [
             "call_id": .string(output.callId),
             "tool_name": .string(output.toolName),
+            "provider_metadata": .object(output.providerMetadata),
           ],
         )
-      case .instructions, .reasoning:
+      case let .reasoning(reasoning):
+        ModelMessage(
+          role: .providerDefined("reasoning"),
+          segments: [],
+          providerMetadata: reasoning.providerMetadata,
+        )
+      case .instructions:
         nil
       }
     }
@@ -251,6 +219,7 @@ package struct ModelRequestBuilder: Sendable {
         "arguments": .string(call.arguments.jsonString),
         "partial_arguments": call.partialArguments.map(JSONValue.string) ?? .null,
         "status": call.status.map { .string(String(describing: $0)) } ?? .null,
+        "provider_metadata": .object(call.providerMetadata),
       ])
     })
   }
@@ -308,19 +277,21 @@ package struct TranscriptRecorder: Sendable {
   package func recordResponse(
     rawContent: GeneratedContent,
     status: Transcript.Status,
+    providerMetadata: [String: JSONValue] = [:],
     to state: inout ConversationState,
   ) {
     let segment: Transcript.Segment
     if case let .string(text) = rawContent.kind {
-      segment = .text(.init(id: state.responseSegmentID, content: text))
+      segment = .text(.init(id: state.responseSegmentID, content: text, providerMetadata: providerMetadata))
     } else {
-      segment = .structure(.init(id: state.responseSegmentID, content: rawContent))
+      segment = .structure(.init(id: state.responseSegmentID, content: rawContent, providerMetadata: providerMetadata))
     }
 
     let entry = Transcript.Entry.response(.init(
       id: state.responseEntryID,
       segments: [segment],
       status: status,
+      providerMetadata: providerMetadata,
     ))
     state.transcript.upsert(entry)
   }
@@ -373,7 +344,6 @@ package struct ModelEventReduction: Sendable, Equatable {
   package var responseStatus: Transcript.Status?
   package var tokenUsage: TokenUsage?
   package var responseMetadata: ResponseMetadata?
-  package var continuation: ProviderContinuation?
   package var completion: ModelTurnCompletion?
   package var warnings: [ModelWarning]
 
@@ -383,7 +353,6 @@ package struct ModelEventReduction: Sendable, Equatable {
     responseStatus: Transcript.Status? = nil,
     tokenUsage: TokenUsage? = nil,
     responseMetadata: ResponseMetadata? = nil,
-    continuation: ProviderContinuation? = nil,
     completion: ModelTurnCompletion? = nil,
     warnings: [ModelWarning] = [],
   ) {
@@ -392,7 +361,6 @@ package struct ModelEventReduction: Sendable, Equatable {
     self.responseStatus = responseStatus
     self.tokenUsage = tokenUsage
     self.responseMetadata = responseMetadata
-    self.continuation = continuation
     self.completion = completion
     self.warnings = warnings
   }
@@ -462,6 +430,7 @@ package struct ModelEventReducer: Sendable {
         arguments: GeneratedContent(properties: [:]),
         partialArguments: "",
         status: .inProgress,
+        providerMetadata: start.providerMetadata,
       )
       return ModelEventReduction(transcriptEntries: [currentToolCallsEntry()])
 
@@ -502,18 +471,18 @@ package struct ModelEventReducer: Sendable {
         arguments: partial.arguments ?? GeneratedContent(partial.partialArguments),
         partialArguments: partial.partialArguments,
         status: .inProgress,
+        providerMetadata: partial.providerMetadata,
       )
       recordToolCall(call)
       return ModelEventReduction(transcriptEntries: [currentToolCallsEntry()])
 
-    case let .toolCallsCompleted(toolCalls, continuation):
+    case let .toolCallsCompleted(toolCalls):
       let calls = toolCalls.map(\.call)
       for call in calls {
         recordToolCall(call)
       }
       return ModelEventReduction(
         transcriptEntries: calls.isEmpty ? [] : [currentToolCallsEntry()],
-        continuation: continuation,
       )
 
     case let .providerToolResult(output):
@@ -529,7 +498,6 @@ package struct ModelEventReducer: Sendable {
       return ModelEventReduction(
         rawContent: content.currentRawContent,
         responseStatus: .completed,
-        continuation: completion.continuation,
         completion: completion,
       )
 
@@ -571,7 +539,6 @@ package struct ConversationStreamSnapshot: Sendable, Equatable {
   package var tokenUsage: TokenUsage?
   package var responseMetadata: ResponseMetadata?
   package var completion: ModelTurnCompletion?
-  package var continuation: ProviderContinuation?
 
   package init(
     modelEvent: ModelStreamEvent? = nil,
@@ -581,7 +548,6 @@ package struct ConversationStreamSnapshot: Sendable, Equatable {
     tokenUsage: TokenUsage? = nil,
     responseMetadata: ResponseMetadata? = nil,
     completion: ModelTurnCompletion? = nil,
-    continuation: ProviderContinuation? = nil,
   ) {
     self.modelEvent = modelEvent
     self.transcript = transcript
@@ -590,7 +556,6 @@ package struct ConversationStreamSnapshot: Sendable, Equatable {
     self.tokenUsage = tokenUsage
     self.responseMetadata = responseMetadata
     self.completion = completion
-    self.continuation = continuation
   }
 }
 
@@ -614,10 +579,6 @@ package actor ConversationEngine {
     state.responseMetadata
   }
 
-  package var latestContinuation: ProviderContinuation? {
-    state.continuationStore.latest
-  }
-
   package init(
     model: any LanguageModel,
     instructions: Instructions? = nil,
@@ -633,17 +594,20 @@ package actor ConversationEngine {
   package func makeRequest(
     prompt: Prompt? = nil,
     promptEntry: Transcript.Prompt? = nil,
+    toolOutputs: [Transcript.ToolOutput] = [],
     toolChoice: ToolChoice? = nil,
     activeToolNames: Set<String>? = nil,
     structuredOutput: StructuredOutputRequest? = nil,
     options: GenerationOptions = GenerationOptions(),
-    continuation explicitContinuation: ProviderContinuation? = nil,
   ) -> ModelRequest {
     if let promptEntry {
       recorder.appendPrompt(promptEntry, to: &state)
     } else if let prompt {
       recorder.appendPrompt(recorder.promptEntry(for: prompt), to: &state)
+    } else if toolOutputs.isEmpty == false {
+      state.prepareResponseEntry()
     }
+    recorder.recordEntries(toolOutputs.map(Transcript.Entry.toolOutput), to: &state)
 
     return requestBuilder.makeRequest(
       transcript: state.transcript,
@@ -652,7 +616,6 @@ package actor ConversationEngine {
       activeToolNames: activeToolNames,
       structuredOutput: structuredOutput,
       options: options,
-      continuation: state.continuationStore.continuation(preferred: explicitContinuation),
     )
   }
 
@@ -661,44 +624,51 @@ package actor ConversationEngine {
   package func respond(
     prompt: Prompt? = nil,
     promptEntry: Transcript.Prompt? = nil,
+    toolOutputs: [Transcript.ToolOutput] = [],
     toolChoice: ToolChoice? = nil,
     activeToolNames: Set<String>? = nil,
     structuredOutput: StructuredOutputRequest? = nil,
     options: GenerationOptions = GenerationOptions(),
-    continuation: ProviderContinuation? = nil,
   ) async throws -> ModelResponse {
     let request = makeRequest(
       prompt: prompt,
       promptEntry: promptEntry,
+      toolOutputs: toolOutputs,
       toolChoice: toolChoice,
       activeToolNames: activeToolNames,
       structuredOutput: structuredOutput,
       options: options,
-      continuation: continuation,
     )
     let response = try await model.respond(to: request)
     apply(response)
     return response
   }
 
+  /// Records tool outputs and prepares a new response slot for the next model turn.
+  package func recordToolOutputs(_ outputs: [Transcript.ToolOutput]) {
+    guard outputs.isEmpty == false else { return }
+    state.prepareResponseEntry()
+    recorder.recordEntries(outputs.map(Transcript.Entry.toolOutput), to: &state)
+  }
+
   /// Streams one model turn and records each reduced update into shared state.
   package func streamResponse(
     prompt: Prompt? = nil,
     promptEntry: Transcript.Prompt? = nil,
+    toolOutputs: [Transcript.ToolOutput] = [],
     toolChoice: ToolChoice? = nil,
     activeToolNames: Set<String>? = nil,
     structuredOutput: StructuredOutputRequest? = nil,
     options: GenerationOptions = GenerationOptions(),
-    continuation: ProviderContinuation? = nil,
   ) -> AsyncThrowingStream<ConversationStreamSnapshot, any Error> {
     let request = makeRequest(
       prompt: prompt,
       promptEntry: promptEntry,
+      toolOutputs: toolOutputs,
       toolChoice: toolChoice,
       activeToolNames: activeToolNames,
       structuredOutput: structuredOutput,
       options: options,
-      continuation: continuation,
     )
     let upstream = model.streamResponse(to: request)
 
@@ -733,7 +703,7 @@ package actor ConversationEngine {
     }
   }
 
-  /// Applies a complete model response to transcript, usage, metadata, and continuation state.
+  /// Applies a complete model response to transcript, usage, and metadata state.
   package func apply(_ response: ModelResponse) {
     recorder.recordEntries(response.transcriptEntries, to: &state)
     recorder.recordEntries(response.reasoning.map(Transcript.Entry.reasoning), to: &state)
@@ -741,21 +711,30 @@ package actor ConversationEngine {
       recorder.recordEntries([.toolCalls(.init(calls: response.toolCalls.map(\.call)))], to: &state)
     }
     if let content = response.content {
-      recorder.recordResponse(rawContent: content, status: .completed, to: &state)
+      recorder.recordResponse(
+        rawContent: content,
+        status: .completed,
+        providerMetadata: response.responseMetadata?.providerMetadata ?? [:],
+        to: &state,
+      )
     }
-    record(usage: response.tokenUsage, metadata: response.responseMetadata, continuation: response.continuation, in: &state)
+    record(usage: response.tokenUsage, metadata: response.responseMetadata, in: &state)
   }
 
   @discardableResult
   private func apply(_ reduction: ModelEventReduction, event: ModelStreamEvent? = nil) -> ConversationStreamSnapshot {
     recorder.recordEntries(reduction.transcriptEntries, to: &state)
     if let rawContent = reduction.rawContent, let status = reduction.responseStatus {
-      recorder.recordResponse(rawContent: rawContent, status: status, to: &state)
+      recorder.recordResponse(
+        rawContent: rawContent,
+        status: status,
+        providerMetadata: reduction.responseMetadata?.providerMetadata ?? [:],
+        to: &state,
+      )
     }
     record(
       usage: reduction.tokenUsage,
       metadata: reduction.responseMetadata,
-      continuation: reduction.continuation,
       in: &state,
     )
     return ConversationStreamSnapshot(
@@ -766,14 +745,12 @@ package actor ConversationEngine {
       tokenUsage: state.tokenUsage,
       responseMetadata: state.responseMetadata,
       completion: reduction.completion,
-      continuation: reduction.continuation,
     )
   }
 
   private func record(
     usage: TokenUsage?,
     metadata: ResponseMetadata?,
-    continuation: ProviderContinuation?,
     in state: inout ConversationState,
   ) {
     var usageAccumulator = TokenUsageAccumulator(usage: state.tokenUsage)
@@ -783,7 +760,5 @@ package actor ConversationEngine {
     var metadataAccumulator = ResponseMetadataAccumulator(metadata: state.responseMetadata)
     metadataAccumulator.record(metadata)
     state.responseMetadata = metadataAccumulator.metadata
-
-    state.continuationStore.record(continuation)
   }
 }

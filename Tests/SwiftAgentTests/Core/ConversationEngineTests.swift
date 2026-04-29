@@ -58,7 +58,6 @@ struct ConversationEngineTests {
     let request = try #require(provider.recordedRequests.first)
     #expect(request.instructions == Instructions("Reply briefly"))
     #expect(request.tools.map(\.name) == ["lookup"])
-    #expect(request.continuation == nil)
     #expect(request.messages.first?.role == .user)
   }
 
@@ -108,19 +107,13 @@ struct ConversationEngineTests {
   }
 
   @Test func engineReducesStreamingTextStructuredDeltasUsageAndCompletion() async throws {
-    let continuation = ProviderContinuation(
-      providerName: "MockProvider",
-      modelID: "mock-model",
-      turnID: "turn-stream",
-      payload: .object(["raw": .string("state")]),
-    )
     let provider = ConversationEngineMockProvider(events: [
       .started(ResponseMetadata(id: "stream-1", providerName: "MockProvider")),
       .textStarted(id: "text-1", metadata: nil),
       .textDelta(id: "text-1", delta: "Hel"),
       .textDelta(id: "text-1", delta: "lo"),
       .usage(TokenUsage(outputTokens: 2)),
-      .completed(.init(finishReason: .completed, continuation: continuation)),
+      .completed(.init(finishReason: .completed)),
     ])
     let engine = ConversationEngine(model: provider)
 
@@ -134,14 +127,13 @@ struct ConversationEngineTests {
     #expect(snapshots.compactMap(\.rawContent).last == GeneratedContent("Hello"))
     #expect(await engine.tokenUsage == TokenUsage(outputTokens: 2))
     #expect(await engine.responseMetadata?.id == "stream-1")
-    #expect(await engine.latestContinuation == continuation)
 
     guard case let .response(response) = await engine.transcript.entries.last else {
       Issue.record("Expected completed response entry")
       return
     }
     #expect(response.text == "Hello")
-    #expect(response.status == .completed)
+    #expect(response.status == Transcript.Status.completed)
   }
 
   @Test func engineReducesStreamingStructuredDeltas() async throws {
@@ -245,7 +237,7 @@ struct ConversationEngineTests {
       .toolInputDelta(id: "input-1", delta: "{\"city\":\""),
       .toolInputDelta(id: "input-1", delta: #"Denver"}"#),
       .toolInputCompleted(id: "input-1"),
-      .toolCallsCompleted([ModelToolCall(call: completedCall, kind: .local)], continuation: nil),
+      .toolCallsCompleted([ModelToolCall(call: completedCall, kind: .local)]),
     ])
     let engine = ConversationEngine(model: provider)
 
@@ -274,25 +266,19 @@ struct ConversationEngineTests {
     try await provider.waitForCancellation()
   }
 
-  @Test func enginePreservesProviderContinuationForMockToolTurn() async throws {
-    let continuation = ProviderContinuation(
-      providerName: "MockProvider",
-      modelID: "mock-model",
-      turnID: "turn-tool",
-      payload: .object(["output_items": .array([.string("opaque-function-call")])]),
-    )
+  @Test func enginePreservesProviderMetadataForMockToolTurn() async throws {
     let toolCall = Transcript.ToolCall(
       id: "tool-1",
       callId: "call-1",
       toolName: "lookup",
       arguments: GeneratedContent(properties: ["query": "forecast"]),
       status: .completed,
+      providerMetadata: ["mock": .object(["item_id": .string("opaque-function-call")])],
     )
     let provider = ConversationEngineMockProvider(responses: [
       ModelResponse(
         toolCalls: [ModelToolCall(call: toolCall, kind: .local)],
         finishReason: .toolCalls,
-        continuation: continuation,
       ),
       ModelResponse(
         content: GeneratedContent("Tool result incorporated"),
@@ -302,7 +288,6 @@ struct ConversationEngineTests {
     let engine = ConversationEngine(model: provider, tools: [LookupTool()])
 
     _ = try await engine.respond(prompt: Prompt("Look up the forecast"))
-    #expect(await engine.latestContinuation == continuation)
 
     let output = Transcript.ToolOutput(
       id: "output-1",
@@ -311,19 +296,20 @@ struct ConversationEngineTests {
       segment: .text(.init(content: "Sunny")),
       status: .completed,
     )
-    await engine.apply(ModelResponse(
-      transcriptEntries: [.toolOutput(output)],
-      finishReason: .completed,
-    ))
+    await engine.recordToolOutputs([output])
 
     _ = try await engine.respond()
 
     let requests = provider.recordedRequests
     #expect(requests.count == 2)
-    #expect(requests[1].continuation == continuation)
-    #expect(requests[1].messages.contains { message in
-      message.role == .tool && message.providerMetadata["call_id"] == .string("call-1")
-    })
+    let hasToolCallMetadata = requests[1].messages.contains { message in
+      message.role == .assistant && message.providerMetadata["tool_calls"] != nil
+    }
+    let hasToolOutput = requests[1].messages.contains { message in
+      message.role == .tool && message.providerMetadata["call_id"] == JSONValue.string("call-1")
+    }
+    #expect(hasToolCallMetadata)
+    #expect(hasToolOutput)
   }
 
   @Test func engineProducedTranscriptPreservesPromptGroundingsForSchemaResolution() async throws {

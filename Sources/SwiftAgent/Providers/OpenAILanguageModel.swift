@@ -498,24 +498,22 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
                 )
             )
         }
-        let toolCalls = try modelToolCalls(from: choice.message.toolCalls ?? [])
+        let toolCalls = try modelToolCalls(
+            from: choice.message.toolCalls ?? [],
+            providerMetadata: openAIProviderMetadata([
+                "assistant_message": (try? JSONValue(choice.message)) ?? .null,
+            ])
+        )
         let content = try openAIContent(
             text: choice.message.content ?? "",
             structuredOutput: request.structuredOutput
         )
-        let continuation = openAIChatContinuation(
-            message: choice.message,
-            responseID: response.id,
-            modelID: response.model ?? model
-        )
-
         return ModelResponse(
             content: toolCalls.isEmpty ? content : nil,
             toolCalls: toolCalls,
             finishReason: toolCalls.isEmpty ? openAIFinishReason(choice.finishReason) : .toolCalls,
             tokenUsage: response.usage?.tokenUsage,
             responseMetadata: metadata,
-            continuation: continuation,
             rawProviderOutput: try? JSONValue(choice.message)
         )
     }
@@ -542,18 +540,13 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
         let metadata = ResponseMetadata
             .providerHTTPMetadata(requestID: httpResponse.requestID, headers: httpResponse.headers, providerName: "OpenAI")
             .merging(response.responseMetadata(providerName: "OpenAI", defaultModelID: model))
+            .merging(openAIResponseOutputMetadata(output: response.output, responseID: response.id))
         let toolCalls = try modelToolCalls(from: extractToolCallsFromOutput(response.output))
         let content = try openAIContent(
             text: response.outputText ?? extractTextFromOutput(response.output) ?? "",
             structuredOutput: request.structuredOutput,
             output: response.output
         )
-        let continuation = openAIResponsesContinuation(
-            output: response.output,
-            responseID: response.id,
-            modelID: response.model ?? model
-        )
-
         return ModelResponse(
             content: toolCalls.isEmpty ? content : nil,
             toolCalls: toolCalls,
@@ -561,7 +554,6 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
             finishReason: toolCalls.isEmpty ? openAIFinishReason(response.finishReason) : .toolCalls,
             tokenUsage: response.usage?.tokenUsage,
             responseMetadata: metadata,
-            continuation: continuation,
             rawProviderOutput: response.output.map(JSONValue.array)
         )
     }
@@ -630,9 +622,6 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
                     )))
                     var accumulatedText = ""
                     var streamingToolCalls: [String: StreamingOpenAIToolCall] = [:]
-                    var continuationItems = OpenAIResponsesContinuationItemBuffer()
-                    var completedResponseID = UUID().uuidString
-                    var completedModelID = model
 
                     for try await event in eventStream.events {
                         switch event {
@@ -644,7 +633,6 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
                                 continuation.yield(.textDelta(id: "openai-text", delta: delta))
                             }
                         case .outputItemAdded(let item):
-                            continuationItems.record(item)
                             switch item.type {
                             case "function_call":
                                 if let name = item.name {
@@ -661,7 +649,11 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
                                     id: item.id,
                                     summary: item.summaryText,
                                     encryptedReasoning: item.encryptedContent,
-                                    status: .completed
+                                    status: .completed,
+                                    providerMetadata: openAIProviderMetadata([
+                                        "item_id": .string(item.id),
+                                        "encrypted_content": item.encryptedContent.map(JSONValue.string) ?? .null,
+                                    ])
                                 )))
                             default:
                                 break
@@ -671,15 +663,8 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
                             continuation.yield(.toolInputDelta(id: itemID, delta: delta))
                         case .functionCallArgumentsDone(let itemID, let arguments):
                             streamingToolCalls[itemID]?.arguments = arguments
-                            continuationItems.updateFunctionCallArguments(itemID: itemID, arguments: arguments)
                             continuation.yield(.toolInputCompleted(id: itemID))
                         case .completed(let completed):
-                            if let id = completed?.id {
-                                completedResponseID = id
-                            }
-                            if let model = completed?.model {
-                                completedModelID = model
-                            }
                             if let usage = completed?.usage?.tokenUsage {
                                 continuation.yield(.usage(usage))
                             }
@@ -694,21 +679,14 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
                             break
                         }
                     }
-                    let rawItems = continuationItems.rawItems()
-                    let providerContinuation = openAIResponsesContinuation(
-                        output: rawItems.isEmpty ? nil : rawItems,
-                        responseID: completedResponseID,
-                        modelID: completedModelID
-                    )
                     let calls = try streamingToolCalls.values
                         .sorted { $0.id < $1.id }
                         .map { ModelToolCall(call: try $0.transcriptToolCall()) }
                     if calls.isEmpty == false {
-                        continuation.yield(.toolCallsCompleted(calls, continuation: providerContinuation))
+                        continuation.yield(.toolCallsCompleted(calls))
                     }
                     continuation.yield(.completed(.init(
-                        finishReason: calls.isEmpty ? .completed : .toolCalls,
-                        continuation: providerContinuation
+                        finishReason: calls.isEmpty ? .completed : .toolCalls
                     )))
                     continuation.finish()
                 } catch {
@@ -1212,10 +1190,6 @@ private func openAIMessages(from request: ModelRequest, apiVariant: OpenAILangua
         messages.append(.init(role: .system, content: .text(instructions.description)))
     }
 
-    let responseContinuationItems = openAIResponsesContinuationItems(from: request.continuation)
-    let chatContinuationMessage = openAIChatContinuationMessage(from: request.continuation)
-    let hasContinuation = responseContinuationItems.isEmpty == false || chatContinuationMessage != nil
-
     for message in request.messages {
         switch message.role {
         case .system:
@@ -1223,7 +1197,14 @@ private func openAIMessages(from request: ModelRequest, apiVariant: OpenAILangua
         case .user:
             messages.append(.init(role: .user, content: .blocks(convertSegmentsToOpenAIBlocks(message.segments))))
         case .assistant:
-            if hasContinuation, message.providerMetadata["tool_calls"] != nil {
+            let rawToolCallMessages = openAIRawToolCallMessages(
+                from: message.providerMetadata,
+                apiVariant: apiVariant
+            )
+            if rawToolCallMessages.isEmpty == false {
+                messages.append(contentsOf: rawToolCallMessages.map {
+                    .init(role: .raw(rawContent: $0), content: .text(""))
+                })
                 continue
             }
             let blocks = convertSegmentsToOpenAIBlocks(message.segments)
@@ -1235,60 +1216,79 @@ private func openAIMessages(from request: ModelRequest, apiVariant: OpenAILangua
                 continue
             }
             messages.append(.init(role: .tool(id: callID), content: .blocks(convertSegmentsToOpenAIBlocks(message.segments))))
-        case .providerDefined:
-            break
-        }
-    }
-
-    switch apiVariant {
-    case .chatCompletions:
-        if let chatContinuationMessage {
-            var continued = messages.filter { message in
-                if case .tool = message.role { return false }
-                return true
+        case let .providerDefined(kind):
+            if apiVariant == .responses,
+               kind == "reasoning",
+               let reasoningItem = openAIReasoningItem(from: message.providerMetadata)
+            {
+                messages.append(.init(role: .raw(rawContent: reasoningItem), content: .text("")))
             }
-            continued.append(.init(role: .raw(rawContent: chatContinuationMessage), content: .text("")))
-            continued.append(contentsOf: messages.filter { message in
-                if case .tool = message.role { return true }
-                return false
-            })
-            return continued
-        }
-    case .responses:
-        if responseContinuationItems.isEmpty == false {
-            var continued = messages.filter { message in
-                if case .tool = message.role { return false }
-                return true
-            }
-            for item in responseContinuationItems {
-                continued.append(.init(role: .raw(rawContent: item), content: .text("")))
-            }
-            continued.append(contentsOf: messages.filter { message in
-                if case .tool = message.role { return true }
-                return false
-            })
-            return continued
         }
     }
 
     return messages
 }
 
-private func openAIResponsesContinuationItems(from continuation: ProviderContinuation?) -> [JSONValue] {
-    guard let continuation,
-        continuation.providerName == "OpenAI",
-        case let .object(payload) = continuation.payload,
-        case let .array(items)? = payload["output"]
-    else { return [] }
-    return items
+private func openAIRawToolCallMessages(
+    from metadata: [String: JSONValue],
+    apiVariant: OpenAILanguageModel.APIVariant
+) -> [JSONValue] {
+    guard case let .array(calls)? = metadata["tool_calls"] else { return [] }
+
+    switch apiVariant {
+    case .chatCompletions:
+        let rawCalls = calls.compactMap { value -> JSONValue? in
+            guard case let .object(call) = value,
+                let callID = call.jsonString(forKey: "call_id") ?? call.jsonString(forKey: "id"),
+                let toolName = call.jsonString(forKey: "tool_name")
+            else { return nil }
+            let arguments = call.jsonString(forKey: "arguments") ?? "{}"
+            return .object([
+                "id": .string(callID),
+                "type": .string("function"),
+                "function": .object([
+                    "name": .string(toolName),
+                    "arguments": .string(arguments),
+                ]),
+            ])
+        }
+        guard rawCalls.isEmpty == false else { return [] }
+        return [.object([
+            "role": .string("assistant"),
+            "content": .null,
+            "tool_calls": .array(rawCalls),
+        ])]
+
+    case .responses:
+        return calls.compactMap { value -> JSONValue? in
+            guard case let .object(call) = value,
+                let callID = call.jsonString(forKey: "call_id") ?? call.jsonString(forKey: "id"),
+                let toolName = call.jsonString(forKey: "tool_name")
+            else { return nil }
+            return .object([
+                "type": .string("function_call"),
+                "call_id": .string(callID),
+                "name": .string(toolName),
+                "arguments": .string(call.jsonString(forKey: "arguments") ?? "{}"),
+                "status": .string("completed"),
+            ])
+        }
+    }
 }
 
-private func openAIChatContinuationMessage(from continuation: ProviderContinuation?) -> JSONValue? {
-    guard let continuation,
-        continuation.providerName == "OpenAI",
-        case let .object(payload) = continuation.payload
+private func openAIReasoningItem(from metadata: [String: JSONValue]) -> JSONValue? {
+    guard case let .object(openAI)? = metadata["openai"],
+        let itemID = openAI.jsonString(forKey: "item_id")
     else { return nil }
-    return payload["assistant_message"]
+
+    var item: [String: JSONValue] = [
+        "type": .string("reasoning"),
+        "id": .string(itemID),
+    ]
+    if let encryptedContent = openAI["encrypted_content"], encryptedContent != .null {
+        item["encrypted_content"] = encryptedContent
+    }
+    return .object(item)
 }
 
 private struct OpenAIMessage: Hashable, Codable, Sendable {
@@ -1627,43 +1627,6 @@ private struct OpenAIResponseOutputItem: Decodable, Sendable {
     }
 }
 
-private struct OpenAIResponsesContinuationItemBuffer: Sendable {
-    private var orderedIDs: [String] = []
-    private var itemsByID: [String: JSONValue] = [:]
-
-    mutating func record(_ item: OpenAIResponseOutputItem) {
-        if itemsByID[item.id] == nil {
-            orderedIDs.append(item.id)
-        }
-        itemsByID[item.id] = item.rawItem
-    }
-
-    mutating func updateFunctionCallArguments(itemID: String, arguments: String) {
-        guard case .object(var object)? = itemsByID[itemID],
-            object.jsonString(forKey: "type") == "function_call"
-        else { return }
-
-        object["arguments"] = .string(arguments)
-        object["status"] = .string("completed")
-        itemsByID[itemID] = .object(object)
-    }
-
-    func rawItems() -> [JSONValue] {
-        orderedIDs.compactMap { itemsByID[$0] }
-    }
-}
-
-private extension [JSONValue] {
-    func functionCallIDs() -> Set<String> {
-        Set(compactMap { value in
-            guard case .object(let object) = value,
-                object.jsonString(forKey: "type") == "function_call"
-            else { return nil }
-            return object.jsonString(forKey: "call_id")
-        })
-    }
-}
-
 private extension [String: JSONValue] {
     func jsonString(forKey key: String) -> String? {
         guard case .string(let value)? = self[key] else { return nil }
@@ -1894,7 +1857,10 @@ private func openAIToolChoiceJSON(_ choice: ToolChoice, apiVariant: OpenAILangua
     }
 }
 
-private func modelToolCalls(from toolCalls: [OpenAIToolCall]) throws -> [ModelToolCall] {
+private func modelToolCalls(
+    from toolCalls: [OpenAIToolCall],
+    providerMetadata: [String: JSONValue] = [:]
+) throws -> [ModelToolCall] {
     try toolCalls.compactMap { call in
         guard let function = call.function else { return nil }
         let callID = call.id ?? UUID().uuidString
@@ -1903,9 +1869,25 @@ private func modelToolCalls(from toolCalls: [OpenAIToolCall]) throws -> [ModelTo
             callId: callID,
             toolName: function.name,
             arguments: try toGeneratedContent(function.arguments),
-            status: .completed
-        ))
+            status: .completed,
+            providerMetadata: providerMetadata
+        ), providerMetadata: providerMetadata)
     }
+}
+
+private func openAIProviderMetadata(_ value: [String: JSONValue]) -> [String: JSONValue] {
+    ["openai": .object(value)]
+}
+
+private func openAIResponseOutputMetadata(output: [JSONValue]?, responseID: String?) -> ResponseMetadata {
+    var metadata: [String: JSONValue] = [:]
+    if let responseID {
+        metadata["response_id"] = .string(responseID)
+    }
+    if let output, output.isEmpty == false {
+        metadata["output"] = .array(output)
+    }
+    return ResponseMetadata(providerMetadata: openAIProviderMetadata(metadata))
 }
 
 private func openAIContent(
@@ -1919,32 +1901,6 @@ private func openAIContent(
     return try GeneratedContent(json: extractJSONFromOutput(output) ?? text)
 }
 
-private func openAIChatContinuation(
-    message: ChatCompletions.Response.Message,
-    responseID: String,
-    modelID: String
-) -> ProviderContinuation? {
-    guard message.toolCalls?.isEmpty == false,
-        let rawMessage = try? JSONValue(message)
-    else { return nil }
-    return ProviderContinuation(
-        providerName: "OpenAI",
-        modelID: modelID,
-        turnID: responseID,
-        payload: .object(["assistant_message": rawMessage])
-    )
-}
-
-private func openAIResponsesContinuation(output: [JSONValue]?, responseID: String, modelID: String?) -> ProviderContinuation? {
-    guard let output, output.isEmpty == false else { return nil }
-    return ProviderContinuation(
-        providerName: "OpenAI",
-        modelID: modelID,
-        turnID: responseID,
-        payload: .object(["output": .array(output)])
-    )
-}
-
 private func openAIReasoningEntries(from output: [JSONValue]?) -> [Transcript.Reasoning] {
     guard let output else { return [] }
     return output.compactMap { item in
@@ -1956,7 +1912,11 @@ private func openAIReasoningEntries(from output: [JSONValue]?) -> [Transcript.Re
             id: id,
             summary: openAIReasoningSummary(from: object["summary"]),
             encryptedReasoning: object.jsonString(forKey: "encrypted_content"),
-            status: .completed
+            status: .completed,
+            providerMetadata: openAIProviderMetadata([
+                "item_id": .string(id),
+                "encrypted_content": object["encrypted_content"] ?? .null,
+            ])
         )
     }
 }

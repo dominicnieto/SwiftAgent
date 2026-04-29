@@ -62,7 +62,7 @@ public actor SimulationLanguageModel: LanguageModel {
               case let .reasoning(reasoning):
                 continuation.yield(.reasoningCompleted(reasoning))
               case let .toolCalls(toolCalls):
-                continuation.yield(.toolCallsCompleted(toolCalls.calls.map { ModelToolCall(call: $0, kind: .local) }, continuation: nil))
+                continuation.yield(.toolCallsCompleted(toolCalls.calls.map { ModelToolCall(call: $0, kind: .local) }))
               case let .toolOutput(output):
                 continuation.yield(.providerToolResult(output))
               default:

@@ -6,12 +6,6 @@ import Testing
 @Suite("Model turn contract")
 struct ModelTurnContractTests {
   @Test func modelRequestRoundTripsThroughCodable() throws {
-    let continuation = ProviderContinuation(
-      providerName: "MockProvider",
-      modelID: "mock-model",
-      turnID: "turn-1",
-      payload: .object(["raw": .string("state")]),
-    )
     let request = ModelRequest(
       messages: [
         ModelMessage(
@@ -39,7 +33,6 @@ struct ModelTurnContractTests {
         includeSchemaInPrompt: false,
       ),
       generationOptions: GenerationOptions(temperature: 0.2, maximumResponseTokens: 128),
-      continuation: continuation,
       attachments: [
         ModelAttachment(kind: .image, mimeType: "image/png", url: URL(string: "https://example.com/image.png")),
       ],
@@ -65,6 +58,7 @@ struct ModelTurnContractTests {
             toolName: "web_search",
             arguments: GeneratedContent(properties: ["query": "weather"]),
             status: .completed,
+            providerMetadata: ["mock": .object(["item_id": .string("tool-item-1")])],
           ),
           kind: .providerDefined,
           providerMetadata: ["provider_tool": .string("web_search_preview")],
@@ -76,12 +70,7 @@ struct ModelTurnContractTests {
         id: "response-1",
         providerName: "MockProvider",
         modelID: "mock-model",
-      ),
-      continuation: ProviderContinuation(
-        providerName: "MockProvider",
-        modelID: "mock-model",
-        turnID: "turn-1",
-        payload: .object(["output": .string("opaque")]),
+        providerMetadata: ["mock": .object(["response_id": .string("response-1")])],
       ),
       rawProviderOutput: .object(["id": .string("response-1")]),
     )
@@ -93,17 +82,13 @@ struct ModelTurnContractTests {
   }
 
   @Test func streamEventsPreserveRichLifecycleValues() {
-    let continuation = ProviderContinuation(
-      providerName: "MockProvider",
-      turnID: "turn-1",
-      payload: .object(["state": .string("opaque")]),
-    )
     let toolCall = Transcript.ToolCall(
       id: "tool-1",
       callId: "call-1",
       toolName: "lookup",
       arguments: GeneratedContent(properties: ["query": "weather"]),
       status: .completed,
+      providerMetadata: ["provider_tool": .string("search")],
     )
     let modelToolCall = ModelToolCall(
       call: toolCall,
@@ -147,9 +132,10 @@ struct ModelTurnContractTests {
         partialArguments: #"{"query":"weather"}"#,
         arguments: GeneratedContent(properties: ["query": "weather"]),
         kind: .providerDefined,
+        providerMetadata: ["provider_tool": .string("search")],
       )),
       .toolInputCompleted(id: "input-1"),
-      .toolCallsCompleted([modelToolCall], continuation: continuation),
+      .toolCallsCompleted([modelToolCall]),
       .providerToolResult(.init(
         id: "output-1",
         callId: "call-1",
@@ -161,7 +147,7 @@ struct ModelTurnContractTests {
       .file(.init(id: "file-1", filename: "result.json", mimeType: "application/json")),
       .usage(TokenUsage(outputTokens: 3)),
       .metadata(ResponseMetadata(providerName: "MockProvider")),
-      .completed(.init(finishReason: .toolCalls, continuation: continuation)),
+      .completed(.init(finishReason: .toolCalls)),
       .failed(.init(
         code: "stream_closed",
         message: "Stream closed by provider",
@@ -229,15 +215,14 @@ struct ModelTurnContractTests {
     #expect(partial.arguments == GeneratedContent(properties: ["query": "weather"]))
     #expect(partial.kind == .providerDefined)
 
-    guard case let .toolCallsCompleted(completedCalls, completedContinuation) = events[13] else {
+    guard case let .toolCallsCompleted(completedCalls) = events[13] else {
       Issue.record("Expected completed tool calls event")
       return
     }
     #expect(completedCalls == [modelToolCall])
     #expect(completedCalls.first?.call == toolCall)
     #expect(completedCalls.first?.kind == .providerDefined)
-    #expect(completedCalls.first?.providerMetadata["provider_tool"] == .string("search"))
-    #expect(completedContinuation == continuation)
+    #expect(completedCalls.first?.providerMetadata["provider_tool"] == JSONValue.string("search"))
 
     guard case let .providerToolResult(toolOutput) = events[14] else {
       Issue.record("Expected provider tool result event")
@@ -285,7 +270,6 @@ struct ModelTurnContractTests {
       return
     }
     #expect(completion.finishReason == .toolCalls)
-    #expect(completion.continuation == continuation)
 
     guard case let .failed(error) = events[20] else {
       Issue.record("Expected failure event")

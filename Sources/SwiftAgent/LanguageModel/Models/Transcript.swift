@@ -225,17 +225,21 @@ public extension SwiftAgent.Transcript {
     public var encryptedReasoning: String?
     /// The status of the reasoning step, if reported.
     public var status: Status?
+    /// Provider-specific metadata needed to reconstruct later provider requests.
+    public var providerMetadata: [String: JSONValue]
 
     package init(
       id: String,
       summary: [String],
       encryptedReasoning: String?,
       status: Status? = nil,
+      providerMetadata: [String: JSONValue] = [:],
     ) {
       self.id = id
       self.summary = summary
       self.encryptedReasoning = encryptedReasoning
       self.status = status
+      self.providerMetadata = providerMetadata
     }
   }
 
@@ -312,6 +316,8 @@ public extension Transcript {
     public var partialArguments: String?
     /// Optional status of the tool call as it progresses.
     public var status: Status?
+    /// Provider-specific metadata needed to reconstruct later provider requests.
+    public var providerMetadata: [String: JSONValue]
 
     public init(
       id: String,
@@ -320,6 +326,7 @@ public extension Transcript {
       arguments: GeneratedContent,
       partialArguments: String? = nil,
       status: Status?,
+      providerMetadata: [String: JSONValue] = [:],
     ) {
       self.id = id
       self.callId = callId
@@ -327,6 +334,7 @@ public extension Transcript {
       self.arguments = arguments
       self.partialArguments = partialArguments
       self.status = status
+      self.providerMetadata = providerMetadata
     }
 
     /// Creates a completed tool call when the provider uses one identifier for both local and provider correlation.
@@ -342,6 +350,7 @@ public extension Transcript {
         arguments: arguments,
         partialArguments: nil,
         status: .completed,
+        providerMetadata: [:],
       )
     }
   }
@@ -358,6 +367,8 @@ public extension Transcript {
     public var segment: Segment
     /// Optional status reflecting the processing state.
     public var status: Status?
+    /// Provider-specific metadata needed to reconstruct later provider requests.
+    public var providerMetadata: [String: JSONValue]
 
     public init(
       id: String,
@@ -365,12 +376,14 @@ public extension Transcript {
       toolName: String,
       segment: Segment,
       status: Status?,
+      providerMetadata: [String: JSONValue] = [:],
     ) {
       self.id = id
       self.callId = callId
       self.toolName = toolName
       self.segment = segment
       self.status = status
+      self.providerMetadata = providerMetadata
     }
 
     /// Creates a completed tool output using the first segment from a provider-produced segment list.
@@ -385,6 +398,7 @@ public extension Transcript {
         toolName: toolName,
         segment: segments.first ?? .text(.init(content: "")),
         status: .completed,
+        providerMetadata: [:],
       )
     }
 
@@ -402,24 +416,29 @@ public extension Transcript {
     public var segments: [Segment]
     /// Whether the response completed or is still in progress.
     public var status: Status
+    /// Provider-specific metadata needed to reconstruct later provider requests.
+    public var providerMetadata: [String: JSONValue]
 
     public init(
       id: String,
       segments: [Segment],
       status: Status,
+      providerMetadata: [String: JSONValue] = [:],
     ) {
       self.id = id
       self.segments = segments
       self.status = status
+      self.providerMetadata = providerMetadata
     }
 
     /// Creates a completed response from provider-produced segments.
     public init(
       assetIDs: [String] = [],
       segments: [Segment],
+      providerMetadata: [String: JSONValue] = [:],
     ) {
       _ = assetIDs
-      self.init(id: UUID().uuidString, segments: segments, status: .completed)
+      self.init(id: UUID().uuidString, segments: segments, status: .completed, providerMetadata: providerMetadata)
     }
 
     /// All text segments in order.
@@ -482,10 +501,13 @@ public extension Transcript {
     public var id: String
     /// The textual content.
     public var content: String
+    /// Provider-specific metadata needed to reconstruct later provider requests.
+    public var providerMetadata: [String: JSONValue]
 
-    public init(id: String = UUID().uuidString, content: String) {
+    public init(id: String = UUID().uuidString, content: String, providerMetadata: [String: JSONValue] = [:]) {
       self.id = id
       self.content = content
+      self.providerMetadata = providerMetadata
     }
   }
 
@@ -497,17 +519,31 @@ public extension Transcript {
     public var typeName: String
     /// The structured payload as generated content.
     public var content: GeneratedContent
+    /// Provider-specific metadata needed to reconstruct later provider requests.
+    public var providerMetadata: [String: JSONValue]
 
-    public init(id: String = UUID().uuidString, typeName: String = "", content: GeneratedContent) {
+    public init(
+      id: String = UUID().uuidString,
+      typeName: String = "",
+      content: GeneratedContent,
+      providerMetadata: [String: JSONValue] = [:],
+    ) {
       self.id = id
       self.typeName = typeName
       self.content = content
+      self.providerMetadata = providerMetadata
     }
 
-    public init(id: String = UUID().uuidString, typeName: String = "", content: some ConvertibleToGeneratedContent) {
+    public init(
+      id: String = UUID().uuidString,
+      typeName: String = "",
+      content: some ConvertibleToGeneratedContent,
+      providerMetadata: [String: JSONValue] = [:],
+    ) {
       self.id = id
       self.typeName = typeName
       self.content = content.generatedContent
+      self.providerMetadata = providerMetadata
     }
   }
 
@@ -517,6 +553,8 @@ public extension Transcript {
     public var id: String
     /// The source of the image data.
     public var source: Source
+    /// Provider-specific metadata needed to reconstruct later provider requests.
+    public var providerMetadata: [String: JSONValue]
 
     /// The origin of image content.
     public enum Source: Sendable, Equatable, Codable {
@@ -565,19 +603,22 @@ public extension Transcript {
       }
     }
 
-    public init(id: String = UUID().uuidString, source: Source) {
+    public init(id: String = UUID().uuidString, source: Source, providerMetadata: [String: JSONValue] = [:]) {
       self.id = id
       self.source = source
+      self.providerMetadata = providerMetadata
     }
 
     public init(id: String = UUID().uuidString, data: Data, mimeType: String) {
       self.id = id
       source = .data(data, mimeType: mimeType)
+      providerMetadata = [:]
     }
 
     public init(id: String = UUID().uuidString, url: URL) {
       self.id = id
       source = .url(url)
+      providerMetadata = [:]
     }
   }
 }
@@ -592,6 +633,7 @@ public extension Transcript.ToolCall {
     case arguments
     case partialArguments
     case status
+    case providerMetadata
   }
 
   init(from decoder: Decoder) throws {
@@ -611,6 +653,7 @@ public extension Transcript.ToolCall {
     }
 
     status = try container.decodeIfPresent(Transcript.Status.self, forKey: .status)
+    providerMetadata = try container.decodeIfPresent([String: JSONValue].self, forKey: .providerMetadata) ?? [:]
   }
 
   func encode(to encoder: Encoder) throws {
@@ -622,6 +665,7 @@ public extension Transcript.ToolCall {
     try container.encode(arguments.stableJsonString, forKey: .arguments)
     try container.encodeIfPresent(partialArguments, forKey: .partialArguments)
     try container.encodeIfPresent(status, forKey: .status)
+    try container.encode(providerMetadata, forKey: .providerMetadata)
   }
 }
 
@@ -630,6 +674,7 @@ public extension Transcript.StructuredSegment {
     case id
     case typeName
     case content
+    case providerMetadata
   }
 
   init(from decoder: Decoder) throws {
@@ -645,6 +690,7 @@ public extension Transcript.StructuredSegment {
       let description = "Failed to decode GeneratedContent from content JSON string: \(error)"
       throw DecodingError.dataCorruptedError(forKey: .content, in: container, debugDescription: description)
     }
+    providerMetadata = try container.decodeIfPresent([String: JSONValue].self, forKey: .providerMetadata) ?? [:]
   }
 
   func encode(to encoder: Encoder) throws {
@@ -653,6 +699,7 @@ public extension Transcript.StructuredSegment {
     try container.encode(id, forKey: .id)
     try container.encode(typeName, forKey: .typeName)
     try container.encode(content.stableJsonString, forKey: .content)
+    try container.encode(providerMetadata, forKey: .providerMetadata)
   }
 }
 
