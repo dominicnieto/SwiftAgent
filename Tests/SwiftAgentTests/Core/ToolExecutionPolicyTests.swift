@@ -7,10 +7,10 @@ struct ToolExecutionPolicyTests {
   @Test func retriesRegisteredToolNonCancellationFailures() async throws {
     let attempts = ToolAttemptCounter()
     let tool = FlakyWeatherTool(attempts: attempts)
-    let session = LanguageModelSession(
+    let session = AgentSession(
       model: NoopLanguageModel(),
       tools: [tool],
-      toolExecutionPolicy: .init(retryPolicy: .retryNonCancellationErrors(maxAttempts: 2)),
+      configuration: .init(toolExecutionPolicy: .init(retryPolicy: .retryNonCancellationErrors(maxAttempts: 2)))
     )
     let call = Transcript.ToolCall(
       id: "call_weather",
@@ -29,9 +29,9 @@ struct ToolExecutionPolicyTests {
   }
 
   @Test func recordsMissingToolOutputWhenConfigured() async throws {
-    let session = LanguageModelSession(
+    let session = AgentSession(
       model: NoopLanguageModel(),
-      toolExecutionPolicy: .init(missingToolBehavior: .recordErrorOutput),
+      configuration: .init(toolExecutionPolicy: .init(missingToolBehavior: .recordErrorOutput))
     )
     let call = try toolCall(id: "missing", toolName: "missing_tool")
 
@@ -49,22 +49,39 @@ struct ToolExecutionPolicyTests {
   }
 
   @Test func throwsMissingToolErrorWhenConfigured() async throws {
-    let session = LanguageModelSession(
+    let session = AgentSession(
       model: NoopLanguageModel(),
-      toolExecutionPolicy: .init(missingToolBehavior: .throwError),
+      configuration: .init(toolExecutionPolicy: .init(missingToolBehavior: .throwError))
     )
     let call = try toolCall(id: "missing", toolName: "missing_tool")
 
-    await #expect(throws: LanguageModelSession.ToolCallError.self) {
+    await #expect(throws: AgentSession.ToolCallError.self) {
       _ = try await session.executeToolCalls([call])
     }
   }
 
   @Test func recordsRegisteredToolFailureOutputWhenConfigured() async throws {
-    let session = LanguageModelSession(
+    let session = AgentSession(
       model: NoopLanguageModel(),
       tools: [AlwaysFailingTool()],
-      toolExecutionPolicy: .init(failureBehavior: .recordErrorOutput),
+      configuration: .init(toolExecutionPolicy: .init(failureBehavior: .recordErrorOutput))
+    )
+    let call = try toolCall(id: "fail", toolName: "always_fail")
+
+    let outcome = try await session.executeToolCalls([call])
+
+    guard case let .outputs(results) = outcome else {
+      Issue.record("Expected recorded failure output")
+      return
+    }
+    #expect(results.first?.output.toolName == "always_fail")
+  }
+
+  @Test func recordsRegisteredToolFailureOutputWhenStopOnToolErrorIsDisabled() async throws {
+    let session = AgentSession(
+      model: NoopLanguageModel(),
+      tools: [AlwaysFailingTool()],
+      configuration: .init(stopOnToolError: false)
     )
     let call = try toolCall(id: "fail", toolName: "always_fail")
 
@@ -78,17 +95,36 @@ struct ToolExecutionPolicyTests {
   }
 
   @Test func throwsRegisteredToolFailureByDefault() async throws {
-    let session = LanguageModelSession(model: NoopLanguageModel(), tools: [AlwaysFailingTool()])
+    let session = AgentSession(model: NoopLanguageModel(), tools: [AlwaysFailingTool()])
     let call = try toolCall(id: "fail", toolName: "always_fail")
 
-    await #expect(throws: LanguageModelSession.ToolCallError.self) {
+    await #expect(throws: AgentSession.ToolCallError.self) {
       _ = try await session.executeToolCalls([call])
     }
   }
 
+  @Test func recordsMissingToolOutputWhenStopOnToolErrorIsDisabled() async throws {
+    let session = AgentSession(
+      model: NoopLanguageModel(),
+      configuration: .init(
+        toolExecutionPolicy: .init(missingToolBehavior: .throwError),
+        stopOnToolError: false,
+      )
+    )
+    let call = try toolCall(id: "missing", toolName: "missing_tool")
+
+    let outcome = try await session.executeToolCalls([call])
+
+    guard case let .outputs(results) = outcome else {
+      Issue.record("Expected recorded missing-tool output")
+      return
+    }
+    #expect(results.first?.output.toolName == "missing_tool")
+  }
+
   @Test func delegateCanStopToolExecution() async throws {
     let delegate = StopToolDelegate()
-    let session = LanguageModelSession(model: NoopLanguageModel(), tools: [EchoTool()])
+    let session = AgentSession(model: NoopLanguageModel(), tools: [EchoTool()])
     session.toolExecutionDelegate = delegate
     let call = try toolCall(id: "echo", toolName: "echo")
 
@@ -103,7 +139,7 @@ struct ToolExecutionPolicyTests {
 
   @Test func delegateCanProvideToolOutput() async throws {
     let delegate = ProvideOutputToolDelegate()
-    let session = LanguageModelSession(model: NoopLanguageModel(), tools: [AlwaysFailingTool()])
+    let session = AgentSession(model: NoopLanguageModel(), tools: [AlwaysFailingTool()])
     session.toolExecutionDelegate = delegate
     let call = try toolCall(id: "provided", toolName: "always_fail")
 
@@ -122,10 +158,10 @@ struct ToolExecutionPolicyTests {
 
   @Test func cancellationErrorsAreNotRetried() async throws {
     let attempts = ToolAttemptCounter()
-    let session = LanguageModelSession(
+    let session = AgentSession(
       model: NoopLanguageModel(),
       tools: [CancellingTool(attempts: attempts)],
-      toolExecutionPolicy: .init(retryPolicy: .retryNonCancellationErrors(maxAttempts: 3)),
+      configuration: .init(toolExecutionPolicy: .init(retryPolicy: .retryNonCancellationErrors(maxAttempts: 3)))
     )
     let call = try toolCall(id: "cancel", toolName: "cancel")
 
@@ -137,10 +173,10 @@ struct ToolExecutionPolicyTests {
 
   @Test func parallelPolicyAllowsConcurrentToolExecution() async throws {
     let tracker = ToolConcurrencyTracker()
-    let session = LanguageModelSession(
+    let session = AgentSession(
       model: NoopLanguageModel(),
       tools: [TrackedTool(tracker: tracker)],
-      toolExecutionPolicy: .init(allowsParallelExecution: true),
+      configuration: .init(toolExecutionPolicy: .init(allowsParallelExecution: true))
     )
     let first = try toolCall(id: "first", toolName: "tracked")
     let second = try toolCall(id: "second", toolName: "tracked")
@@ -152,10 +188,10 @@ struct ToolExecutionPolicyTests {
 
   @Test func serialPolicyRunsToolCallsOneAtATime() async throws {
     let tracker = ToolConcurrencyTracker()
-    let session = LanguageModelSession(
+    let session = AgentSession(
       model: NoopLanguageModel(),
       tools: [TrackedTool(tracker: tracker)],
-      toolExecutionPolicy: .init(allowsParallelExecution: false),
+      configuration: .init(toolExecutionPolicy: .init(allowsParallelExecution: false))
     )
     let first = try toolCall(id: "first", toolName: "tracked")
     let second = try toolCall(id: "second", toolName: "tracked")
@@ -296,7 +332,7 @@ private struct TrackedTool: Tool {
 private struct StopToolDelegate: ToolExecutionDelegate {
   func toolCallDecision(
     for toolCall: Transcript.ToolCall,
-    in session: LanguageModelSession,
+    in session: any ToolExecutionContext,
   ) async -> ToolExecutionDecision {
     _ = toolCall
     _ = session
@@ -307,7 +343,7 @@ private struct StopToolDelegate: ToolExecutionDelegate {
 private struct ProvideOutputToolDelegate: ToolExecutionDelegate {
   func toolCallDecision(
     for toolCall: Transcript.ToolCall,
-    in session: LanguageModelSession,
+    in session: any ToolExecutionContext,
   ) async -> ToolExecutionDecision {
     _ = toolCall
     _ = session
@@ -318,33 +354,5 @@ private struct ProvideOutputToolDelegate: ToolExecutionDelegate {
 private struct NoopLanguageModel: LanguageModel {
   typealias UnavailableReason = Never
 
-  func respond<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) async throws -> LanguageModelSession.Response<Content> where Content: Generable & Sendable {
-    _ = session
-    _ = prompt
-    _ = type
-    _ = includeSchemaInPrompt
-    _ = options
-    throw LanguageModelSession.GenerationError.decodingFailure(.init(debugDescription: "Noop model"))
-  }
 
-  func streamResponse<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) -> sending LanguageModelSession.ResponseStream<Content> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
-    _ = session
-    _ = prompt
-    _ = type
-    _ = includeSchemaInPrompt
-    _ = options
-    return LanguageModelSession.ResponseStream(stream: AsyncThrowingStream { $0.finish() })
-  }
 }

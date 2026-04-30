@@ -12,7 +12,7 @@ public enum ToolExecutionDecision: Sendable {
   case provideOutput([Transcript.Segment])
 }
 
-/// Policy controls for session-owned tool execution.
+/// Policy controls for agent-owned tool execution.
 public struct ToolExecutionPolicy: Sendable, Equatable {
   /// Behavior when the model calls a tool that is not registered with the session.
   public enum MissingToolBehavior: Sendable, Equatable {
@@ -24,7 +24,7 @@ public struct ToolExecutionPolicy: Sendable, Equatable {
 
   /// Behavior when a registered tool throws.
   public enum FailureBehavior: Sendable, Equatable {
-    /// Throw a ``LanguageModelSession/ToolCallError`` and stop the turn.
+    /// Throw an ``AgentSession/ToolCallError`` and stop the turn.
     case throwError
     /// Record the thrown error as tool output and continue.
     case recordErrorOutput
@@ -78,14 +78,19 @@ public struct ToolExecutionPolicy: Sendable, Equatable {
   }
 }
 
-/// A delegate that observes and controls tool execution for a session.
+/// Shared context passed to tool execution delegates.
+public protocol ToolExecutionContext: AnyObject, Sendable {}
+
+extension AgentSession: ToolExecutionContext {}
+
+/// A delegate that observes and controls tool execution for an agent session.
 public protocol ToolExecutionDelegate: Sendable {
   /// Notifies the delegate when the model generates tool calls.
   ///
   /// - Parameters:
   ///   - toolCalls: The tool calls produced by the model.
-  ///   - session: The session that generated the tool calls.
-  func didGenerateToolCalls(_ toolCalls: [Transcript.ToolCall], in session: LanguageModelSession) async
+  ///   - session: The agent session that generated the tool calls.
+  func didGenerateToolCalls(_ toolCalls: [Transcript.ToolCall], in session: any ToolExecutionContext) async
 
   /// Asks the delegate how to handle a tool call.
   ///
@@ -96,7 +101,7 @@ public protocol ToolExecutionDelegate: Sendable {
   ///   - session: The session requesting the decision.
   func toolCallDecision(
     for toolCall: Transcript.ToolCall,
-    in session: LanguageModelSession,
+    in session: any ToolExecutionContext,
   ) async -> ToolExecutionDecision
 
   /// Notifies the delegate after a tool call produces output.
@@ -104,11 +109,11 @@ public protocol ToolExecutionDelegate: Sendable {
   /// - Parameters:
   ///   - toolCall: The tool call that was handled.
   ///   - output: The output sent back to the model.
-  ///   - session: The session that executed the tool call.
+  ///   - session: The agent session that executed the tool call.
   func didExecuteToolCall(
     _ toolCall: Transcript.ToolCall,
     output: Transcript.ToolOutput,
-    in session: LanguageModelSession,
+    in session: any ToolExecutionContext,
   ) async
 
   /// Notifies the delegate when a tool call fails.
@@ -116,11 +121,11 @@ public protocol ToolExecutionDelegate: Sendable {
   /// - Parameters:
   ///   - toolCall: The tool call that failed.
   ///   - error: The underlying error raised during execution.
-  ///   - session: The session that attempted the tool call.
+  ///   - session: The agent session that attempted the tool call.
   func didFailToolCall(
     _ toolCall: Transcript.ToolCall,
     error: any Error,
-    in session: LanguageModelSession,
+    in session: any ToolExecutionContext,
   ) async
 }
 
@@ -128,7 +133,7 @@ public protocol ToolExecutionDelegate: Sendable {
 
 public extension ToolExecutionDelegate {
   /// Provides a default no-op implementation.
-  func didGenerateToolCalls(_ toolCalls: [Transcript.ToolCall], in session: LanguageModelSession) async {
+  func didGenerateToolCalls(_ toolCalls: [Transcript.ToolCall], in session: any ToolExecutionContext) async {
     _ = toolCalls
     _ = session
   }
@@ -136,7 +141,7 @@ public extension ToolExecutionDelegate {
   /// Provides a default decision that executes the tool call.
   func toolCallDecision(
     for toolCall: Transcript.ToolCall,
-    in session: LanguageModelSession,
+    in session: any ToolExecutionContext,
   ) async -> ToolExecutionDecision {
     _ = toolCall
     _ = session
@@ -147,7 +152,7 @@ public extension ToolExecutionDelegate {
   func didExecuteToolCall(
     _ toolCall: Transcript.ToolCall,
     output: Transcript.ToolOutput,
-    in session: LanguageModelSession,
+    in session: any ToolExecutionContext,
   ) async {
     _ = toolCall
     _ = output
@@ -158,7 +163,7 @@ public extension ToolExecutionDelegate {
   func didFailToolCall(
     _ toolCall: Transcript.ToolCall,
     error: any Error,
-    in session: LanguageModelSession,
+    in session: any ToolExecutionContext,
   ) async {
     _ = toolCall
     _ = error

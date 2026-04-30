@@ -16,7 +16,7 @@ enum OpenAIStreamingToolCallsWeatherScenario {
         apiVariant: .responses,
         httpClient: OpenAIRecordingHTTPClient.make(apiKey: apiKey, recorder: recorder),
       )
-      let session = LanguageModelSession(
+      let session = AgentSession(
         model: model,
         tools: [WeatherTool()],
         instructions: """
@@ -30,7 +30,7 @@ enum OpenAIStreamingToolCallsWeatherScenario {
         reasoning: .init(effort: .low, summary: "detailed"),
       )
 
-      let stream = session.streamResponse(
+      let stream = session.stream(
         to: "What is the weather in New York City, USA?",
         options: options,
       )

@@ -21,7 +21,7 @@ extension SessionSchemaMacro: ExtensionMacro {
 
     let languageModelExtension: DeclSyntax =
       """
-      extension \(type.trimmed): LanguageModelSessionSchema {}
+      extension \(type.trimmed): TranscriptSchema {}
       """
 
     if let extensionSyntax = languageModelExtension.as(ExtensionDeclSyntax.self) {

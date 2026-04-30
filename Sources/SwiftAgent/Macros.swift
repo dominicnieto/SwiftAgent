@@ -23,13 +23,20 @@ import Observation
 ///
 /// let schema = SessionSchema()
 /// let model = OpenAILanguageModel(apiKey: "sk-...", model: "gpt-5-nano", apiVariant: .responses)
-/// let session = LanguageModelSession(model: model, tools: schema.tools, instructions: "You are a helpful assistant.")
-/// let response = try await session.respond(to: "Weather in Lisbon?", generating: \.weatherReport)
+/// let agent = AgentSession(model: model, tools: schema.tools, instructions: "You are a helpful assistant.")
+/// let response = try await agent.run(
+///   to: "Weather in Lisbon?",
+///   generating: \.weatherReport,
+///   schema: schema,
+///   groundingWith: [],
+/// ) { input, _ in
+///   Prompt(input)
+/// }
 /// ```
 @attached(member, names: arbitrary)
 @attached(
   extension,
-  conformances: LanguageModelSessionSchema, GroundingSupportingSchema,
+  conformances: TranscriptSchema, GroundingSupportingSchema,
   names: arbitrary
 )
 public macro SessionSchema() = #externalMacro(

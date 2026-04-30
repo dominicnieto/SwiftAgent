@@ -27,81 +27,74 @@ public actor SimulationLanguageModel: LanguageModel {
     )
   }
 
-  public func respond<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) async throws -> LanguageModelSession.Response<Content> where Content: Generable & Sendable {
-    _ = session
-    _ = includeSchemaInPrompt
-
-    let resolvedOptions = try resolveOptions(from: options)
+  public func respond(to request: ModelRequest) async throws -> ModelResponse {
+    let resolvedOptions = try resolveOptions(from: request.generationOptions)
+    let promptPreview = request.messages.last?.segments.description ?? ""
     let result = try await runGenerations(
       resolvedOptions.simulatedGenerations,
       tokenUsage: resolvedOptions.tokenUsageOverride ?? configuration.tokenUsage,
       generationDelay: configuration.generationDelay,
-      promptPreview: prompt.description,
+      promptPreview: promptPreview,
     )
-    let content = try decode(result.rawContent, as: type)
 
-    return LanguageModelSession.Response(
-      content: content,
-      rawContent: result.rawContent,
+    return ModelResponse(
+      content: result.rawContent,
       transcriptEntries: result.transcriptEntries,
+      finishReason: .completed,
       tokenUsage: result.tokenUsage,
       responseMetadata: ResponseMetadata(providerName: "Simulation", modelID: "simulated"),
     )
   }
 
-  public nonisolated func streamResponse<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) -> sending LanguageModelSession.ResponseStream<Content>
-    where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
-    _ = session
-    _ = includeSchemaInPrompt
-
-    let stream = AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error> { continuation in
+  public nonisolated func streamResponse(to request: ModelRequest) -> AsyncThrowingStream<ModelStreamEvent, any Error> {
+    AsyncThrowingStream { continuation in
       let task = Task {
         do {
-          let resolvedOptions = try await resolveOptions(from: options)
-          let configuredTokenUsage = configuration.tokenUsage
-          let tokenUsage = resolvedOptions.tokenUsageOverride ?? configuredTokenUsage
-          let generationDelay = configuration.generationDelay
-          let result = try await streamGenerations(
-            resolvedOptions.simulatedGenerations,
-            tokenUsage: tokenUsage,
-            generationDelay: generationDelay,
-            promptPreview: prompt.description,
-            as: type,
-            continuation: continuation,
-          )
+          let resolvedOptions = try await resolveOptions(from: request.generationOptions)
+          let tokenUsage = resolvedOptions.tokenUsageOverride ?? configuration.tokenUsage
+          let promptPreview = request.messages.last?.segments.description ?? ""
 
-          let content = try await decode(result.rawContent, as: type)
-          continuation.yield(LanguageModelSession.ResponseStream<Content>.Snapshot(
-            content: content.asPartiallyGenerated(),
-            rawContent: result.rawContent,
-            tokenUsage: result.tokenUsage,
-            responseMetadata: ResponseMetadata(providerName: "Simulation", modelID: "simulated"),
-          ))
+          for generation in resolvedOptions.simulatedGenerations {
+            try await Task.sleep(for: configuration.generationDelay)
+            let update = try await update(for: generation)
+            for entry in update.transcriptEntries {
+              switch entry {
+              case let .reasoning(reasoning):
+                continuation.yield(.reasoningCompleted(reasoning))
+              case let .toolCalls(toolCalls):
+                continuation.yield(.toolCallsCompleted(toolCalls.calls.map { ModelToolCall(call: $0, kind: .local) }))
+              case let .toolOutput(output):
+                continuation.yield(.providerToolResult(output))
+              default:
+                continuation.yield(.raw(try JSONValue(entry)))
+              }
+            }
+            if let rawContent = update.rawContent {
+              if case let .string(text) = rawContent.kind {
+                continuation.yield(.textStarted(id: "simulation-text", metadata: nil))
+                continuation.yield(.textDelta(id: "simulation-text", delta: text))
+                continuation.yield(.textCompleted(id: "simulation-text", metadata: nil))
+              } else {
+                continuation.yield(.structuredDelta(id: "simulation-structured", delta: rawContent))
+              }
+            }
+          }
+
+          if let tokenUsage {
+            continuation.yield(.usage(tokenUsage))
+          }
+          continuation.yield(.metadata(ResponseMetadata(providerName: "Simulation", modelID: "simulated")))
+          continuation.yield(.completed(.init(finishReason: .completed)))
           continuation.finish()
+          _ = promptPreview
         } catch {
           AgentLog.error(error, context: "simulation_language_model")
           continuation.finish(throwing: error)
         }
       }
 
-      continuation.onTermination = { _ in
-        task.cancel()
-      }
+      continuation.onTermination = { _ in task.cancel() }
     }
-
-    return LanguageModelSession.ResponseStream(stream: stream)
   }
 }
 
@@ -170,50 +163,6 @@ private extension SimulationLanguageModel {
       let update = try await update(for: generation)
       entries.append(contentsOf: update.transcriptEntries)
       rawContent = update.rawContent ?? rawContent
-    }
-
-    if let usage = tokenUsage {
-      logTokenUsage(usage)
-    }
-
-    guard let rawContent else {
-      throw SimulationConfigurationError.missingGenerations
-    }
-
-    return SimulationResult(transcriptEntries: entries, rawContent: rawContent, tokenUsage: tokenUsage)
-  }
-
-  func streamGenerations<Content>(
-    _ generations: [SimulatedGeneration],
-    tokenUsage: TokenUsage?,
-    generationDelay: Duration,
-    promptPreview: String,
-    as type: Content.Type,
-    continuation: AsyncThrowingStream<LanguageModelSession.ResponseStream<Content>.Snapshot, any Error>.Continuation,
-  ) async throws -> SimulationResult where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
-    _ = type
-    AgentLog.start(
-      model: "simulated",
-      toolNames: generations.compactMap(\.toolName),
-      promptPreview: promptPreview,
-    )
-    defer { AgentLog.finish() }
-
-    var entries: [Transcript.Entry] = []
-    var rawContent: GeneratedContent?
-
-    for (index, generation) in generations.enumerated() {
-      try await Task.sleep(for: generationDelay)
-      AgentLog.stepRequest(step: index + 1)
-      let update = try await update(for: generation)
-      entries.append(contentsOf: update.transcriptEntries)
-      rawContent = update.rawContent ?? rawContent
-      continuation.yield(LanguageModelSession.ResponseStream<Content>.Snapshot(
-        rawContent: update.rawContent,
-        tokenUsage: tokenUsage,
-        responseMetadata: ResponseMetadata(providerName: "Simulation", modelID: "simulated"),
-        transcriptEntries: update.transcriptEntries,
-      ))
     }
 
     if let usage = tokenUsage {

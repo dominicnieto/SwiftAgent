@@ -16,7 +16,7 @@ enum OpenAIStreamingToolCallsMultipleScenario {
         apiVariant: .responses,
         httpClient: OpenAIRecordingHTTPClient.make(apiKey: apiKey, recorder: recorder),
       )
-      let session = LanguageModelSession(
+      let session = AgentSession(
         model: model,
         tools: [WeatherTool(), TimeTool()],
         instructions: """
@@ -24,11 +24,11 @@ enum OpenAIStreamingToolCallsMultipleScenario {
         Call `get_weather` with { "location": "Tokyo" } and `get_time` with { "location": "Tokyo" } in parallel.
         After tool outputs, reply with exactly: Done.
         """,
-        toolExecutionPolicy: .init(allowsParallelExecution: true),
+        configuration: .init(toolExecutionPolicy: .init(allowsParallelExecution: true)),
       )
 
-      let stream = session.streamResponse(
-        to: "Need weather and time.",
+      let stream = session.stream(
+        to: Prompt("Need weather and time."),
         options: GenerationOptions(minimumStreamingSnapshotInterval: .zero),
       )
 

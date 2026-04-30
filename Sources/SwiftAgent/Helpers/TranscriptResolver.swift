@@ -12,7 +12,7 @@ import OSLog
 ///
 /// - Note: You typically create this via `session.resolver()`; the macro wires
 ///   up everything needed. You rarely construct it manually.
-public struct TranscriptResolver<SessionSchema: LanguageModelSessionSchema> {
+public struct TranscriptResolver<SessionSchema: TranscriptSchema> {
   /// The tool call type from the associated transcript.
   public typealias ToolCall = Transcript.ToolCall
 

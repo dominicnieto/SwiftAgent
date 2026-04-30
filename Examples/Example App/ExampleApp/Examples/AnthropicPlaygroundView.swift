@@ -13,7 +13,9 @@ struct AnthropicPlaygroundView: View {
   @State private var transcript: Transcript.Resolved<SessionSchema> = .init()
   @State private var streamingTranscript: Transcript.Resolved<SessionSchema> = .init()
   @State private var sessionSchema = SessionSchema()
-  @State private var session: LanguageModelSession?
+  @State private var executionMode: PlaygroundExecutionMode = .agentSession
+  @State private var directSession: LanguageModelSession?
+  @State private var agentSession: AgentSession?
 
   @State private var viewState: ViewState = .idle
   @State private var messageTask: Task<Void, Never>?
@@ -25,15 +27,16 @@ struct AnthropicPlaygroundView: View {
     NavigationStack {
       ScrollView {
         VStack(alignment: .leading) {
-          if let session {
-            content(session: session)
-          }
+          content
         }
         .padding(.horizontal)
         .frame(maxWidth: .infinity, alignment: .leading)
       }
       .defaultScrollAnchor(.bottom)
-      .onAppear(perform: setupAgent)
+      .onAppear(perform: setupSessions)
+      .onChange(of: executionMode) {
+        resetConversation()
+      }
       .safeAreaBar(edge: .bottom) {
         if let error {
           Text(error.localizedDescription)
@@ -76,12 +79,38 @@ struct AnthropicPlaygroundView: View {
       .animation(.default, value: viewState)
       .navigationTitle("Anthropic Playground")
       .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) {
+          modeMenu
+        }
+      }
     }
   }
 
   @ViewBuilder
-  private func content(session: LanguageModelSession) -> some View {
-    ForEach(transcript + streamingTranscript) { entry in
+  private var modeMenu: some View {
+    Menu {
+      ForEach(PlaygroundExecutionMode.allCases) { mode in
+        Button {
+          executionMode = mode
+        } label: {
+          if executionMode == mode {
+            Label(mode.title, systemImage: "checkmark")
+          } else {
+            Text(mode.title)
+          }
+        }
+      }
+    } label: {
+      Label(executionMode.title, systemImage: "switch.2")
+    }
+    .help("Execution mode")
+  }
+
+  @ViewBuilder
+  private var content: some View {
+    let visibleTranscript = streamingTranscript.isEmpty ? transcript : streamingTranscript
+    ForEach(visibleTranscript) { entry in
       switch entry {
       case let .prompt(prompt):
         PromptEntryView(prompt: prompt)
@@ -95,26 +124,47 @@ struct AnthropicPlaygroundView: View {
     }
   }
 
-  private func setupAgent() {
-    let model = AnthropicLanguageModel(
+  private func setupSessions() {
+    directSession = LanguageModelSession(
+      model: makeModel(),
+      tools: [sessionSchema.calculator, sessionSchema.weather],
+      instructions: instructions,
+    )
+    agentSession = AgentSession(
+      model: makeModel(),
+      schema: sessionSchema,
+      instructions: instructions,
+    )
+  }
+
+  private func resetConversation() {
+    messageTask?.cancel()
+    transcript = .init()
+    streamingTranscript = .init()
+    error = nil
+    viewState = .idle
+    setupSessions()
+  }
+
+  private func makeModel() -> AnthropicLanguageModel {
+    AnthropicLanguageModel(
       apiKey: Secret.Anthropic.apiKey,
       model: "claude-sonnet-4-5-20250929",
     )
-    session = LanguageModelSession(
-      model: model,
-      tools: [sessionSchema.calculator, sessionSchema.weather],
-      instructions: """
-      You are a helpful assistant with access to several tools.
-      Use the available tools when appropriate to help answer questions.
-      Be concise but informative in your responses.
-      """,
-    )
+  }
+
+  private var instructions: String {
+    """
+    You are a helpful assistant with access to several tools.
+    Use the available tools when appropriate to help answer questions.
+    Be concise but informative in your responses.
+    """
   }
 
   // MARK: - Actions
 
   private func sendMessage() async {
-    guard let session, userInput.isEmpty == false else { return }
+    guard userInput.isEmpty == false else { return }
 
     let userInput = userInput
     self.userInput = ""
@@ -129,33 +179,13 @@ struct AnthropicPlaygroundView: View {
         thinking: .init(budgetTokens: 1_024),
       )
 
-      let stream = try session.streamResponse(
-        to: userInput,
-        schema: sessionSchema,
-        groundingWith: [.currentDate(Date())],
-        options: options,
-      ) { input, sources in
-        PromptTag("context") {
-          for source in sources {
-            switch source {
-            case let .currentDate(date):
-              PromptTag("current-date") { date }
-            }
-          }
-        }
-
-        PromptTag("input") {
-          input
-        }
+      switch executionMode {
+      case .languageModelSession:
+        try await streamDirectSession(input: userInput, options: options)
+      case .agentSession:
+        try await streamAgentSession(input: userInput, options: options)
       }
 
-      let resolver = sessionSchema.transcriptResolver()
-      for try await snapshot in stream {
-        streamingTranscript = try resolver.resolve(snapshot.transcript)
-      }
-
-      transcript += streamingTranscript
-      streamingTranscript = .init()
       viewState = .idle
     } catch {
       print("Error", error.localizedDescription)
@@ -163,12 +193,81 @@ struct AnthropicPlaygroundView: View {
       self.error = error
     }
   }
+
+  private func streamDirectSession(input: String, options: GenerationOptions) async throws {
+    guard let directSession else { return }
+
+    let stream = try directSession.streamResponse(
+      to: input,
+      schema: sessionSchema,
+      groundingWith: [.currentDate(Date())],
+      options: options,
+    ) { input, sources in
+      PromptTag("context") {
+        for source in sources {
+          switch source {
+          case let .currentDate(date):
+            PromptTag("current-date") { date }
+          }
+        }
+      }
+
+      PromptTag("input") {
+        input
+      }
+    }
+
+    let resolver = sessionSchema.transcriptResolver()
+    for try await snapshot in stream {
+      streamingTranscript = try resolver.resolve(snapshot.transcript)
+    }
+
+    transcript = streamingTranscript
+    streamingTranscript = .init()
+  }
+
+  private func streamAgentSession(input: String, options: GenerationOptions) async throws {
+    guard let agentSession else { return }
+
+    let stream = try agentSession.stream(
+      to: input,
+      schema: sessionSchema,
+      groundingWith: [.currentDate(Date())],
+      options: options,
+    ) { input, sources in
+      PromptTag("context") {
+        for source in sources {
+          switch source {
+          case let .currentDate(date):
+            PromptTag("current-date") { date }
+          }
+        }
+      }
+
+      PromptTag("input") {
+        input
+      }
+    }
+
+    let resolver = sessionSchema.transcriptResolver()
+    for try await event in stream {
+      switch event {
+      case let .completed(result):
+        streamingTranscript = try resolver.resolve(result.transcript)
+      default:
+        streamingTranscript = try resolver.resolve(agentSession.transcript)
+      }
+    }
+
+    transcript = streamingTranscript
+    streamingTranscript = .init()
+  }
 }
 
 // MARK: - Entry Views
 
 private struct PromptEntryView: View {
-  let prompt: Transcript.Resolved<SessionSchema>.Prompt
+  var prompt: Transcript.Resolved<SessionSchema>.Prompt
 
   var body: some View {
     Text(prompt.input)
@@ -176,7 +275,7 @@ private struct PromptEntryView: View {
 }
 
 private struct ReasoningEntryView: View {
-  let reasoning: Transcript.Resolved<SessionSchema>.Reasoning
+  var reasoning: Transcript.Resolved<SessionSchema>.Reasoning
 
   var body: some View {
     Text(reasoning.summary.joined(separator: ", "))
@@ -185,7 +284,7 @@ private struct ReasoningEntryView: View {
 }
 
 private struct ToolRunEntryView: View {
-  let toolRun: SessionSchema.DecodedToolRun
+  var toolRun: SessionSchema.DecodedToolRun
 
   var body: some View {
     switch toolRun {
@@ -203,7 +302,7 @@ private struct ToolRunEntryView: View {
 }
 
 private struct ResponseEntryView: View {
-  let response: Transcript.Resolved<SessionSchema>.Response
+  var response: Transcript.Resolved<SessionSchema>.Response
 
   var body: some View {
     if let text = response.text {

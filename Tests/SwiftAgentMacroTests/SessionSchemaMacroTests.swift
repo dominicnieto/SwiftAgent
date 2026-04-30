@@ -182,7 +182,7 @@ struct SessionSchemaMacroTests {
         }
       }
 
-      extension SessionSchema: LanguageModelSessionSchema {
+      extension SessionSchema: TranscriptSchema {
       }
 
       extension SessionSchema: GroundingSupportingSchema {
@@ -311,7 +311,7 @@ struct SessionSchemaMacroTests {
         }
       }
 
-      extension SessionSchema: LanguageModelSessionSchema {
+      extension SessionSchema: TranscriptSchema {
       }
       """
     }

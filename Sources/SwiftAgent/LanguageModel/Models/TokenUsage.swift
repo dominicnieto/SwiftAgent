@@ -5,7 +5,7 @@ import Foundation
 /// Public token usage metrics for a generation.
 ///
 /// `LanguageModelSession` aggregates these across internal provider and tool steps.
-public struct TokenUsage: Sendable, Equatable {
+public struct TokenUsage: Sendable, Equatable, Codable {
   /// The number of input tokens.
   public var inputTokens: Int?
 

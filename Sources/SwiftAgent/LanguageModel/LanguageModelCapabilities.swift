@@ -104,17 +104,8 @@ public protocol CapabilityReportingLanguageModel: LanguageModel {
   var capabilities: LanguageModelCapabilities { get }
 }
 
-/// A model can conform when it emits rich provider stream events.
-public protocol EventStreamingLanguageModel: LanguageModel {
-  func streamEvents<Content>(
-    within session: LanguageModelSession,
-    to prompt: Prompt,
-    generating type: Content.Type,
-    includeSchemaInPrompt: Bool,
-    options: GenerationOptions,
-  ) -> AsyncThrowingStream<LanguageModelStreamEvent, any Error>
-    where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable
-}
+/// Marker protocol for providers that stream provider turn events.
+public protocol EventStreamingLanguageModel: LanguageModel {}
 
 /// Marker protocol for providers that can stream tool-call argument deltas.
 public protocol StreamingToolCallLanguageModel: EventStreamingLanguageModel {}
@@ -147,4 +138,3 @@ public extension LanguageModelCapabilities {
     LanguageModelCapabilities(provider: .inferred(from: model))
   }
 }
-

@@ -41,10 +41,10 @@ import Foundation
 ///
 /// let sessionSchema = SessionSchema()
 /// let model = OpenAILanguageModel(apiKey: "sk-...", model: "gpt-5-nano", apiVariant: .responses)
-/// let session = LanguageModelSession(model: model, tools: sessionSchema.tools, instructions: "You are a helpful assistant.")
-/// let response = try await session.respond(to: "Weather in Lisbon today?")
+/// let agent = AgentSession(model: model, tools: sessionSchema.tools, instructions: "You are a helpful assistant.")
+/// let response = try await agent.run(to: "Weather in Lisbon today?")
 ///
-/// for entry in try sessionSchema.decode(session.transcript) {
+/// for entry in try sessionSchema.decode(agent.transcript) {
 ///   if case let .toolRun(.weatherTool(run)) = entry, let arguments = run.currentArguments {
 ///     Text(arguments.city ?? "–")
 ///     if arguments.isFinal, let output = run.output {

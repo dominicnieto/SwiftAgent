@@ -169,6 +169,78 @@ struct OpenAIProviderReplayTests {
     #expect(body["stream"] == .bool(true))
   }
 
+  @Test func openAIResponsesSendsContinuationIncludeAndHostedToolOptions() async throws {
+    let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(body: """
+    {
+      "id": "resp_options",
+      "model": "gpt-test",
+      "output": [],
+      "output_text": "Done"
+    }
+    """))
+    let model = OpenAILanguageModel(
+      apiKey: "test-key",
+      model: "gpt-test",
+      apiVariant: .responses,
+      httpClient: replay,
+    )
+    let session = LanguageModelSession(
+      model: model,
+      providerTools: [
+        OpenAILanguageModel.HostedTool.webSearch(searchContextSize: "low"),
+        OpenAILanguageModel.HostedTool.fileSearch(vectorStoreIDs: ["vs_123"], maxResults: 3, includeResults: true),
+        OpenAILanguageModel.HostedTool.codeInterpreter(container: .string("auto"), includeOutputs: true),
+      ],
+    )
+    var options = GenerationOptions()
+    options[custom: OpenAILanguageModel.self] = .init(
+      reasoning: .init(effort: .low, summary: "auto"),
+      store: false,
+      previousResponseID: "resp_previous",
+      include: [.fileSearchCallResults],
+    )
+
+    _ = try await session.respond(to: "Use hosted tools if needed.", options: options)
+
+    let body = try await requestBodyObject(from: replay)
+    #expect(body["previous_response_id"] == .string("resp_previous"))
+    #expect(body["store"] == .bool(false))
+    #expect(body["reasoning"] == .object(["effort": .string("low"), "summary": .string("auto")]))
+    #expect(body["include"] == .array([
+      .string("file_search_call.results"),
+      .string("code_interpreter_call.outputs"),
+      .string("reasoning.encrypted_content"),
+    ]))
+    let tools = try #require(body["tools"]?.arrayValue)
+    #expect(tools.containsJSONObject { $0["type"] == .string("web_search_preview") })
+    #expect(tools.containsJSONObject { object in
+      object["type"] == .string("file_search")
+        && object["vector_store_ids"] == .array([.string("vs_123")])
+        && object["max_num_results"] == .int(3)
+    })
+    #expect(tools.containsJSONObject { $0["type"] == .string("code_interpreter") })
+  }
+
+  @Test func openAIResponsesRejectsPreviousResponseAndConversationTogether() async throws {
+    let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(body: #"{"id":"unused","output":[]}"#))
+    let model = OpenAILanguageModel(
+      apiKey: "test-key",
+      model: "gpt-test",
+      apiVariant: .responses,
+      httpClient: replay,
+    )
+    let session = LanguageModelSession(model: model)
+    var options = GenerationOptions()
+    options[custom: OpenAILanguageModel.self] = .init(
+      previousResponseID: "resp_previous",
+      conversation: .id("conv_123"),
+    )
+
+    await #expect(throws: GenerationError.self) {
+      _ = try await session.respond(to: "Invalid continuation options.", options: options)
+    }
+  }
+
   @Test func openAIResponsesProviderStreamsStructuredOutputThroughPartialDecoder() async throws {
     let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(body: """
     event: response.output_text.delta
@@ -203,6 +275,9 @@ struct OpenAIProviderReplayTests {
     let replay = ReplayHTTPClient<JSONValue>(recordedResponses: [
       .init(body: #"""
       event: response.output_item.added
+      data: {"type":"response.output_item.added","item":{"id":"rs_weather","type":"reasoning","summary":[{"text":"Need weather"}],"encrypted_content":"encrypted-reasoning"},"output_index":0}
+
+      event: response.output_item.added
       data: {"type":"response.output_item.added","item":{"id":"fc_weather","type":"function_call","status":"in_progress","arguments":"","call_id":"call_weather","name":"get_weather"},"output_index":0}
 
       event: response.function_call_arguments.delta
@@ -233,27 +308,30 @@ struct OpenAIProviderReplayTests {
       apiVariant: .responses,
       httpClient: replay,
     )
-    let session = LanguageModelSession(
+    let session = AgentSession(
       model: model,
       tools: [WeatherTool()],
-      toolExecutionPolicy: .init(allowsParallelExecution: false),
+      configuration: .init(toolExecutionPolicy: .init(allowsParallelExecution: false)),
     )
 
     var sawPartialArgumentsBeforeOutput = false
     var sawToolOutput = false
-    for try await snapshot in session.streamResponse(
-      to: "What is the weather?",
+    for try await event in session.stream(
+      to: Prompt("What is the weather?"),
       options: GenerationOptions(minimumStreamingSnapshotInterval: .zero),
     ) {
-      for entry in snapshot.transcript.entries {
-        if case .toolOutput = entry {
-          sawToolOutput = true
-        }
-        if case let .toolCalls(toolCalls) = entry,
-           toolCalls.calls.contains(where: { $0.partialArguments?.contains(#""Spokane""#) == true }),
-           sawToolOutput == false {
-          sawPartialArgumentsBeforeOutput = true
-        }
+      if case let .toolInputDelta(_, delta) = event,
+         delta.contains("Spokane"),
+         sawToolOutput == false {
+        sawPartialArgumentsBeforeOutput = true
+      }
+      if case let .toolInputStarted(call) = event,
+         call.partialArguments?.contains("Spokane") == true,
+         sawToolOutput == false {
+        sawPartialArgumentsBeforeOutput = true
+      }
+      if case .toolOutput = event {
+        sawToolOutput = true
       }
     }
 
@@ -263,6 +341,27 @@ struct OpenAIProviderReplayTests {
       return false
     })
     #expect(session.tokenUsage?.totalTokens == 42)
+
+    let requests = await replay.recordedRequests()
+    guard requests.count == 2 else {
+      Issue.record("Expected two OpenAI Responses requests, got \(requests.count)")
+      return
+    }
+    guard case let .object(secondBody) = requests[1].body,
+      case let .array(input)? = secondBody["input"]
+    else {
+      Issue.record("Expected second OpenAI Responses request input")
+      return
+    }
+    #expect(input.containsJSONObject { object in
+      object["type"] == .string("reasoning") && object["id"] == .string("rs_weather")
+    })
+    #expect(input.containsJSONObject { object in
+      object["type"] == .string("function_call") && object["call_id"] == .string("call_weather")
+    })
+    #expect(input.containsJSONObject { object in
+      object["type"] == .string("function_call_output") && object["call_id"] == .string("call_weather")
+    })
   }
 
   @Test func openAIResponsesProviderStreamsReasoningSeparatelyFromText() async throws {
@@ -339,7 +438,7 @@ struct OpenAIProviderReplayTests {
     #expect(response.responseMetadata?.rateLimits["requests"]?.retryAfter == 2)
   }
 
-  @Test func openAIRefusalThrowsSessionGenerationError() async throws {
+  @Test func openAIRefusalThrowsGenerationError() async throws {
     let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(body: """
     {
       "id": "chatcmpl_refusal",
@@ -368,13 +467,12 @@ struct OpenAIProviderReplayTests {
     do {
       _ = try await session.respond(to: "Refuse")
       Issue.record("Expected OpenAI refusal to throw")
-    } catch let error as LanguageModelSession.GenerationError {
-      guard case let .refusal(refusal, _) = error else {
+    } catch let error as GenerationError {
+      guard case let .contentRefusal(context) = error else {
         Issue.record("Expected refusal error, got \(error)")
         return
       }
-      let explanation = try await refusal.explanation
-      #expect(explanation.content == "I cannot help with that.")
+      #expect(context.reason == "I cannot help with that.")
     }
   }
 
