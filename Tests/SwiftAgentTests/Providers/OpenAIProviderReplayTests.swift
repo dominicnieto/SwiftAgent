@@ -354,7 +354,9 @@ struct OpenAIProviderReplayTests {
       return
     }
     #expect(input.containsJSONObject { object in
-      object["type"] == .string("reasoning") && object["id"] == .string("rs_weather")
+      object["type"] == .string("reasoning")
+        && object["id"] == .string("rs_weather")
+        && object["summary"] == .array([.object(["text": .string("Need weather")])])
     })
     #expect(input.containsJSONObject { object in
       object["type"] == .string("function_call") && object["call_id"] == .string("call_weather")
