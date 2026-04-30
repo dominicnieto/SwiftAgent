@@ -81,6 +81,9 @@ public struct AnthropicLanguageModel: EventStreamingLanguageModel, StreamingTool
         /// Use this to control whether the model can use tools and which tools it prefers.
         public var toolChoice: ToolChoice?
 
+        /// Whether Anthropic should disable parallel tool use for this request.
+        public var disableParallelToolUse: Bool?
+
         /// Configuration for extended thinking.
         ///
         /// When enabled, the model will use internal reasoning before responding,
@@ -92,6 +95,9 @@ public struct AnthropicLanguageModel: EventStreamingLanguageModel, StreamingTool
         /// The default is "auto", which will use the priority tier if available
         /// and fall back to standard.
         public var serviceTier: ServiceTier?
+
+        /// Beta header values that should be enabled for this request.
+        public var betas: [String]?
 
         /// Additional parameters to include in the request body.
         ///
@@ -188,12 +194,16 @@ public struct AnthropicLanguageModel: EventStreamingLanguageModel, StreamingTool
             /// This budget is the maximum number of tokens the model can use for its
             /// internal reasoning process. Larger budgets can improve response quality
             /// for complex tasks but increase latency and cost.
-            public var budgetTokens: Int
+            public var budgetTokens: Int?
 
             /// The type of thinking mode.
             public enum ThinkingType: String, Hashable, Codable, Sendable {
                 /// Enables extended thinking.
                 case enabled
+                /// Lets Anthropic choose the thinking mode when supported.
+                case adaptive
+                /// Disables extended thinking when supported.
+                case disabled
             }
 
             enum CodingKeys: String, CodingKey {
@@ -206,6 +216,12 @@ public struct AnthropicLanguageModel: EventStreamingLanguageModel, StreamingTool
             /// - Parameter budgetTokens: The maximum number of tokens to use for thinking.
             public init(budgetTokens: Int) {
                 self.type = .enabled
+                self.budgetTokens = budgetTokens
+            }
+
+            /// Creates a thinking configuration with an explicit mode.
+            public init(type: ThinkingType, budgetTokens: Int? = nil) {
+                self.type = type
                 self.budgetTokens = budgetTokens
             }
         }
@@ -239,8 +255,10 @@ public struct AnthropicLanguageModel: EventStreamingLanguageModel, StreamingTool
             stopSequences: [String]? = nil,
             metadata: Metadata? = nil,
             toolChoice: ToolChoice? = nil,
+            disableParallelToolUse: Bool? = nil,
             thinking: Thinking? = nil,
             serviceTier: ServiceTier? = nil,
+            betas: [String]? = nil,
             extraBody: [String: JSONValue]? = nil
         ) {
             self.topP = topP
@@ -248,9 +266,76 @@ public struct AnthropicLanguageModel: EventStreamingLanguageModel, StreamingTool
             self.stopSequences = stopSequences
             self.metadata = metadata
             self.toolChoice = toolChoice
+            self.disableParallelToolUse = disableParallelToolUse
             self.thinking = thinking
             self.serviceTier = serviceTier
+            self.betas = betas
             self.extraBody = extraBody
+        }
+    }
+
+    /// Server-side tools executed by Anthropic.
+    public enum ServerTool {
+        /// Creates an Anthropic server web-search tool definition.
+        public static func webSearch(
+            maxUses: Int? = nil,
+            allowedDomains: [String]? = nil,
+            blockedDomains: [String]? = nil
+        ) -> ToolDefinition {
+            raw(name: "web_search", tool: anthropicTool(
+                type: "web_search_20250305",
+                name: "web_search",
+                values: [
+                    "max_uses": maxUses.map(JSONValue.int),
+                    "allowed_domains": allowedDomains.map { .array($0.map(JSONValue.string)) },
+                    "blocked_domains": blockedDomains.map { .array($0.map(JSONValue.string)) },
+                ]
+            ))
+        }
+
+        /// Creates an Anthropic server web-fetch tool definition.
+        public static func webFetch() -> ToolDefinition {
+            raw(name: "web_fetch", tool: anthropicTool(type: "web_fetch_20250910", name: "web_fetch"))
+        }
+
+        /// Creates an Anthropic server code-execution tool definition.
+        public static func codeExecution() -> ToolDefinition {
+            raw(name: "code_execution", tool: anthropicTool(type: "code_execution_20250825", name: "code_execution"))
+        }
+
+        /// Creates an Anthropic server memory tool definition.
+        public static func memory() -> ToolDefinition {
+            raw(name: "memory", tool: anthropicTool(type: "memory_20250818", name: "memory"))
+        }
+
+        /// Creates a raw Anthropic server tool definition.
+        public static func raw(
+            name: String,
+            tool: JSONValue,
+            description: String? = nil
+        ) -> ToolDefinition {
+            ToolDefinition.providerDefined(
+                name: name,
+                providerMetadata: .object(["anthropic": tool]),
+                description: description
+            )
+        }
+
+        private static func anthropicTool(
+            type: String,
+            name: String,
+            values: [String: JSONValue?] = [:]
+        ) -> JSONValue {
+            var object: [String: JSONValue] = [
+                "type": .string(type),
+                "name": .string(name),
+            ]
+            for (key, value) in values {
+                if let value {
+                    object[key] = value
+                }
+            }
+            return .object(object)
         }
     }
     /// The reason the model is unavailable.
@@ -347,16 +432,18 @@ public struct AnthropicLanguageModel: EventStreamingLanguageModel, StreamingTool
         if let toolChoice = request.toolChoice {
             params["tool_choice"] = anthropicToolChoiceJSON(toolChoice)
         }
+        applyAnthropicCustomToolOptions(to: &params, options: request.generationOptions)
 
         let httpResponse: HTTPClientDecodedResponse<AnthropicMessageResponse> = try await httpClient.sendResponse(
             path: "v1/messages",
             method: .post,
             queryItems: nil,
-            headers: nil,
+            headers: requestHeaders(for: request.generationOptions),
             body: params,
             responseType: AnthropicMessageResponse.self
         )
         let message = httpResponse.body
+        let providerDefinedToolNames = providerDefinedToolNames(in: request)
         let metadata = ResponseMetadata
             .providerHTTPMetadata(
                 requestID: httpResponse.requestID,
@@ -375,7 +462,7 @@ public struct AnthropicLanguageModel: EventStreamingLanguageModel, StreamingTool
                 providerMetadata: anthropicProviderMetadata([
                     "tool_use_id": .string(toolUse.id),
                 ])
-            ), providerMetadata: anthropicProviderMetadata([
+            ), kind: providerDefinedToolNames.contains(toolUse.name) ? .providerDefined : .local, providerMetadata: anthropicProviderMetadata([
                 "tool_use_id": .string(toolUse.id),
             ]))
         }
@@ -409,10 +496,12 @@ public struct AnthropicLanguageModel: EventStreamingLanguageModel, StreamingTool
                     if let toolChoice = request.toolChoice {
                         params["tool_choice"] = anthropicToolChoiceJSON(toolChoice)
                     }
+                    applyAnthropicCustomToolOptions(to: &params, options: request.generationOptions)
                     params["stream"] = .bool(true)
 
                     let stream = try await httpClient.decodedEventStreamResponse(
                         path: "v1/messages",
+                        headers: requestHeaders(for: request.generationOptions) ?? [:],
                         body: params,
                         as: AnthropicStreamEvent.self
                     )
@@ -427,6 +516,7 @@ public struct AnthropicLanguageModel: EventStreamingLanguageModel, StreamingTool
                     var currentToolByIndex: [Int: StreamingAnthropicToolInput] = [:]
                     var thinkingByIndex: [Int: String] = [:]
                     var latestFinishReason: FinishReason = .completed
+                    let providerDefinedToolNames = providerDefinedToolNames(in: request)
 
                     for try await event in stream.events {
                         switch event {
@@ -441,10 +531,16 @@ public struct AnthropicLanguageModel: EventStreamingLanguageModel, StreamingTool
                             case "text":
                                 currentTextByIndex[start.index] = start.contentBlock.text ?? ""
                                 continuation.yield(.textStarted(id: "anthropic-text-\(start.index)", metadata: nil))
-                            case "tool_use":
+                            case "tool_use", "server_tool_use":
                                 if let id = start.contentBlock.id, let name = start.contentBlock.name {
                                     currentToolByIndex[start.index] = StreamingAnthropicToolInput(id: id, name: name)
-                                    continuation.yield(.toolInputStarted(.init(id: id, callId: id, toolName: name)))
+                                    continuation.yield(.toolInputStarted(.init(
+                                        id: id,
+                                        callId: id,
+                                        toolName: name,
+                                        kind: providerDefinedToolNames.contains(name) ? .providerDefined : .local,
+                                        providerMetadata: anthropicProviderMetadata(["tool_use_id": .string(id)])
+                                    )))
                                 }
                             case "thinking":
                                 thinkingByIndex[start.index] = ""
@@ -502,6 +598,7 @@ public struct AnthropicLanguageModel: EventStreamingLanguageModel, StreamingTool
                                 continuation.yield(.toolInputCompleted(id: tool.id))
                                 continuation.yield(.toolCallsCompleted([ModelToolCall(
                                     call: call,
+                                    kind: providerDefinedToolNames.contains(tool.name) ? .providerDefined : .local,
                                     providerMetadata: call.providerMetadata
                                 )]))
                             }
@@ -614,10 +711,13 @@ private func createMessageParams(
             }
         }
         if let thinking = customOptions.thinking {
-            params["thinking"] = .object([
+            var thinkingObject: [String: JSONValue] = [
                 "type": .string(thinking.type.rawValue),
-                "budget_tokens": .int(thinking.budgetTokens),
-            ])
+            ]
+            if let budgetTokens = thinking.budgetTokens {
+                thinkingObject["budget_tokens"] = .int(budgetTokens)
+            }
+            params["thinking"] = .object(thinkingObject)
         }
         if let serviceTier = customOptions.serviceTier {
             params["service_tier"] = .string(serviceTier.rawValue)
@@ -634,6 +734,35 @@ private func createMessageParams(
     return params
 }
 
+private func applyAnthropicCustomToolOptions(to params: inout [String: JSONValue], options: GenerationOptions) {
+    guard let customOptions = options[custom: AnthropicLanguageModel.self],
+          let disableParallelToolUse = customOptions.disableParallelToolUse
+    else {
+        return
+    }
+    guard case var .object(toolChoice)? = params["tool_choice"] else {
+        params["tool_choice"] = .object([
+            "type": .string("auto"),
+            "disable_parallel_tool_use": .bool(disableParallelToolUse),
+        ])
+        return
+    }
+    toolChoice["disable_parallel_tool_use"] = .bool(disableParallelToolUse)
+    params["tool_choice"] = .object(toolChoice)
+}
+
+private extension AnthropicLanguageModel {
+    func requestHeaders(for options: GenerationOptions) -> [String: String]? {
+        guard let requestBetas = options[custom: AnthropicLanguageModel.self]?.betas,
+              requestBetas.isEmpty == false
+        else {
+            return nil
+        }
+        let mergedBetas = Array(Set((betas ?? []) + requestBetas)).sorted()
+        return ["anthropic-beta": mergedBetas.joined(separator: ",")]
+    }
+}
+
 // Convert our GenerationSchema into Anthropic's expected JSON Schema payload
 private func convertSchemaToAnthropicFormat(_ schema: GenerationSchema) throws -> JSONSchema {
     let resolvedSchema = schema.withResolvedRoot() ?? schema
@@ -647,8 +776,23 @@ private func convertToolToAnthropicFormat(_ tool: any Tool) throws -> AnthropicT
 }
 
 private func anthropicToolDefinition(_ definition: ToolDefinition) throws -> AnthropicTool {
+    if definition.kind == .providerDefined,
+       let rawTool = providerDefinedToolJSON(from: definition.providerMetadata, providerKey: "anthropic")
+    {
+        return AnthropicTool(rawValue: rawTool)
+    }
     let schema = try convertSchemaToAnthropicFormat(definition.schema)
     return AnthropicTool(name: definition.name, description: definition.description ?? "", inputSchema: schema)
+}
+
+private func providerDefinedToolJSON(from metadata: JSONValue?, providerKey: String) -> JSONValue? {
+    guard let metadata else { return nil }
+    guard case let .object(object) = metadata else { return metadata }
+    return object[providerKey] ?? object["tool"] ?? metadata
+}
+
+private func providerDefinedToolNames(in request: ModelRequest) -> Set<String> {
+    Set(request.tools.filter { $0.kind == .providerDefined }.map(\.name))
 }
 
 private func toGeneratedContent(_ value: [String: JSONValue]?) throws -> GeneratedContent {
@@ -860,12 +1004,45 @@ private extension [String: JSONValue] {
 private struct AnthropicTool: Codable, Sendable {
     let name: String
     let description: String
-    let inputSchema: JSONSchema
+    let inputSchema: JSONSchema?
+    let rawValue: JSONValue?
+
+    init(name: String, description: String, inputSchema: JSONSchema) {
+        self.name = name
+        self.description = description
+        self.inputSchema = inputSchema
+        rawValue = nil
+    }
+
+    init(rawValue: JSONValue) {
+        name = ""
+        description = ""
+        inputSchema = nil
+        self.rawValue = rawValue
+    }
 
     enum CodingKeys: String, CodingKey {
         case name
         case description
         case inputSchema = "input_schema"
+    }
+
+    init(from decoder: Decoder) throws {
+        rawValue = try JSONValue(from: decoder)
+        name = ""
+        description = ""
+        inputSchema = nil
+    }
+
+    func encode(to encoder: Encoder) throws {
+        if let rawValue {
+            try rawValue.encode(to: encoder)
+            return
+        }
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encode(description, forKey: .description)
+        try container.encode(inputSchema, forKey: .inputSchema)
     }
 }
 
@@ -881,25 +1058,24 @@ private enum AnthropicContent: Codable, Sendable {
     case image(AnthropicImage)
     case toolUse(AnthropicToolUse)
     case toolResult(AnthropicToolResult)
+    case raw(JSONValue)
 
     enum CodingKeys: String, CodingKey { case type }
 
-    enum ContentType: String, Codable {
-        case text = "text", image = "image", toolUse = "tool_use", toolResult = "tool_result"
-    }
-
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let type = try container.decode(ContentType.self, forKey: .type)
+        let type = try container.decode(String.self, forKey: .type)
         switch type {
-        case .text:
+        case "text":
             self = .text(try AnthropicText(from: decoder))
-        case .image:
+        case "image":
             self = .image(try AnthropicImage(from: decoder))
-        case .toolUse:
+        case "tool_use", "server_tool_use":
             self = .toolUse(try AnthropicToolUse(from: decoder))
-        case .toolResult:
+        case "tool_result":
             self = .toolResult(try AnthropicToolResult(from: decoder))
+        default:
+            self = .raw(try JSONValue(from: decoder))
         }
     }
 
@@ -909,6 +1085,7 @@ private enum AnthropicContent: Codable, Sendable {
         case .image(let i): try i.encode(to: encoder)
         case .toolUse(let u): try u.encode(to: encoder)
         case .toolResult(let r): try r.encode(to: encoder)
+        case .raw(let value): try value.encode(to: encoder)
         }
     }
 }

@@ -95,6 +95,49 @@ struct OpenResponsesProviderReplayTests {
     })
   }
 
+  @Test func openResponsesProviderSendsIncludeAndRawProviderToolOptions() async throws {
+    let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(body: """
+    {
+      "id": "resp_provider_tool",
+      "model": "openai/gpt-test",
+      "output": [],
+      "output_text": "Done"
+    }
+    """))
+    let model = OpenResponsesLanguageModel(
+      baseURL: URL(string: "https://example.com/v1/")!,
+      apiKey: "test-key",
+      model: "openai/gpt-test",
+      httpClient: replay,
+    )
+    let session = LanguageModelSession(
+      model: model,
+      providerTools: [
+        OpenResponsesLanguageModel.ProviderTool.raw(
+          name: "web_search",
+          tool: .object(["type": .string("web_search"), "name": .string("web_search")]),
+        ),
+      ],
+    )
+    var options = GenerationOptions()
+    options[custom: OpenResponsesLanguageModel.self] = .init(
+      toolChoice: .allowedTools(tools: ["get_weather"], mode: .required),
+      include: ["reasoning.encrypted_content"],
+    )
+
+    _ = try await session.respond(to: "Search if needed.", options: options)
+
+    let body = try await requestBodyObject(from: replay)
+    #expect(body["include"] == .array([.string("reasoning.encrypted_content")]))
+    #expect(body["tool_choice"] == .object([
+      "type": .string("allowed_tools"),
+      "tools": .array([.object(["type": .string("function"), "name": .string("get_weather")])]),
+      "mode": .string("required"),
+    ]))
+    let tools = try #require(body["tools"]?.arrayValue)
+    #expect(tools == [.object(["type": .string("web_search"), "name": .string("web_search")])])
+  }
+
   @Test func openResponsesProviderStreamsTextThroughMainSessionAndHTTPClient() async throws {
     let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(
       body: """

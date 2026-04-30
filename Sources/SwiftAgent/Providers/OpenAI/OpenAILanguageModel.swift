@@ -165,6 +165,21 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
         /// Chat Completions defaults to `false`. Responses API defaults to `true`.
         public var store: Bool?
 
+        /// Stored Responses API response to continue from.
+        ///
+        /// Only applicable to the Responses API. Do not set this together with
+        /// ``conversation``.
+        public var previousResponseID: String?
+
+        /// OpenAI Conversations state to continue from.
+        ///
+        /// Only applicable to the Responses API. Do not set this together with
+        /// ``previousResponseID``.
+        public var conversation: ConversationReference?
+
+        /// Additional provider fields to include in the Responses API result.
+        public var include: [ResponseInclude]
+
         /// Set of up to 16 key-value pairs that can be attached to an object.
         ///
         /// This can be useful for storing additional information about the object
@@ -282,6 +297,68 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
             case disabled
         }
 
+        /// Reference to an OpenAI Conversations object.
+        public enum ConversationReference: Hashable, Codable, Sendable {
+            /// Continue using the conversation with this identifier.
+            case id(String)
+            /// Pass a provider-specific conversation payload directly.
+            case raw(JSONValue)
+
+            var jsonValue: JSONValue {
+                switch self {
+                case .id(let id):
+                    return .string(id)
+                case .raw(let value):
+                    return value
+                }
+            }
+        }
+
+        /// Provider fields that can be requested through the Responses API `include` parameter.
+        public enum ResponseInclude: Hashable, Codable, Sendable {
+            /// Include encrypted reasoning content required for stateless reasoning continuity.
+            case reasoningEncryptedContent
+            /// Include hosted file-search call results.
+            case fileSearchCallResults
+            /// Include hosted code-interpreter outputs.
+            case codeInterpreterCallOutputs
+            /// Pass a provider-specific include value directly.
+            case raw(String)
+
+            var rawValue: String {
+                switch self {
+                case .reasoningEncryptedContent:
+                    return "reasoning.encrypted_content"
+                case .fileSearchCallResults:
+                    return "file_search_call.results"
+                case .codeInterpreterCallOutputs:
+                    return "code_interpreter_call.outputs"
+                case .raw(let value):
+                    return value
+                }
+            }
+
+            public init(from decoder: Decoder) throws {
+                let container = try decoder.singleValueContainer()
+                let value = try container.decode(String.self)
+                switch value {
+                case "reasoning.encrypted_content":
+                    self = .reasoningEncryptedContent
+                case "file_search_call.results":
+                    self = .fileSearchCallResults
+                case "code_interpreter_call.outputs":
+                    self = .codeInterpreterCallOutputs
+                default:
+                    self = .raw(value)
+                }
+            }
+
+            public func encode(to encoder: Encoder) throws {
+                var container = encoder.singleValueContainer()
+                try container.encode(rawValue)
+            }
+        }
+
         enum CodingKeys: String, CodingKey {
             case topP = "top_p"
             case frequencyPenalty = "frequency_penalty"
@@ -299,6 +376,9 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
             case maxToolCalls = "max_tool_calls"
             case serviceTier = "service_tier"
             case store
+            case previousResponseID = "previous_response_id"
+            case conversation
+            case include
             case metadata
             case safetyIdentifier = "safety_identifier"
             case promptCacheKey = "prompt_cache_key"
@@ -349,6 +429,9 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
             maxToolCalls: Int? = nil,
             serviceTier: ServiceTier? = nil,
             store: Bool? = nil,
+            previousResponseID: String? = nil,
+            conversation: ConversationReference? = nil,
+            include: [ResponseInclude] = [],
             metadata: [String: String]? = nil,
             safetyIdentifier: String? = nil,
             promptCacheKey: String? = nil,
@@ -372,12 +455,83 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
             self.maxToolCalls = maxToolCalls
             self.serviceTier = serviceTier
             self.store = store
+            self.previousResponseID = previousResponseID
+            self.conversation = conversation
+            self.include = include
             self.metadata = metadata
             self.safetyIdentifier = safetyIdentifier
             self.promptCacheKey = promptCacheKey
             self.promptCacheRetention = promptCacheRetention
             self.truncation = truncation
             self.extraBody = extraBody
+        }
+    }
+
+    /// Hosted tools executed by OpenAI through the Responses API.
+    public enum HostedTool {
+        /// Creates an OpenAI hosted web-search tool definition.
+        public static func webSearch(
+            searchContextSize: String? = nil,
+            userLocation: JSONValue? = nil
+        ) -> ToolDefinition {
+            var metadata: [String: JSONValue] = ["type": .string("web_search_preview")]
+            if let searchContextSize {
+                metadata["search_context_size"] = .string(searchContextSize)
+            }
+            if let userLocation {
+                metadata["user_location"] = userLocation
+            }
+            return ToolDefinition.providerDefined(
+                name: "web_search_preview",
+                providerMetadata: .object(["openai": .object(metadata)]),
+                description: "OpenAI hosted web search."
+            )
+        }
+
+        /// Creates an OpenAI hosted file-search tool definition.
+        public static func fileSearch(
+            vectorStoreIDs: [String],
+            maxResults: Int? = nil,
+            filters: JSONValue? = nil,
+            includeResults: Bool = false
+        ) -> ToolDefinition {
+            var metadata: [String: JSONValue] = [
+                "type": .string("file_search"),
+                "vector_store_ids": .array(vectorStoreIDs.map(JSONValue.string)),
+            ]
+            if let maxResults {
+                metadata["max_num_results"] = .int(maxResults)
+            }
+            if let filters {
+                metadata["filters"] = filters
+            }
+            if includeResults {
+                metadata["include"] = .array([.string("file_search_call.results")])
+            }
+            return ToolDefinition.providerDefined(
+                name: "file_search",
+                providerMetadata: .object(["openai": .object(metadata)]),
+                description: "OpenAI hosted file search."
+            )
+        }
+
+        /// Creates an OpenAI hosted code-interpreter tool definition.
+        public static func codeInterpreter(
+            container: JSONValue? = nil,
+            includeOutputs: Bool = false
+        ) -> ToolDefinition {
+            var metadata: [String: JSONValue] = ["type": .string("code_interpreter")]
+            if let container {
+                metadata["container"] = container
+            }
+            if includeOutputs {
+                metadata["include"] = .array([.string("code_interpreter_call.outputs")])
+            }
+            return ToolDefinition.providerDefined(
+                name: "code_interpreter",
+                providerMetadata: .object(["openai": .object(metadata)]),
+                description: "OpenAI hosted code interpreter."
+            )
         }
     }
 
@@ -500,6 +654,7 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
         }
         let toolCalls = try modelToolCalls(
             from: choice.message.toolCalls ?? [],
+            providerDefinedToolNames: providerDefinedToolNames(in: request),
             providerMetadata: openAIProviderMetadata([
                 "assistant_message": (try? JSONValue(choice.message)) ?? .null,
             ])
@@ -541,7 +696,10 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
             .providerHTTPMetadata(requestID: httpResponse.requestID, headers: httpResponse.headers, providerName: "OpenAI")
             .merging(response.responseMetadata(providerName: "OpenAI", defaultModelID: model))
             .merging(openAIResponseOutputMetadata(output: response.output, responseID: response.id))
-        let toolCalls = try modelToolCalls(from: extractToolCallsFromOutput(response.output))
+        let toolCalls = try modelToolCalls(
+            from: extractToolCallsFromOutput(response.output),
+            providerDefinedToolNames: providerDefinedToolNames(in: request)
+        )
         let content = try openAIContent(
             text: response.outputText ?? extractTextFromOutput(response.output) ?? "",
             structuredOutput: request.structuredOutput,
@@ -622,6 +780,7 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
                     )))
                     var accumulatedText = ""
                     var streamingToolCalls: [String: StreamingOpenAIToolCall] = [:]
+                    let providerDefinedToolNames = providerDefinedToolNames(in: request)
 
                     for try await event in eventStream.events {
                         switch event {
@@ -640,9 +799,16 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
                                         id: item.id,
                                         callId: item.callID ?? item.id,
                                         name: name,
-                                        arguments: item.arguments ?? ""
+                                        arguments: item.arguments ?? "",
+                                        kind: providerDefinedToolNames.contains(name) ? .providerDefined : .local
                                     )
-                                    continuation.yield(.toolInputStarted(.init(id: item.id, callId: item.callID ?? item.id, toolName: name)))
+                                    continuation.yield(.toolInputStarted(.init(
+                                        id: item.id,
+                                        callId: item.callID ?? item.id,
+                                        toolName: name,
+                                        kind: providerDefinedToolNames.contains(name) ? .providerDefined : .local,
+                                        providerMetadata: openAIProviderMetadata(["item": item.rawItem])
+                                    )))
                                 }
                             case "reasoning":
                                 continuation.yield(.reasoningCompleted(Transcript.Reasoning(
@@ -681,7 +847,7 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
                     }
                     let calls = try streamingToolCalls.values
                         .sorted { $0.id < $1.id }
-                        .map { ModelToolCall(call: try $0.transcriptToolCall()) }
+                        .map { ModelToolCall(call: try $0.transcriptToolCall(), kind: $0.kind) }
                     if calls.isEmpty == false {
                         continuation.yield(.toolCallsCompleted(calls))
                     }
@@ -1442,9 +1608,28 @@ private func convertSegmentsToToolContentString(_ segments: [Transcript.Segment]
 
 private struct OpenAITool: Hashable, Codable, Sendable {
     let type: String
-    let function: OpenAIFunction
+    let function: OpenAIFunction?
+    let rawValue: JSONValue?
+
+    init(type: String, function: OpenAIFunction) {
+        self.type = type
+        self.function = function
+        rawValue = nil
+    }
+
+    init(rawValue: JSONValue) {
+        type = ""
+        function = nil
+        self.rawValue = rawValue
+    }
 
     func jsonValue(for apiVariant: OpenAILanguageModel.APIVariant) -> JSONValue {
+        if let rawValue {
+            return rawValue
+        }
+        guard let function else {
+            return .object([:])
+        }
         switch apiVariant {
         case .chatCompletions:
             return .object([
@@ -1634,6 +1819,22 @@ private extension [String: JSONValue] {
     }
 }
 
+private extension JSONValue {
+    var containsReasoningItem: Bool {
+        switch self {
+        case .object(let object):
+            if case .string("reasoning")? = object["type"] {
+                return true
+            }
+            return object.values.contains { $0.containsReasoningItem }
+        case .array(let values):
+            return values.contains { $0.containsReasoningItem }
+        default:
+            return false
+        }
+    }
+}
+
 private struct OpenAIResponseCompleted: Decodable, Sendable {
     let id: String?
     let model: String?
@@ -1717,6 +1918,7 @@ private struct StreamingOpenAIToolCall: Sendable {
     var callId: String
     var name: String
     var arguments: String
+    var kind: ToolDefinitionKind = .local
 
     func transcriptToolCall() throws -> Transcript.ToolCall {
         try Transcript.ToolCall(
@@ -1753,6 +1955,11 @@ private func convertToolToOpenAIFormat(_ tool: any Tool) -> OpenAITool {
 }
 
 private func openAIToolDefinition(_ definition: ToolDefinition) -> OpenAITool {
+    if definition.kind == .providerDefined,
+       let rawTool = providerDefinedToolJSON(from: definition.providerMetadata, providerKey: "openai")
+    {
+        return OpenAITool(rawValue: rawTool)
+    }
     let rawParameters = definition.schema.withResolvedRoot()
         .flatMap { try? JSONValue($0) }
         ?? (try? JSONValue(definition.schema))
@@ -1763,6 +1970,12 @@ private func openAIToolDefinition(_ definition: ToolDefinition) -> OpenAITool {
         rawParameters: rawParameters
     )
     return OpenAITool(type: "function", function: function)
+}
+
+private func providerDefinedToolJSON(from metadata: JSONValue?, providerKey: String) -> JSONValue? {
+    guard let metadata else { return nil }
+    guard case let .object(object) = metadata else { return metadata }
+    return object[providerKey] ?? object["tool"] ?? metadata
 }
 
 private func openAIChatRequestBody(
@@ -1803,6 +2016,13 @@ private func openAIResponsesRequestBody(
     request: ModelRequest,
     stream: Bool
 ) throws -> JSONValue {
+    let customOptions = request.generationOptions[custom: OpenAILanguageModel.self]
+    if customOptions?.previousResponseID != nil, customOptions?.conversation != nil {
+        throw GenerationError.requestFailed(
+            reason: .invalidRequestConfiguration,
+            detail: "`previousResponseID` and `conversation` cannot both be set for OpenAI Responses requests."
+        )
+    }
     var body = try objectBody(Responses.createRequestBody(
         model: model,
         messages: messages,
@@ -1824,7 +2044,71 @@ private func openAIResponsesRequestBody(
     if let toolChoice = request.toolChoice {
         body["tool_choice"] = openAIToolChoiceJSON(toolChoice, apiVariant: .responses)
     }
+    if let previousResponseID = customOptions?.previousResponseID {
+        body["previous_response_id"] = .string(previousResponseID)
+    }
+    if let conversation = customOptions?.conversation {
+        body["conversation"] = conversation.jsonValue
+    }
+    let include = openAIResponseIncludes(customOptions: customOptions, request: request)
+    if include.isEmpty == false {
+        body["include"] = .array(include.map { .string($0) })
+    }
     return .object(body)
+}
+
+private func openAIResponseIncludes(
+    customOptions: OpenAILanguageModel.CustomGenerationOptions?,
+    request: ModelRequest
+) -> [String] {
+    var orderedIncludes = customOptions?.include.map(\.rawValue) ?? []
+    orderedIncludes.append(contentsOf: request.tools.flatMap(openAIIncludesFromProviderTool))
+    if customOptions?.store == false, openAIRequestNeedsEncryptedReasoning(request, customOptions: customOptions) {
+        orderedIncludes.append(OpenAILanguageModel.CustomGenerationOptions.ResponseInclude.reasoningEncryptedContent.rawValue)
+    }
+
+    var seen: Set<String> = []
+    return orderedIncludes.filter { include in
+        seen.insert(include).inserted
+    }
+}
+
+private func openAIIncludesFromProviderTool(_ tool: ToolDefinition) -> [String] {
+    guard case let .object(metadata)? = tool.providerMetadata,
+          case let .object(openAI)? = metadata["openai"],
+          case let .array(includes)? = openAI["include"]
+    else {
+        return []
+    }
+    return includes.compactMap { include in
+        guard case let .string(value) = include else { return nil }
+        return value
+    }
+}
+
+private func openAIRequestNeedsEncryptedReasoning(
+    _ request: ModelRequest,
+    customOptions: OpenAILanguageModel.CustomGenerationOptions?
+) -> Bool {
+    if customOptions?.reasoning != nil || customOptions?.reasoningEffort != nil {
+        return true
+    }
+    return request.messages.contains { message in
+        if case .providerDefined("reasoning") = message.role {
+            return true
+        }
+        return containsReasoningMetadata(message.providerMetadata)
+    }
+}
+
+private func containsReasoningMetadata(_ metadata: [String: JSONValue]) -> Bool {
+    if metadata["encrypted_content"] != nil {
+        return true
+    }
+    if case let .object(openAI)? = metadata["openai"] {
+        return openAI["encrypted_content"] != nil || openAI["output"]?.containsReasoningItem == true
+    }
+    return false
 }
 
 private func objectBody(_ body: JSONValue) throws -> [String: JSONValue] {
@@ -1859,6 +2143,7 @@ private func openAIToolChoiceJSON(_ choice: ToolChoice, apiVariant: OpenAILangua
 
 private func modelToolCalls(
     from toolCalls: [OpenAIToolCall],
+    providerDefinedToolNames: Set<String> = [],
     providerMetadata: [String: JSONValue] = [:]
 ) throws -> [ModelToolCall] {
     try toolCalls.compactMap { call in
@@ -1871,8 +2156,12 @@ private func modelToolCalls(
             arguments: try toGeneratedContent(function.arguments),
             status: .completed,
             providerMetadata: providerMetadata
-        ), providerMetadata: providerMetadata)
+        ), kind: providerDefinedToolNames.contains(function.name) ? .providerDefined : .local, providerMetadata: providerMetadata)
     }
+}
+
+private func providerDefinedToolNames(in request: ModelRequest) -> Set<String> {
+    Set(request.tools.filter { $0.kind == .providerDefined }.map(\.name))
 }
 
 private func openAIProviderMetadata(_ value: [String: JSONValue]) -> [String: JSONValue] {

@@ -72,6 +72,9 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
         /// Whether to store the response so it can be retrieved later.
         public var store: Bool?
 
+        /// Provider-specific fields to include in the response.
+        public var include: [String]
+
         /// Set of key-value pairs attached to the request.
         /// Keys are strings with a maximum length of 64 characters;
         /// values are strings with a maximum length of 512 characters.
@@ -297,6 +300,7 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
             case verbosity
             case maxOutputTokens = "max_output_tokens"
             case store
+            case include
             case metadata
             case safetyIdentifier = "safety_identifier"
             case truncation
@@ -335,6 +339,7 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
             verbosity: Verbosity? = nil,
             maxOutputTokens: Int? = nil,
             store: Bool? = nil,
+            include: [String] = [],
             metadata: [String: String]? = nil,
             safetyIdentifier: String? = nil,
             truncation: Truncation? = nil,
@@ -352,10 +357,27 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
             self.verbosity = verbosity
             self.maxOutputTokens = maxOutputTokens
             self.store = store
+            self.include = include
             self.metadata = metadata
             self.safetyIdentifier = safetyIdentifier
             self.truncation = truncation
             self.extraBody = extraBody
+        }
+    }
+
+    /// Provider-defined tools for Responses-compatible endpoints.
+    public enum ProviderTool {
+        /// Creates a raw provider-defined Responses tool.
+        public static func raw(
+            name: String,
+            tool: JSONValue,
+            description: String? = nil
+        ) -> ToolDefinition {
+            ToolDefinition.providerDefined(
+                name: name,
+                providerMetadata: .object(["openresponses": tool]),
+                description: description
+            )
         }
     }
 
@@ -443,7 +465,10 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
             )
             .merging(response.responseMetadata(providerName: "Open Responses", defaultModelID: model))
             .merging(openResponsesOutputMetadata(output: response.output, responseID: response.id))
-        let toolCalls = try modelToolCalls(from: extractToolCallsFromOutput(response.output))
+        let toolCalls = try modelToolCalls(
+            from: extractToolCallsFromOutput(response.output),
+            providerDefinedToolNames: providerDefinedToolNames(in: request)
+        )
         let reasoning = reasoningEntries(from: response.output)
         let content = try openResponsesContent(from: response.output, outputText: response.outputText, structuredOutput: request.structuredOutput)
         return ModelResponse(
@@ -486,6 +511,7 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
 
                     var accumulatedText = ""
                     var streamingToolCalls: [String: StreamingOpenResponsesToolCall] = [:]
+                    let providerDefinedToolNames = providerDefinedToolNames(in: request)
 
                     for try await event in eventStream.events {
                         switch event {
@@ -505,12 +531,15 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
                                         id: item.id,
                                         callId: item.callID ?? item.id,
                                         name: name,
-                                        arguments: item.arguments ?? ""
+                                        arguments: item.arguments ?? "",
+                                        kind: providerDefinedToolNames.contains(name) ? .providerDefined : .local
                                     )
                                     continuation.yield(.toolInputStarted(.init(
                                         id: item.id,
                                         callId: item.callID ?? item.id,
-                                        toolName: name
+                                        toolName: name,
+                                        kind: providerDefinedToolNames.contains(name) ? .providerDefined : .local,
+                                        providerMetadata: openResponsesProviderMetadata(["item": item.rawItem])
                                     )))
                                     if let arguments = item.arguments, arguments.isEmpty == false {
                                         continuation.yield(.toolInputDelta(id: item.id, delta: arguments))
@@ -569,7 +598,7 @@ public struct OpenResponsesLanguageModel: EventStreamingLanguageModel, Streaming
 
                     let calls = try streamingToolCalls.values
                         .sorted { $0.id < $1.id }
-                        .map { ModelToolCall(call: try $0.transcriptToolCall(), kind: .local) }
+                        .map { ModelToolCall(call: try $0.transcriptToolCall(), kind: $0.kind) }
                     if calls.isEmpty == false {
                         continuation.yield(.toolCallsCompleted(calls))
                     }
@@ -779,6 +808,9 @@ private enum OpenResponsesAPI {
             if let v = custom.verbosity { body["verbosity"] = .string(v.rawValue) }
             if let v = custom.maxOutputTokens { body["max_output_tokens"] = .int(v) }
             if let v = custom.store { body["store"] = .bool(v) }
+            if custom.include.isEmpty == false {
+                body["include"] = .array(custom.include.map(JSONValue.string))
+            }
             if let m = custom.metadata, !m.isEmpty {
                 body["metadata"] = .object(
                     Dictionary(uniqueKeysWithValues: m.map { ($0.key, JSONValue.string($0.value)) })
@@ -1075,12 +1107,32 @@ private func openResponsesConvertSegmentsToToolContentString(_ segments: [Transc
 // MARK: - Tools
 
 private struct OpenResponsesTool: Sendable {
-    let type: String = "function"
+    let type: String
     let name: String
     let description: String
     let parameters: JSONValue?
+    let rawValue: JSONValue?
+
+    init(name: String, description: String, parameters: JSONValue?) {
+        type = "function"
+        self.name = name
+        self.description = description
+        self.parameters = parameters
+        rawValue = nil
+    }
+
+    init(rawValue: JSONValue) {
+        type = ""
+        name = ""
+        description = ""
+        parameters = nil
+        self.rawValue = rawValue
+    }
 
     var jsonValue: JSONValue {
+        if let rawValue {
+            return rawValue
+        }
         var obj: [String: JSONValue] = [
             "type": .string(type),
             "name": .string(name),
@@ -1106,6 +1158,11 @@ private func convertToolToOpenResponsesFormat(_ tool: any Tool) -> OpenResponses
 }
 
 private func openResponsesToolDefinition(_ definition: ToolDefinition) -> OpenResponsesTool {
+    if definition.kind == .providerDefined,
+       let rawTool = providerDefinedToolJSON(from: definition.providerMetadata, providerKey: "openresponses")
+    {
+        return OpenResponsesTool(rawValue: rawTool)
+    }
     let parameters = definition.schema.withResolvedRoot()
         .flatMap { try? JSONValue($0) }
         ?? (try? JSONValue(definition.schema))
@@ -1172,7 +1229,10 @@ private func openResponsesReasoningSummary(from value: JSONValue?) -> [String] {
     }
 }
 
-private func modelToolCalls(from toolCalls: [OpenResponsesToolCall]) throws -> [ModelToolCall] {
+private func modelToolCalls(
+    from toolCalls: [OpenResponsesToolCall],
+    providerDefinedToolNames: Set<String> = []
+) throws -> [ModelToolCall] {
     try toolCalls.map { call in
         let arguments = try call.arguments.map(GeneratedContent.init(json:)) ?? GeneratedContent(properties: [:])
         let metadata = openResponsesProviderMetadata([
@@ -1187,10 +1247,14 @@ private func modelToolCalls(from toolCalls: [OpenResponsesToolCall]) throws -> [
                 status: .completed,
                 providerMetadata: metadata
             ),
-            kind: .local,
+            kind: providerDefinedToolNames.contains(call.name) ? .providerDefined : .local,
             providerMetadata: metadata
         )
     }
+}
+
+private func providerDefinedToolNames(in request: ModelRequest) -> Set<String> {
+    Set(request.tools.filter { $0.kind == .providerDefined }.map(\.name))
 }
 
 private func openResponsesProviderMetadata(_ value: [String: JSONValue]) -> [String: JSONValue] {
@@ -1334,6 +1398,7 @@ private struct StreamingOpenResponsesToolCall: Sendable {
     var callId: String
     var name: String
     var arguments: String
+    var kind: ToolDefinitionKind = .local
 
     func transcriptToolCall() throws -> Transcript.ToolCall {
         try Transcript.ToolCall(
@@ -1451,6 +1516,12 @@ private extension [String: JSONValue] {
         guard case .string(let value)? = self[key] else { return nil }
         return value
     }
+}
+
+private func providerDefinedToolJSON(from metadata: JSONValue?, providerKey: String) -> JSONValue? {
+    guard let metadata else { return nil }
+    guard case let .object(object) = metadata else { return metadata }
+    return object[providerKey] ?? object["tool"] ?? metadata
 }
 
 private struct OpenResponsesCompleted: Decodable, Sendable {

@@ -109,6 +109,67 @@ struct AnthropicProviderReplayTests {
     })
   }
 
+  @Test func anthropicProviderSendsServerToolsPerRequestBetasAndThinkingModes() async throws {
+    let replay = ReplayHTTPClient<[String: JSONValue]>(recordedResponse: .init(body: """
+    {
+      "id": "msg_server_tools",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Done"
+        }
+      ],
+      "model": "claude-test",
+      "stop_reason": "end_turn"
+    }
+    """))
+    let model = AnthropicLanguageModel(
+      apiKey: "test-key",
+      betas: ["model-beta"],
+      model: "claude-test",
+      httpClient: replay,
+    )
+    let session = LanguageModelSession(
+      model: model,
+      providerTools: [
+        AnthropicLanguageModel.ServerTool.webSearch(maxUses: 2, allowedDomains: ["example.com"]),
+        AnthropicLanguageModel.ServerTool.codeExecution(),
+      ],
+    )
+    var options = GenerationOptions()
+    options[custom: AnthropicLanguageModel.self] = .init(
+      toolChoice: .auto,
+      disableParallelToolUse: true,
+      thinking: .init(type: .disabled),
+      betas: ["request-beta"],
+    )
+
+    _ = try await session.respond(to: "Use server tools if needed.", options: options)
+
+    let requests = await replay.recordedRequests()
+    let request = try #require(requests.first)
+    #expect(request.headers?["anthropic-beta"] == "model-beta,request-beta")
+    let body = request.body
+    #expect(body["tool_choice"] == .object([
+      "type": .string("auto"),
+      "disable_parallel_tool_use": .bool(true),
+    ]))
+    #expect(body["thinking"] == .object(["type": .string("disabled")]))
+    let tools = try #require(body["tools"]?.arrayValue)
+    #expect(tools.containsJSONObject { object in
+      object["type"] == .string("web_search_20250305")
+        && object["name"] == .string("web_search")
+        && object["max_uses"] == .int(2)
+        && object["allowed_domains"] == .array([.string("example.com")])
+    })
+    #expect(tools.containsJSONObject { object in
+      object["type"] == .string("code_execution_20250825")
+        && object["name"] == .string("code_execution")
+    })
+  }
+
   @Test func anthropicProviderStreamsTextThroughMainSessionAndHTTPClient() async throws {
     let replay = ReplayHTTPClient<[String: JSONValue]>(recordedResponse: .init(
       body: """

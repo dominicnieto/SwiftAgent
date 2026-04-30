@@ -72,9 +72,8 @@ public protocol Tool<Arguments, Output>: Sendable {
 
     /// A language model will call this method when it wants to leverage this tool.
     ///
-    /// If errors are throw in the body of this method, they will be wrapped in a
-    /// ``LanguageModelSession.ToolCallError`` and rethrown at the call site
-    /// of ``LanguageModelSession.respond(to:)``.
+    /// If errors are thrown in the body of this method, they will be wrapped in
+    /// ``AgentSession/ToolCallError`` and rethrown from the agent run.
     ///
     /// - Note: This method may be invoked concurrently with itself or with other tools.
     func call(arguments: Self.Arguments) async throws -> Self.Output

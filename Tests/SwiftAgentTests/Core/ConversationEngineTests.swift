@@ -61,6 +61,35 @@ struct ConversationEngineTests {
     #expect(request.messages.first?.role == .user)
   }
 
+  @Test func engineIncludesProviderDefinedToolsInModelRequestWithoutInstructionInjection() async throws {
+    let providerTool = ToolDefinition.providerDefined(
+      name: "server_search",
+      providerMetadata: .object(["mock": .object(["type": .string("server_search")])]),
+      description: "Provider hosted search.",
+    )
+    let provider = ConversationEngineMockProvider(responses: [
+      ModelResponse(content: GeneratedContent("Done"), finishReason: .completed),
+    ])
+    let engine = ConversationEngine(
+      model: provider,
+      instructions: Instructions("Use available tools."),
+      tools: [LookupTool()],
+      providerTools: [providerTool],
+    )
+
+    _ = try await engine.respond(prompt: Prompt("Search"))
+
+    let request = try #require(provider.recordedRequests.first)
+    #expect(request.tools.map(\.name) == ["lookup", "server_search"])
+    #expect(request.tools.last?.kind == .providerDefined)
+
+    guard case let .instructions(instructions) = await engine.transcript.entries.first else {
+      Issue.record("Expected instructions entry")
+      return
+    }
+    #expect(instructions.toolDefinitions.map(\.name) == ["lookup"])
+  }
+
   @Test func engineRunsMockStructuredOutputTurn() async throws {
     let rawContent = GeneratedContent(properties: ["condition": "sunny", "temperature": 72])
     let provider = ConversationEngineMockProvider(responses: [

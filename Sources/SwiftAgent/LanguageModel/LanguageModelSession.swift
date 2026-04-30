@@ -11,6 +11,9 @@ public final class LanguageModelSession: @unchecked Sendable {
   /// Tools available to the model during this session.
   public let tools: [any Tool]
 
+  /// Provider-defined tools serialized by the provider and executed remotely.
+  public let providerTools: [ToolDefinition]
+
   /// Instructions applied to each turn.
   public let instructions: Instructions?
 
@@ -42,12 +45,14 @@ public final class LanguageModelSession: @unchecked Sendable {
   public init(
     model: any LanguageModel,
     tools: [any Tool] = [],
+    providerTools: [ToolDefinition] = [],
     instructions: Instructions? = nil,
   ) {
     self.model = model
     self.tools = tools
+    self.providerTools = providerTools
     self.instructions = instructions
-    engine = ConversationEngine(model: model, instructions: instructions, tools: tools)
+    engine = ConversationEngine(model: model, instructions: instructions, tools: tools, providerTools: providerTools)
     state = Locked(State(transcript: Self.initialTranscript(instructions: instructions, tools: tools)))
   }
 
@@ -55,11 +60,13 @@ public final class LanguageModelSession: @unchecked Sendable {
   public convenience init(
     model: any LanguageModel,
     tools: [any Tool] = [],
+    providerTools: [ToolDefinition] = [],
     instructions: String,
   ) {
     self.init(
       model: model,
       tools: tools,
+      providerTools: providerTools,
       instructions: Instructions(instructions),
     )
   }
@@ -68,27 +75,30 @@ public final class LanguageModelSession: @unchecked Sendable {
   public convenience init<SessionSchema>(
     model: any LanguageModel,
     schema: SessionSchema,
+    providerTools: [ToolDefinition] = [],
     instructions: Instructions? = nil,
   ) where SessionSchema: TranscriptSchema {
-    self.init(model: model, tools: schema.tools, instructions: instructions)
+    self.init(model: model, tools: schema.tools, providerTools: providerTools, instructions: instructions)
   }
 
   /// Creates a direct model session with schema-declared tools and string instructions.
   public convenience init<SessionSchema>(
     model: any LanguageModel,
     schema: SessionSchema,
+    providerTools: [ToolDefinition] = [],
     instructions: String,
   ) where SessionSchema: TranscriptSchema {
-    self.init(model: model, schema: schema, instructions: Instructions(instructions))
+    self.init(model: model, schema: schema, providerTools: providerTools, instructions: Instructions(instructions))
   }
 
   /// Creates a session with instructions from an ``InstructionsBuilder``.
   public convenience init(
     model: any LanguageModel,
     tools: [any Tool] = [],
+    providerTools: [ToolDefinition] = [],
     @InstructionsBuilder instructions: () throws -> Instructions,
   ) rethrows {
-    try self.init(model: model, tools: tools, instructions: instructions())
+    try self.init(model: model, tools: tools, providerTools: providerTools, instructions: instructions())
   }
 
   /// Prepares the underlying model for an upcoming prompt prefix when supported.

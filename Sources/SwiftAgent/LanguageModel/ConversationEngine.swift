@@ -75,6 +75,7 @@ package struct ModelRequestBuilder: Sendable {
   package func makeRequest(
     transcript: Transcript,
     tools: [any Tool],
+    providerTools: [ToolDefinition],
     toolChoice: ToolChoice?,
     activeToolNames: Set<String>?,
     structuredOutput: StructuredOutputRequest?,
@@ -83,7 +84,7 @@ package struct ModelRequestBuilder: Sendable {
     let filteredTools = tools.filter { tool in
       activeToolNames?.contains(tool.name) ?? true
     }
-    let definitions = filteredTools.map { SwiftAgent.ToolDefinition(tool: $0) }
+    let definitions = filteredTools.map { SwiftAgent.ToolDefinition(tool: $0) } + providerTools
 
     return ModelRequest(
       messages: messages(from: transcript, structuredOutput: structuredOutput),
@@ -563,6 +564,7 @@ package struct ConversationStreamSnapshot: Sendable, Equatable {
 package actor ConversationEngine {
   private let model: any LanguageModel
   private let tools: [any Tool]
+  private let providerTools: [ToolDefinition]
   private var state: ConversationState
   private let recorder = TranscriptRecorder()
   private let requestBuilder: ModelRequestBuilder
@@ -583,9 +585,11 @@ package actor ConversationEngine {
     model: any LanguageModel,
     instructions: Instructions? = nil,
     tools: [any Tool] = [],
+    providerTools: [ToolDefinition] = [],
   ) {
     self.model = model
     self.tools = tools
+    self.providerTools = providerTools
     requestBuilder = ModelRequestBuilder(instructions: instructions)
     state = ConversationState(transcript: recorder.initialTranscript(instructions: instructions, tools: tools))
   }
@@ -612,6 +616,7 @@ package actor ConversationEngine {
     return requestBuilder.makeRequest(
       transcript: state.transcript,
       tools: tools,
+      providerTools: providerTools,
       toolChoice: toolChoice,
       activeToolNames: activeToolNames,
       structuredOutput: structuredOutput,

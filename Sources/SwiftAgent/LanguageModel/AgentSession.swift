@@ -151,6 +151,9 @@ public final class AgentSession: @unchecked Sendable {
   /// Tools available to the agent.
   public let tools: [any Tool]
 
+  /// Provider-defined tools serialized by the provider and executed remotely.
+  public let providerTools: [ToolDefinition]
+
   /// Instructions applied to each model turn.
   public let instructions: Instructions?
 
@@ -215,13 +218,15 @@ public final class AgentSession: @unchecked Sendable {
   public init(
     model: any LanguageModel,
     tools: [any Tool] = [],
+    providerTools: [ToolDefinition] = [],
     instructions: Instructions? = nil,
     configuration: AgentConfiguration = AgentConfiguration(),
   ) {
     self.tools = tools
+    self.providerTools = providerTools
     self.instructions = instructions
     self.configuration = configuration
-    modelSession = LanguageModelSession(model: model, tools: tools, instructions: instructions)
+    modelSession = LanguageModelSession(model: model, tools: tools, providerTools: providerTools, instructions: instructions)
     state = Locked(AgentState(transcript: TranscriptRecorder().initialTranscript(instructions: instructions, tools: tools)))
   }
 
@@ -229,30 +234,45 @@ public final class AgentSession: @unchecked Sendable {
   public convenience init(
     model: any LanguageModel,
     tools: [any Tool] = [],
+    providerTools: [ToolDefinition] = [],
     instructions: String,
     configuration: AgentConfiguration = AgentConfiguration(),
   ) {
-    self.init(model: model, tools: tools, instructions: Instructions(instructions), configuration: configuration)
+    self.init(
+      model: model,
+      tools: tools,
+      providerTools: providerTools,
+      instructions: Instructions(instructions),
+      configuration: configuration,
+    )
   }
 
   /// Creates an agent session with tools declared by a session schema.
   public convenience init<SessionSchema>(
     model: any LanguageModel,
     schema: SessionSchema,
+    providerTools: [ToolDefinition] = [],
     instructions: Instructions? = nil,
     configuration: AgentConfiguration = AgentConfiguration(),
   ) where SessionSchema: TranscriptSchema {
-    self.init(model: model, tools: schema.tools, instructions: instructions, configuration: configuration)
+    self.init(model: model, tools: schema.tools, providerTools: providerTools, instructions: instructions, configuration: configuration)
   }
 
   /// Creates an agent session with schema-declared tools and string instructions.
   public convenience init<SessionSchema>(
     model: any LanguageModel,
     schema: SessionSchema,
+    providerTools: [ToolDefinition] = [],
     instructions: String,
     configuration: AgentConfiguration = AgentConfiguration(),
   ) where SessionSchema: TranscriptSchema {
-    self.init(model: model, schema: schema, instructions: Instructions(instructions), configuration: configuration)
+    self.init(
+      model: model,
+      schema: schema,
+      providerTools: providerTools,
+      instructions: Instructions(instructions),
+      configuration: configuration,
+    )
   }
 
   /// Runs the agent until it produces a final answer or hits a stop condition.

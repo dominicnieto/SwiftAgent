@@ -199,19 +199,18 @@ Exit criteria:
 
 ## Phase 9: Cleanup and Hardening
 
-Status: not started.
+Status: completed. See `AgentRefactor/results-phase9.md`.
 
 Tasks:
 
 1. Audit source comments/docs for old architecture terms.
-2. Add symbolgraph/public API visibility test proving internal runtime types are not normal public API.
-3. Add provider feature tests from the new provider matrices where appropriate.
-4. Add OpenAI Responses first-class provider options:
+2. Add provider feature tests from the new provider matrices where appropriate.
+3. Add OpenAI Responses first-class provider options:
    - `previousResponseId`
    - `conversation`
    - `include`
    - automatic `reasoning.encrypted_content` include when needed.
-5. Expand hosted/server tool coverage where prioritized:
+4. Expand hosted/server tool coverage where prioritized:
    - OpenAI web search/file search/code interpreter.
    - Anthropic web search/fetch/code execution/memory/container/context management.
 6. Verify AgentRecorder scenarios against direct and agent flows.

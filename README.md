@@ -295,6 +295,8 @@ print(response.content)
 > [!NOTE]
 > `LanguageModelSession` and `AgentSession` both take tools as an array, for example `tools: [WeatherTool(), OtherTool()]`. `LanguageModelSession` exposes tool calls for app-managed loops; `AgentSession` executes registered local tools automatically.
 
+Provider-hosted tools use the separate `providerTools:` parameter. SwiftAgent forwards those definitions to the provider and preserves provider-owned calls in the transcript, but `AgentSession` does not execute them as local Swift tools.
+
 #### Recoverable Tool Rejections
 
 If a tool call fails in a way the agent can correct (such as an unknown identifier or other validation issue), throw a `ToolRunRejection`. SwiftAgent forwards the structured content you provide to the model without aborting the loop so the agent can adjust its next action.

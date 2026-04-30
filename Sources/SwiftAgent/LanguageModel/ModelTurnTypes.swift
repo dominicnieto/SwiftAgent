@@ -151,6 +151,25 @@ public struct ToolDefinition: Sendable, Equatable, Codable, Identifiable {
       providerMetadata: providerMetadata,
     )
   }
+
+  /// Creates a provider-defined tool declaration.
+  ///
+  /// Provider-defined tools are serialized by providers and executed remotely by
+  /// the provider. SwiftAgent records their events and metadata but does not
+  /// execute them as local ``Tool`` values.
+  public static func providerDefined(
+    name: String,
+    providerMetadata: JSONValue,
+    description: String? = nil,
+  ) -> ToolDefinition {
+    ToolDefinition(
+      name: name,
+      description: description,
+      schema: GenerationSchema(type: GeneratedContent.self, description: description, properties: []),
+      kind: .providerDefined,
+      providerMetadata: providerMetadata,
+    )
+  }
 }
 
 /// Identifies who executes a tool definition.

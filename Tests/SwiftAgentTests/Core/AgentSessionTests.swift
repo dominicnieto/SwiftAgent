@@ -252,6 +252,35 @@ struct AgentSessionTests {
       return false
     } == false)
   }
+
+  @Test func agentSessionPassesProviderToolsToUnderlyingModelSession() async throws {
+    let providerTool = ToolDefinition.providerDefined(
+      name: "server_search",
+      providerMetadata: .object(["mock": .object(["type": .string("server_search")])]),
+      description: "Provider hosted search.",
+    )
+    let provider = AgentSessionMockProvider(responses: [
+      ModelResponse(content: GeneratedContent("Provider tool available"), finishReason: .completed),
+    ])
+    let session = AgentSession(
+      model: provider,
+      tools: [AgentLookupTool()],
+      providerTools: [providerTool],
+      instructions: "Use tools when useful.",
+    )
+
+    _ = try await session.run(to: "Search")
+
+    let request = try #require(provider.recordedRequests.first)
+    #expect(request.tools.map(\.name) == ["lookup", "server_search"])
+    #expect(request.tools.last?.kind == .providerDefined)
+    #expect(session.providerTools.map(\.name) == ["server_search"])
+    guard case let .instructions(instructions) = session.transcript.entries.first else {
+      Issue.record("Expected instructions entry")
+      return
+    }
+    #expect(instructions.toolDefinitions.map(\.name) == ["lookup"])
+  }
 }
 
 struct AgentWeatherReport: StructuredOutput {

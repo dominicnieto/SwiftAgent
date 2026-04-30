@@ -169,6 +169,78 @@ struct OpenAIProviderReplayTests {
     #expect(body["stream"] == .bool(true))
   }
 
+  @Test func openAIResponsesSendsContinuationIncludeAndHostedToolOptions() async throws {
+    let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(body: """
+    {
+      "id": "resp_options",
+      "model": "gpt-test",
+      "output": [],
+      "output_text": "Done"
+    }
+    """))
+    let model = OpenAILanguageModel(
+      apiKey: "test-key",
+      model: "gpt-test",
+      apiVariant: .responses,
+      httpClient: replay,
+    )
+    let session = LanguageModelSession(
+      model: model,
+      providerTools: [
+        OpenAILanguageModel.HostedTool.webSearch(searchContextSize: "low"),
+        OpenAILanguageModel.HostedTool.fileSearch(vectorStoreIDs: ["vs_123"], maxResults: 3, includeResults: true),
+        OpenAILanguageModel.HostedTool.codeInterpreter(container: .string("auto"), includeOutputs: true),
+      ],
+    )
+    var options = GenerationOptions()
+    options[custom: OpenAILanguageModel.self] = .init(
+      reasoning: .init(effort: .low, summary: "auto"),
+      store: false,
+      previousResponseID: "resp_previous",
+      include: [.fileSearchCallResults],
+    )
+
+    _ = try await session.respond(to: "Use hosted tools if needed.", options: options)
+
+    let body = try await requestBodyObject(from: replay)
+    #expect(body["previous_response_id"] == .string("resp_previous"))
+    #expect(body["store"] == .bool(false))
+    #expect(body["reasoning"] == .object(["effort": .string("low"), "summary": .string("auto")]))
+    #expect(body["include"] == .array([
+      .string("file_search_call.results"),
+      .string("code_interpreter_call.outputs"),
+      .string("reasoning.encrypted_content"),
+    ]))
+    let tools = try #require(body["tools"]?.arrayValue)
+    #expect(tools.containsJSONObject { $0["type"] == .string("web_search_preview") })
+    #expect(tools.containsJSONObject { object in
+      object["type"] == .string("file_search")
+        && object["vector_store_ids"] == .array([.string("vs_123")])
+        && object["max_num_results"] == .int(3)
+    })
+    #expect(tools.containsJSONObject { $0["type"] == .string("code_interpreter") })
+  }
+
+  @Test func openAIResponsesRejectsPreviousResponseAndConversationTogether() async throws {
+    let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(body: #"{"id":"unused","output":[]}"#))
+    let model = OpenAILanguageModel(
+      apiKey: "test-key",
+      model: "gpt-test",
+      apiVariant: .responses,
+      httpClient: replay,
+    )
+    let session = LanguageModelSession(model: model)
+    var options = GenerationOptions()
+    options[custom: OpenAILanguageModel.self] = .init(
+      previousResponseID: "resp_previous",
+      conversation: .id("conv_123"),
+    )
+
+    await #expect(throws: GenerationError.self) {
+      _ = try await session.respond(to: "Invalid continuation options.", options: options)
+    }
+  }
+
   @Test func openAIResponsesProviderStreamsStructuredOutputThroughPartialDecoder() async throws {
     let replay = ReplayHTTPClient<JSONValue>(recordedResponse: .init(body: """
     event: response.output_text.delta
