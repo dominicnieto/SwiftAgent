@@ -110,6 +110,45 @@ struct AgentSessionTests {
     #expect(result.iterationCount == 1)
   }
 
+  @Test func agentStreamDoesNotExecutePartialToolCalls() async throws {
+    let provider = PartialToolCallStreamingProvider()
+    let tool = CountingAgentLookupTool()
+    let session = AgentSession(model: provider, tools: [tool])
+
+    var completed: AgentResult<String>?
+    for try await event in session.stream(to: "Stream a partial tool call") {
+      if case let .completed(result) = event {
+        completed = result
+      }
+    }
+
+    #expect(completed?.content == "Model final answer")
+    #expect(tool.callCount == 0)
+    #expect(provider.recordedRequests().count == 1)
+  }
+
+  @Test func agentStreamThrowsWhenModelCompletesWithoutContent() async throws {
+    let provider = AgentSessionMockProvider(events: [
+      .completed(.init(finishReason: .completed)),
+    ])
+    let session = AgentSession(model: provider)
+
+    var completed = false
+    var didThrow = false
+    do {
+      for try await event in session.stream(to: "Complete without content") {
+        if case .completed = event {
+          completed = true
+        }
+      }
+    } catch {
+      didThrow = true
+    }
+
+    #expect(didThrow)
+    #expect(completed == false)
+  }
+
   @Test func agentResultIncludesPerStepToolHistory() async throws {
     let toolCall = Transcript.ToolCall(
       id: "tool-1",
@@ -220,6 +259,7 @@ struct AgentSessionTests {
     )
     let provider = AgentSessionMockProvider(events: [
       .toolCallsCompleted([ModelToolCall(call: serverToolCall, kind: .providerDefined)]),
+      .textDelta(id: "server-tool-answer", delta: "Provider handled the search"),
       .completed(.init(finishReason: .completed)),
     ])
     let session = AgentSession(model: provider, tools: [AgentLookupTool()])
@@ -293,6 +333,38 @@ struct AgentWeatherReport: StructuredOutput {
   }
 }
 
+private final class PartialToolCallStreamingProvider: LanguageModel, @unchecked Sendable {
+  typealias UnavailableReason = Never
+
+  private let requests = Locked<[ModelRequest]>([])
+
+  func respond(to request: ModelRequest) async throws -> ModelResponse {
+    _ = request
+    throw LanguageModelContractError.neutralTurnNotImplemented(modelType: "PartialToolCallStreamingProvider")
+  }
+
+  func streamResponse(to request: ModelRequest) -> AsyncThrowingStream<ModelStreamEvent, any Error> {
+    requests.withLock { $0.append(request) }
+
+    return AsyncThrowingStream { continuation in
+      continuation.yield(.toolCallPartial(.init(
+        id: "partial-tool",
+        callId: "partial-call",
+        toolName: "lookup",
+        partialArguments: #"{"query":"forecast"}"#,
+        arguments: GeneratedContent(properties: ["query": "forecast"]),
+      )))
+      continuation.yield(.textDelta(id: "text", delta: "Model final answer"))
+      continuation.yield(.completed(.init(finishReason: .completed)))
+      continuation.finish()
+    }
+  }
+
+  func recordedRequests() -> [ModelRequest] {
+    requests.withLock { $0 }
+  }
+}
+
 private final class AgentSessionMockProvider: LanguageModel, @unchecked Sendable {
   typealias UnavailableReason = Never
 
@@ -345,6 +417,27 @@ private struct AgentLookupTool: Tool {
 
   func call(arguments: Arguments) async throws -> String {
     "Lookup result for \(arguments.query)"
+  }
+}
+
+private final class CountingAgentLookupTool: Tool, @unchecked Sendable {
+  let name = "lookup"
+  let description = "Looks up a value."
+
+  private let calls = Locked(0)
+
+  @Generable
+  struct Arguments {
+    var query: String
+  }
+
+  var callCount: Int {
+    calls.withLock { $0 }
+  }
+
+  func call(arguments: Arguments) async throws -> String {
+    calls.withLock { $0 += 1 }
+    return "Lookup result for \(arguments.query)"
   }
 }
 

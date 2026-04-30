@@ -544,11 +544,13 @@ public final class AgentSession: @unchecked Sendable {
             let modelToolCalls = iterationModelToolCallOrder.compactMap { iterationModelToolCallsByID[$0] }
             let toolCalls = modelToolCalls.isEmpty ? transcriptOnlyToolCalls : modelToolCalls.map(\.call)
             let localToolCalls = modelToolCalls.isEmpty
-              ? toolCalls
-              : modelToolCalls.filter { $0.kind == .local }.map(\.call)
+              ? toolCalls.filter { $0.status == .completed }
+              : modelToolCalls.filter { $0.kind == .local && $0.call.status == .completed }.map(\.call)
 
             guard localToolCalls.isEmpty == false else {
-              let rawContent = latestRawContent ?? completedSnapshot?.rawContent
+              guard let rawContent = latestRawContent ?? completedSnapshot?.rawContent else {
+                throw AgentSessionError.noFinalResponse
+              }
               let step = await stepResult(
                 index: iteration,
                 transcriptEntries: iterationEntries,
@@ -559,7 +561,7 @@ public final class AgentSession: @unchecked Sendable {
               let completedSteps = steps + [step]
               continuation.yield(.iterationCompleted(step))
               let result = try await result(
-                from: rawContent ?? GeneratedContent(""),
+                from: rawContent,
                 as: type,
                 steps: completedSteps,
               )

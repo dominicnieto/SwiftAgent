@@ -207,7 +207,7 @@ public final class LanguageModelSession: @unchecked Sendable {
     options: GenerationOptions = GenerationOptions(),
   ) -> sending ResponseStream<Content> where Content: Generable & Sendable, Content.PartiallyGenerated: Sendable {
     let relay = AsyncThrowingStream<ResponseStream<Content>.Snapshot, any Error> { continuation in
-      Task {
+      let task = Task {
         self.beginResponding()
         defer { self.endResponding() }
 
@@ -257,10 +257,14 @@ public final class LanguageModelSession: @unchecked Sendable {
           }
 
           continuation.finish()
+        } catch is CancellationError {
+          continuation.finish()
         } catch {
           continuation.finish(throwing: error)
         }
       }
+
+      continuation.onTermination = { _ in task.cancel() }
     }
 
     return ResponseStream(stream: relay)

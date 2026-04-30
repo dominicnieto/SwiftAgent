@@ -75,6 +75,17 @@ struct LanguageModelSessionStreamingTests {
     #expect(snapshots.compactMap(\.content) == ["A", "ABC"])
     #expect(session.transcript.lastResponseEntry()?.text == "ABC")
   }
+
+  @Test func streamResponseCancelsProducerWhenConsumerStopsEarly() async throws {
+    let model = CancellableStreamingLanguageModel()
+    let session = LanguageModelSession(model: model)
+
+    for try await _ in session.streamResponse(to: "Stop after the first token") {
+      break
+    }
+
+    #expect(try await waitUntilStreamCancellation(model.wasCancelled))
+  }
 }
 
 private struct BurstStreamingLanguageModel: EventStreamingLanguageModel {
@@ -88,6 +99,43 @@ private struct BurstStreamingLanguageModel: EventStreamingLanguageModel {
       continuation.yield(.textDelta(id: "text", delta: "C"))
       continuation.yield(.completed(.init(finishReason: .completed)))
       continuation.finish()
+    }
+  }
+}
+
+private final class CancellableStreamingLanguageModel: LanguageModel, @unchecked Sendable {
+  typealias UnavailableReason = Never
+
+  private let cancelled = Locked(false)
+
+  var wasCancelled: Bool {
+    cancelled.withLock { $0 }
+  }
+
+  func respond(to request: ModelRequest) async throws -> ModelResponse {
+    _ = request
+    throw LanguageModelContractError.neutralTurnNotImplemented(modelType: "CancellableStreamingLanguageModel")
+  }
+
+  func streamResponse(to request: ModelRequest) -> AsyncThrowingStream<ModelStreamEvent, any Error> {
+    _ = request
+    return AsyncThrowingStream { continuation in
+      let task = Task {
+        continuation.yield(.textDelta(id: "text", delta: "A"))
+        do {
+          try await Task.sleep(for: .seconds(60))
+          continuation.finish()
+        } catch is CancellationError {
+          continuation.finish()
+        } catch {
+          continuation.finish(throwing: error)
+        }
+      }
+
+      continuation.onTermination = { _ in
+        self.cancelled.withLock { $0 = true }
+        task.cancel()
+      }
     }
   }
 }
@@ -194,4 +242,19 @@ private func textContent(from segments: [Transcript.Segment]) -> String {
     }
     return nil
   }.joined()
+}
+
+private func waitUntilStreamCancellation(
+  _ condition: @autoclosure () -> Bool,
+  timeout: Duration = .milliseconds(500),
+  pollInterval: Duration = .milliseconds(5),
+) async throws -> Bool {
+  let deadline = ContinuousClock.now + timeout
+  while condition() == false {
+    if ContinuousClock.now >= deadline {
+      return false
+    }
+    try await Task.sleep(for: pollInterval)
+  }
+  return true
 }
