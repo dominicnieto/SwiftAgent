@@ -818,6 +818,7 @@ public struct OpenAILanguageModel: EventStreamingLanguageModel, StructuredOutput
                                     status: .completed,
                                     providerMetadata: openAIProviderMetadata([
                                         "item_id": .string(item.id),
+                                        "summary": item.summary ?? .array([]),
                                         "encrypted_content": item.encryptedContent.map(JSONValue.string) ?? .null,
                                     ])
                                 )))
@@ -1454,6 +1455,7 @@ private func openAIReasoningItem(from metadata: [String: JSONValue]) -> JSONValu
     if let encryptedContent = openAI["encrypted_content"], encryptedContent != .null {
         item["encrypted_content"] = encryptedContent
     }
+    item["summary"] = openAI["summary"] ?? .array([])
     return .object(item)
 }
 
@@ -2204,6 +2206,7 @@ private func openAIReasoningEntries(from output: [JSONValue]?) -> [Transcript.Re
             status: .completed,
             providerMetadata: openAIProviderMetadata([
                 "item_id": .string(id),
+                "summary": object["summary"] ?? .array([]),
                 "encrypted_content": object["encrypted_content"] ?? .null,
             ])
         )
